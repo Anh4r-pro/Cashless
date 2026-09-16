@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Portal Orang Tua — Kantin Imbos</title>
+<link rel="icon" type="image/png" href="/img/logo-imbos.png">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Slab:wght@600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body class="ortu">
+
+<div id="boot"><img src="/img/logo-imbos.png" alt="Memuat Portal Orang Tua"></div>
+
+<!-- ======================================================= MASUK -->
+<div id="ortu-login" class="hidden">
+  <div class="panel login-panel">
+    <img src="/img/logo-imbos.png" alt="Logo IMBOS" class="login-logo">
+    <h1>Portal Orang Tua</h1>
+    <p class="muted">Kantin Imbos — pantau saldo &amp; jajan putra/putri Anda</p>
+
+    <div class="field"><label>NIS putra/putri</label>
+      <input id="o-nis" inputmode="numeric" autocomplete="off" placeholder="nomor induk siswa">
+      <span class="muted hint">Nomor induk yang tercetak di kartu kantin anak</span></div>
+    <div class="field"><label>Tanggal lahir (ddmmyy)</label>
+      <input id="o-lahir" inputmode="numeric" autocomplete="off" maxlength="6" placeholder="contoh: 170412">
+      <span class="muted hint">Lahir 17 April 2012 → ketik <b>170412</b></span></div>
+    <!-- Kunci ketiga ini bisa dimatikan sekolah; halaman menyembunyikannya
+         sendiri menurut jawaban /api/ortu/me, bukan menurut berkas ini. -->
+    <div class="field hidden" id="o-hp4-field"><label>4 digit terakhir nomor HP wali</label>
+      <input id="o-hp4" inputmode="numeric" autocomplete="off" maxlength="4" placeholder="contoh: 1234">
+      <span class="muted hint">Nomor HP yang didaftarkan ke sekolah</span></div>
+
+    <button id="o-masuk" class="primary-btn">Lihat Data Anak</button>
+    <p id="o-err" class="o-err hidden"></p>
+    <p class="muted demo-hint">
+      Anda bisa memantau saldo dan mengajukan isi saldo di sini.<br>
+      Saldo hanya bertambah setelah admin kantin menyetujui pengajuan.<br>
+      Data tidak cocok? Hubungi admin kantin sekolah.
+    </p>
+  </div>
+</div>
+
+<!-- ======================================================= ISI -->
+<div id="ortu-app" class="hidden">
+<header>
+  <img src="/img/logo-imbos.png" alt="" class="hd-logo">
+  <h1>Portal Orang Tua</h1>
+  <span id="o-hd-nama" class="hd-user"></span>
+  <button id="o-keluar">Keluar</button>
+</header>
+
+<main>
+  <div class="panel o-hero">
+    <div id="o-avatar"></div>
+    <div class="o-hero-id">
+      <b id="o-nama"></b>
+      <span class="muted" id="o-meta"></span>
+      <span class="muted" id="o-hp"></span>
+    </div>
+    <div class="o-hero-saldo">
+      <span class="muted">Saldo kartu saat ini</span>
+      <b id="o-saldo">—</b>
+      <span class="muted hidden" id="o-titipan"></span>
+      <span class="muted" id="o-terakhir"></span>
+      <button id="o-topup" class="o-topup-btn hidden">+ Isi Saldo</button>
+    </div>
+  </div>
+
+  <div class="cards" id="o-stat"></div>
+
+  <div class="panel hidden" id="o-tp-panel">
+    <div class="o-panel-head">
+      <h2>Pengajuan isi saldo</h2>
+      <span class="muted" id="o-tp-ringkas"></span>
+    </div>
+    <div id="o-tp-list"></div>
+  </div>
+
+  <div class="panel">
+    <div class="o-panel-head">
+      <h2>Pengeluaran harian</h2>
+      <div class="quick" id="o-rentang">
+        <button data-hari="7">7 hari</button>
+        <button data-hari="30" class="sel">30 hari</button>
+        <button data-hari="90">90 hari</button>
+      </div>
+    </div>
+    <div id="o-grafik"></div>
+  </div>
+
+  <div class="row">
+    <div class="panel">
+      <h2>Jajan di kantin mana</h2>
+      <div id="o-tenant"></div>
+    </div>
+    <div class="panel">
+      <h2>Yang paling sering dibeli</h2>
+      <div id="o-menu"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="o-panel-head">
+      <h2>Catatan transaksi</h2>
+      <div class="quick" id="o-tipe">
+        <button data-tipe="" class="sel">semua</button>
+        <button data-tipe="beli">jajan</button>
+        <button data-tipe="topup">isi saldo</button>
+        <button data-tipe="donasi">donasi</button>
+        <button data-tipe="koreksi">penyesuaian</button>
+      </div>
+    </div>
+    <div id="o-tx-ringkas" class="muted"></div>
+    <div class="o-txlist" id="o-tx"></div>
+    <div class="pager">
+      <span class="muted" id="o-tx-info"></span>
+      <button id="o-tx-prev">‹</button><button id="o-tx-next">›</button>
+    </div>
+  </div>
+</main>
+<footer class="muted">Kantin Imbos · Insan Mulia Boarding School Pringsewu<br>
+  Sesi portal berakhir otomatis setelah 2 jam.</footer>
+</div>
+
+<div id="o-modal-root"></div>
+<div id="toast"></div>
+
+<script src="/uang.js"></script>
+<script src="/charts.js"></script>
+<script src="/ortu.js"></script>
+</body>
+</html>

@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kantin Imbos — Sistem Kasir Kartu</title>
+<link rel="icon" type="image/png" href="/img/logo-imbos.png">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Slab:wght@600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<!-- Layar antara: tampil sampai status sesi diketahui, supaya form login tidak
+     sempat berkedip saat halaman di-refresh dalam keadaan sudah login. -->
+<div id="boot"><img src="/img/logo-imbos.png" alt="Memuat Kantin Imbos"></div>
+
+<!-- ============================================================ LOGIN -->
+<div id="login" class="hidden">
+  <div class="panel login-panel">
+    <img src="/img/logo-imbos.png" alt="Logo IMBOS" class="login-logo">
+    <h1>Kantin Imbos</h1>
+    <p class="muted">Insan Mulia Boarding School — Sistem Kasir Kartu</p>
+    <div class="field"><label>Username</label><input id="login-user" autocomplete="username"></div>
+    <div class="field"><label>Password</label><input type="password" id="login-pass" autocomplete="current-password"></div>
+    <button id="btn-login" class="primary-btn">Masuk</button>
+    <!-- Daftar akun demo beserta sandinya SENGAJA dihapus dari sini (13 Agu 2026):
+         halaman ini terbuka untuk umum di internet, jadi menuliskan sandi apa pun
+         di dalamnya — termasuk di dalam komentar seperti ini, yang ikut terkirim
+         ke peramban — sama dengan menyerahkan kunci sistem kepada siapa pun yang
+         membuka situsnya. Daftar akun demo hanya ada di README sekarang. -->
+    <a class="ortu-link" href="/ortu">Orang tua / wali murid? Buka Portal Orang Tua →</a>
+  </div>
+</div>
+
+<!-- ============================================================ APP -->
+<div id="app" class="hidden">
+<header>
+  <img src="/img/logo-imbos.png" alt="" class="hd-logo">
+  <h1><span id="hd-title">Kantin Imbos</span></h1>
+  <nav id="nav"></nav>
+  <span id="hd-user" class="hd-user"></span>
+  <button id="btn-logout">Keluar</button>
+</header>
+<main id="main"></main>
+<footer class="muted">Kantin Imbos · Insan Mulia Boarding School Pringsewu</footer>
+</div>
+
+<div id="toast"></div>
+<div id="modal-root"></div>
+
+<script src="/uang.js"></script>
+<script src="/charts.js"></script>
+<script src="/app.js"></script>
+</body>
+</html>

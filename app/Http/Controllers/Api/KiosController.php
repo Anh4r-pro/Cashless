@@ -1,0 +1,595 @@
+<?php
+
+namespace App\Http\Controllers\Api;
+
+use App\Exceptions\ApiError;
+use App\Models\DonasiNominal;
+use App\Models\DonasiProgram;
+use App\Models\KiosConfig;
+use App\Models\Siswa;
+use App\Models\Transaksi;
+use App\Services\BidangSiswa;
+use App\Services\Kartu;
+use App\Services\Pengaturan;
+use App\Services\Pin;
+use App\Services\Rem;
+use App\Services\Rupiah;
+use App\Services\SesiKios;
+use App\Services\SmartTopup;
+use App\Services\SqlWaktu;
+use App\Services\Transfer;
+use App\Support\WaktuIso;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\RateLimiter;
+
+/**
+ * Layar kios siswa (/kios) — dipasang di depan reader kartu, tanpa login.
+ *
+ * Siswa tap kartu untuk cek saldo, dan tap + PIN untuk berdonasi, mengirim
+ * saldo ke teman, melihat riwayat, atau mengganti PIN sendiri.
+ *
+ * Layar ini terbaca antrean di belakang, dan satu-satunya bukti identitas adalah
+ * kartu yang bisa saja sedang dipegang orang lain. Karena itu setiap tindakan
+ * yang menyentuh uang atau data pribadi meminta PIN, dan satu tap hanya berlaku
+ * untuk satu transaksi.
+ */
+class KiosController extends Controller
+{
+    private const RIWAYAT_LIMIT = 25;
+
+    private const RIWAYAT_MAKS_HAL = 20;   // 500 baris — kios untuk melihat, bukan mengunduh massal
+
+    /** Kios sehat paling banyak beberapa tap per menit; ini membendung skrip penyisir UID. */
+    private const TAP_PER_MENIT = 60;
+
+    /**
+     * Penanda peringatan di panel admin berarti "sandinya memang masih
+     * rahasia123", bukan "belum pernah diganti" — admin yang mengembalikannya
+     * ke bawaan harus tetap diperingatkan.
+     */
+    private const SANDI_BAWAAN = 'rahasia123';
+
+    public function info()
+    {
+        $cfg = Pengaturan::sekolah();
+        $aktif = ($cfg['kios_aktif'] ?? 0) === 1;
+
+        return response()->json([
+            'aktif' => $aktif,
+            'program' => $aktif ? DonasiController::daftar(false) : [],
+            'maks_donasi_harian' => $cfg['donasi_maks_harian'] ?? 0,
+        ]);
+    }
+
+    public function tap(Request $r)
+    {
+        $this->harusAktif();
+        $this->kuotaTap($r);
+
+        $uid = BidangSiswa::uid($r->input('uid'));
+        if (! $uid) {
+            throw new ApiError(400, 'UID kartu kosong');
+        }
+        $s = Siswa::where('card_uid', $uid)->first();
+        if (! $s) {
+            return response()->json(['ok' => false, 'terdaftar' => false]);
+        }
+
+        // Sebagian golongan sengaja tidak dilayani kios (mis. kartu tamu sekali
+        // pakai yang tidak punya PIN). Ditolak dengan ALASANNYA, bukan dianggap
+        // tak terdaftar — pemegangnya berhak tahu kartunya sah tetapi layar ini
+        // bukan untuknya.
+        $gol = Pengaturan::golongan($s->golongan);
+        if (! $gol?->kios) {
+            return response()->json(['ok' => false, 'terdaftar' => true,
+                'ditolak' => "Kartu {$gol?->nama} tidak dilayani di kios"]);
+        }
+        if (Kartu::kedaluwarsa($s)) {
+            return response()->json(['ok' => false, 'terdaftar' => true,
+                'ditolak' => "Masa berlaku kartu habis ({$s->berlaku_sampai})"]);
+        }
+
+        // Siswa mengecek saldo di kios justru ketika merasa saldonya tipis —
+        // isi ulang dari titipan dikerjakan lebih dulu supaya angka di layar
+        // sudah yang terbaru.
+        $smart = SmartTopup::diam($s->id, 'tap kios');
+        if ($smart) {
+            $s = Siswa::find($s->id);
+        }
+
+        return response()->json(array_merge(
+            ['ok' => true, 'terdaftar' => true],
+            $this->bekal($s, SesiKios::buka($s->id)),
+            ['smart' => $smart ? ['isi' => $smart['isi'], 'sisa_titipan' => $smart['sisa_titipan']] : null],
+        ));
+    }
+
+    public function donasi(Request $r)
+    {
+        $this->harusAktif();
+        $txId = $r->input('tx_id') ? mb_substr((string) $r->input('tx_id'), 0, 80) : null;
+
+        if ($jawab = $this->jawabUlang($r, $txId, 'donasi')) {
+            return $jawab;
+        }
+
+        ['token' => $token, 'sesi' => $sesi, 'siswa' => $s] = SesiKios::ambil($r->input('token'));
+
+        $p = DonasiProgram::where('id', (int) $r->input('program_id'))->where('aktif', true)->first();
+        if (! $p) {
+            throw new ApiError(404, 'Jenis donasi tidak tersedia');
+        }
+        $jumlah = (int) floor((float) $r->input('jumlah'));
+        if ($jumlah <= 0) {
+            throw new ApiError(400, 'Nominal donasi tidak valid');
+        }
+        // Besaran donasi ditentukan sekolah: hanya angka yang persis ada di
+        // daftar nominal program ini yang diterima, berapa pun yang dikirim klien.
+        if (! DonasiNominal::where('program_id', $p->id)->where('jumlah', $jumlah)->exists()) {
+            throw new ApiError(400, 'Nominal donasi tidak sesuai pilihan yang disediakan sekolah');
+        }
+
+        Pin::verifikasi($s, $r->input('pin'), $r);
+        if ($s->status !== 'aktif') {
+            throw new ApiError(403, 'Kartu sedang diblokir — hubungi admin kantin');
+        }
+
+        $cfg = Pengaturan::sekolah();
+
+        // Jaring pengaman terakhir untuk tx_id yang sudah tercatat (mis. sesi
+        // lamanya sudah kedaluwarsa): jawab apa adanya, jangan mencatat dua kali.
+        if ($txId && $dupe = Transaksi::where('tx_id', $txId)->first()) {
+            $s2 = Siswa::find($s->id);
+
+            return response()->json([
+                'ok' => true, 'duplikat' => true, 'program' => $p->nama,
+                'jumlah' => -$dupe->jumlah, 'saldo' => $s2->saldo, 'waktu' => $dupe->created_at,
+                'sisa_donasi' => max(0, $cfg['donasi_maks_harian'] - $this->donasiHariIni($s->id)),
+            ]);
+        }
+
+        $sudah = $this->donasiHariIni($s->id);
+        if ($sudah + $jumlah > $cfg['donasi_maks_harian']) {
+            throw new ApiError(429, 'Melebihi batas donasi harian (hari ini sudah ' . Rupiah::f($sudah) .
+                ', batas ' . Rupiah::f($cfg['donasi_maks_harian']) . ')');
+        }
+
+        $hasil = DB::transaction(function () use ($s, $jumlah, $txId, $p) {
+            $ubah = Siswa::where('id', $s->id)->where('saldo', '>=', $jumlah)->where('status', 'aktif')
+                ->update(['saldo' => DB::raw("saldo - {$jumlah}")]);
+            if ($ubah === 0) {
+                $cek = Siswa::find($s->id);
+                if (! $cek) {
+                    throw new ApiError(404, 'Siswa tidak ditemukan');
+                }
+                if ($cek->status !== 'aktif') {
+                    throw new ApiError(403, 'Kartu sedang diblokir — hubungi admin kantin');
+                }
+                throw new ApiError(402, 'Saldo tidak cukup (saldo ' . Rupiah::f($cek->saldo) . ')');
+            }
+            $s2 = Siswa::find($s->id);
+            $trx = Transaksi::create([
+                'tx_id' => $txId, 'tipe' => 'donasi', 'siswa_id' => $s2->id,
+                'siswa_nama' => $s2->nama, 'kelas' => $s2->kelas,
+                'jumlah' => -$jumlah, 'saldo_sesudah' => $s2->saldo,
+                'operator' => 'Kios Siswa', 'keterangan' => 'Donasi ' . $p->nama,
+                'donasi_id' => $p->id, 'created_at' => WaktuIso::sekarang(),
+            ]);
+
+            return ['saldo' => $s2->saldo, 'waktu' => $trx->created_at];
+        });
+
+        $jawab = [
+            'ok' => true, 'program' => $p->nama, 'jumlah' => $jumlah,
+            'saldo' => $hasil['saldo'], 'waktu' => $hasil['waktu'],
+            'sisa_donasi' => max(0, $cfg['donasi_maks_harian'] - ($sudah + $jumlah)),
+        ];
+        $this->tandaiSelesai($token, $sesi, $txId, $jawab);   // satu tap = satu donasi
+
+        return response()->json($jawab);
+    }
+
+    public function cariPenerima(Request $r)
+    {
+        $this->harusAktif();
+        Transfer::harusAktif();
+
+        ['token' => $token, 'sesi' => $sesi, 'siswa' => $s] = SesiKios::ambil($r->input('token'));
+        $g = Pengaturan::golongan($s->golongan);
+        if (! $g?->transfer) {
+            throw new ApiError(403, "Kartu {$g?->nama} tidak bisa mengirim saldo");
+        }
+
+        // Tanpa batas ini, satu tap kartu sendiri cukup untuk menyisir seluruh
+        // NIS sekolah dan memanen daftar nama — dan NIS adalah PIN bawaan kios.
+        $sesi['cari']++;
+        SesiKios::simpan($token, $sesi);
+        if ($sesi['cari'] > SesiKios::CARI_MAKS) {
+            throw new ApiError(429, 'Terlalu banyak pencarian NIS dalam satu tap — tempelkan kartu lagi');
+        }
+
+        $p = Transfer::cariPenerima($r->input('nis'), $s);
+        $cfg = Pengaturan::sekolah();
+        $hari = Transfer::hariIni($s->id);
+
+        return response()->json([
+            'ok' => true,
+            'penerima' => Transfer::penerimaUntukKios($p),
+            // Sisa jatah dikirim bersama hasil pencarian supaya layar nominal
+            // bisa langsung menutup pilihan yang pasti ditolak, bukan
+            // menolaknya belakangan.
+            'min' => $cfg['transfer_min'],
+            'maks' => min($cfg['transfer_maks'], max(0, $cfg['transfer_maks_harian'] - $hari['kirim']), $s->saldo),
+            'sisa_harian' => max(0, $cfg['transfer_maks_harian'] - $hari['kirim']),
+            'sisa_kali' => max(0, $cfg['transfer_maks_kali_harian'] - $hari['n_kirim']),
+            'saldo' => $s->saldo,
+        ]);
+    }
+
+    public function transfer(Request $r)
+    {
+        $this->harusAktif();
+        Transfer::harusAktif();
+        $txId = $r->input('tx_id') ? mb_substr((string) $r->input('tx_id'), 0, 80) : null;
+
+        if ($jawab = $this->jawabUlang($r, $txId, 'transfer')) {
+            return $jawab;
+        }
+
+        ['token' => $token, 'sesi' => $sesi, 'siswa' => $s] = SesiKios::ambil($r->input('token'));
+        $g = Pengaturan::golongan($s->golongan);
+        if (! $g?->transfer) {
+            throw new ApiError(403, "Kartu {$g?->nama} tidak bisa mengirim saldo");
+        }
+
+        $penerima = Transfer::cariPenerima($r->input('nis'), $s);
+        $jumlah = (int) floor((float) $r->input('jumlah'));
+        $cfg = Pengaturan::sekolah();
+
+        if ($jumlah <= 0) {
+            throw new ApiError(400, 'Nominal transfer tidak valid');
+        }
+        if ($jumlah < $cfg['transfer_min']) {
+            throw new ApiError(400, 'Minimal kirim ' . Rupiah::f($cfg['transfer_min']));
+        }
+        if ($jumlah > $cfg['transfer_maks']) {
+            throw new ApiError(400, 'Maksimal sekali kirim ' . Rupiah::f($cfg['transfer_maks']));
+        }
+
+        Pin::verifikasi($s, $r->input('pin'), $r);
+        Kartu::pastikanBerlaku($s);
+
+        if ($txId && $dupe = Transaksi::where('tx_id', $txId)->first()) {
+            return response()->json([
+                'ok' => true, 'duplikat' => true, 'jumlah' => -$dupe->jumlah,
+                'saldo' => Siswa::find($s->id)->saldo,
+                'penerima' => ['nama' => $dupe->lawan_nama], 'waktu' => $dupe->created_at,
+            ]);
+        }
+
+        $hari = Transfer::hariIni($s->id);
+        if ($hari['n_kirim'] >= $cfg['transfer_maks_kali_harian']) {
+            throw new ApiError(429, "Sudah {$hari['n_kirim']}x kirim hari ini (batas {$cfg['transfer_maks_kali_harian']}x/hari)");
+        }
+        if ($hari['kirim'] + $jumlah > $cfg['transfer_maks_harian']) {
+            throw new ApiError(429, 'Melebihi batas kirim harian (hari ini sudah ' . Rupiah::f($hari['kirim']) .
+                ', batas ' . Rupiah::f($cfg['transfer_maks_harian']) . ')');
+        }
+        $hariP = Transfer::hariIni($penerima->id);
+        if ($hariP['terima'] + $jumlah > $cfg['transfer_terima_harian']) {
+            throw new ApiError(429, "{$penerima->nama} sudah menerima " . Rupiah::f($hariP['terima']) .
+                ' hari ini — batasnya ' . Rupiah::f($cfg['transfer_terima_harian']) . '/hari');
+        }
+
+        $maksPenerima = Pengaturan::untuk($penerima, $cfg)['max_saldo'];
+        if ($penerima->saldo + $jumlah > $maksPenerima) {
+            throw new ApiError(400, "Saldo {$penerima->nama} akan melebihi batas " .
+                Rupiah::f($maksPenerima) . ' — kirim nominal lebih kecil');
+        }
+
+        $hasil = DB::transaction(function () use ($s, $penerima, $jumlah, $txId, $maksPenerima) {
+            // Sisi keluar: bersyarat, jadi dua permintaan bersamaan tidak bisa
+            // mengirimkan saldo yang sama dua kali.
+            $keluar = Siswa::where('id', $s->id)->where('saldo', '>=', $jumlah)->where('status', 'aktif')
+                ->update(['saldo' => DB::raw("saldo - {$jumlah}")]);
+            if ($keluar === 0) {
+                $cek = Siswa::find($s->id);
+                if ($cek->status !== 'aktif') {
+                    throw new ApiError(403, 'Kartu sedang diblokir');
+                }
+                throw new ApiError(402, 'Saldo tidak cukup (saldo ' . Rupiah::f($cek->saldo) . ')');
+            }
+            // Sisi masuk: juga bersyarat pada batas saldo penerima, supaya
+            // pemeriksaan di atas tidak bisa dilangkahi oleh dua transfer yang
+            // tiba bersamaan.
+            $masuk = Siswa::where('id', $penerima->id)->where('status', 'aktif')
+                ->whereRaw('saldo + ? <= ?', [$jumlah, $maksPenerima])
+                ->update(['saldo' => DB::raw("saldo + {$jumlah}")]);
+            if ($masuk === 0) {
+                throw new ApiError(409, "Saldo {$penerima->nama} sudah penuh — coba nominal lebih kecil");
+            }
+
+            $sBaru = Siswa::find($s->id);
+            $pBaru = Siswa::find($penerima->id);
+            $waktu = WaktuIso::sekarang();
+
+            Transaksi::create([
+                'tx_id' => $txId, 'tipe' => 'transfer_keluar', 'siswa_id' => $sBaru->id,
+                'siswa_nama' => $sBaru->nama, 'kelas' => $sBaru->kelas,
+                'jumlah' => -$jumlah, 'saldo_sesudah' => $sBaru->saldo, 'operator' => 'Kios Siswa',
+                'keterangan' => "Kirim ke {$pBaru->nama} (NIS {$pBaru->nis})",
+                'lawan_id' => $pBaru->id, 'lawan_nama' => $pBaru->nama, 'created_at' => $waktu,
+            ]);
+            // tx_id sisi penerima diberi akhiran: kunci UNIQUE tetap menolak
+            // kiriman ulang, tanpa kedua baris berebut nilai yang sama.
+            Transaksi::create([
+                'tx_id' => $txId ? $txId . '-r' : null, 'tipe' => 'transfer_masuk', 'siswa_id' => $pBaru->id,
+                'siswa_nama' => $pBaru->nama, 'kelas' => $pBaru->kelas,
+                'jumlah' => $jumlah, 'saldo_sesudah' => $pBaru->saldo, 'operator' => 'Kios Siswa',
+                'keterangan' => "Terima dari {$sBaru->nama} (NIS {$sBaru->nis})",
+                'lawan_id' => $sBaru->id, 'lawan_nama' => $sBaru->nama, 'created_at' => $waktu,
+            ]);
+
+            return ['saldo' => $sBaru->saldo, 'waktu' => $waktu];
+        });
+
+        $jawab = [
+            'ok' => true, 'jumlah' => $jumlah, 'saldo' => $hasil['saldo'], 'waktu' => $hasil['waktu'],
+            'penerima' => Transfer::penerimaUntukKios($penerima),
+            'sisa_harian' => max(0, $cfg['transfer_maks_harian'] - ($hari['kirim'] + $jumlah)),
+        ];
+        $this->tandaiSelesai($token, $sesi, $txId, $jawab);   // satu tap = satu transfer
+
+        return response()->json($jawab);
+    }
+
+    public function gantiPin(Request $r)
+    {
+        $this->harusAktif();
+        ['token' => $token, 'siswa' => $s] = SesiKios::ambil($r->input('token'));
+
+        Pin::verifikasi($s, $r->input('pin_lama'), $r);
+        $baru = Pin::periksaBaru($r->input('pin_baru'), $s);
+        if (Pin::cocok($s, $baru)) {
+            throw new ApiError(400, 'PIN baru sama dengan PIN lama');
+        }
+        Pin::ganti($s, $baru);
+        SesiKios::tutup($token);
+
+        return response()->json(['ok' => true]);
+    }
+
+    public function riwayat(Request $r)
+    {
+        $this->harusAktif();
+        ['token' => $token, 'sesi' => $sesi, 'siswa' => $s] = SesiKios::ambil($r->input('token'));
+
+        // PIN diminta SEKALI per tap. Riwayat lengkap jauh lebih peka daripada
+        // saldo (pola jajan, siapa yang mengisi saldo) sementara layar kios
+        // terbaca antrean di belakang — jadi kartu saja tidak cukup. Setelah
+        // terbuka, ganti periode dan halaman berikutnya tidak meminta PIN lagi:
+        // kalau tiap halaman meminta PIN, siswa mengetik PIN berkali-kali di
+        // depan orang banyak.
+        if (! $sesi['riwayat']) {
+            Pin::verifikasi($s, $r->input('pin'), $r);
+            $sesi['riwayat'] = true;
+            SesiKios::simpan($token, $sesi);
+        }
+
+        $periode = in_array($r->input('periode'), ['hari', '7', '30', 'bulan'], true) ? $r->input('periode') : 'hari';
+        [$dari, $sampai] = $this->rentang($periode, $r->input('bulan'));
+        $page = min(self::RIWAYAT_MAKS_HAL, max(1, (int) $r->input('page', 1)));
+
+        $q = Transaksi::where('siswa_id', $s->id)->where('created_at', '>=', $dari);
+        if ($sampai) {
+            $q->where('created_at', '<', $sampai);
+        }
+
+        $agg = (clone $q)->selectRaw('COUNT(*) AS n')
+            ->selectRaw('COALESCE(SUM(CASE WHEN jumlah > 0 THEN jumlah END),0) AS total_masuk')
+            ->selectRaw('COALESCE(SUM(CASE WHEN jumlah < 0 THEN -jumlah END),0) AS total_keluar')
+            ->first();
+
+        $rows = (clone $q)->select('tipe', 'tenant_nama', 'jumlah', 'saldo_sesudah', 'keterangan', 'created_at')
+            ->orderByDesc('created_at')->orderByDesc('id')
+            ->limit(self::RIWAYAT_LIMIT)->offset(($page - 1) * self::RIWAYAT_LIMIT)->get();
+
+        // Daftar bulan yang benar-benar punya transaksi — supaya siswa tidak
+        // memilih bulan kosong. Dipotong 12 bulan terakhir agar muat di layar.
+        $bulanAda = Transaksi::where('siswa_id', $s->id)
+            ->selectRaw('DISTINCT ' . SqlWaktu::periode('bulanan') . ' AS bulan')
+            ->orderByDesc('bulan')->limit(12)->pluck('bulan');
+
+        return response()->json([
+            'ok' => true, 'periode' => $periode,
+            'bulan' => $periode === 'bulan' ? $r->input('bulan') : null,
+            'transaksi' => $rows, 'total' => (int) $agg->n,
+            'total_masuk' => (int) $agg->total_masuk, 'total_keluar' => (int) $agg->total_keluar,
+            'page' => $page, 'limit' => self::RIWAYAT_LIMIT,
+            'ada_lagi' => $page * self::RIWAYAT_LIMIT < (int) $agg->n && $page < self::RIWAYAT_MAKS_HAL,
+            'bulan_tersedia' => $bulanAda,
+            'saldo' => $s->saldo,
+            'sesi_detik' => SesiKios::detikSesi(),
+        ]);
+    }
+
+    /**
+     * Buka kunci mode layar penuh.
+     *
+     * Sandinya diperiksa DI SERVER, bukan di kios.js: halaman /kios boleh dibuka
+     * siapa saja tanpa login, jadi sandi yang ditanam di berkas JS sama saja
+     * dengan ditempel di dinding. Yang dikirim balik hanya "cocok / tidak".
+     */
+    public function bukaLayar(Request $r)
+    {
+        // Rem per alamat IP dan ketat, berbeda dari rem PIN siswa yang sengaja
+        // dilonggarkan: sandi ini dipakai staf dari satu perangkat, jadi
+        // mengunci per perangkat tidak pernah mengganggu antrean siswa.
+        $kunci = 'kioslayar:' . Rem::ip($r);
+        Rem::periksa($kunci);
+
+        $hash = KiosConfig::ambil('sandi_hash');
+        if (! $hash) {
+            throw new ApiError(500, 'Sandi kios belum tersiapkan');
+        }
+        $kiriman = is_string($r->input('sandi')) ? $r->input('sandi') : '';   // bukan teks = pasti salah
+        if (! Hash::check($kiriman, $hash)) {
+            Rem::catatGagal($kunci);
+            throw new ApiError(401, 'Sandi salah. Setelah ' . Rem::MAKS_GAGAL . ' kali salah, perangkat ini terkunci 15 menit.');
+        }
+        Rem::lupakan($kunci);
+
+        return response()->json(['ok' => true]);
+    }
+
+    public function sandiLayar(Request $r)
+    {
+        $this->wajibPeran($r, 'superadmin');
+        $s = is_string($r->input('sandi_baru')) ? $r->input('sandi_baru') : '';
+        if (strlen($s) < 6) {
+            throw new ApiError(400, 'Sandi kios minimal 6 karakter');
+        }
+        if (strlen($s) > 64) {
+            throw new ApiError(400, 'Sandi kios maksimal 64 karakter');
+        }
+        DB::transaction(function () use ($s) {
+            KiosConfig::simpan('sandi_hash', Hash::make($s));
+            KiosConfig::simpan('sandi_bawaan', $s === self::SANDI_BAWAAN ? '1' : '0');
+        });
+
+        return response()->json(['ok' => true, 'bawaan' => $s === self::SANDI_BAWAAN]);
+    }
+
+    public function selesai(Request $r)
+    {
+        SesiKios::tutup($r->input('token'));
+
+        return response()->json(['ok' => true]);
+    }
+
+    // ------------------------------------------------------------ penolong
+
+    private function harusAktif(): void
+    {
+        if ((Pengaturan::sekolah()['kios_aktif'] ?? 0) !== 1) {
+            throw new ApiError(503, 'Kios siswa sedang ditutup admin');
+        }
+    }
+
+    private function kuotaTap(Request $r): void
+    {
+        $kunci = 'kiostap:' . Rem::ip($r);
+        if (RateLimiter::tooManyAttempts($kunci, self::TAP_PER_MENIT)) {
+            throw new ApiError(429, 'Terlalu banyak tap dari perangkat ini — tunggu sebentar');
+        }
+        RateLimiter::hit($kunci, 60);
+    }
+
+    private function donasiHariIni(int $siswaId): int
+    {
+        return (int) Transaksi::where('tipe', 'donasi')->where('siswa_id', $siswaId)
+            ->where('created_at', '>=', WaktuIso::awalHariIni())->sum(DB::raw('-jumlah'));
+    }
+
+    /**
+     * Kalau jaringan kios putus tepat setelah transaksi tercatat, kiriman ulang
+     * dengan tx_id yang sama harus menerima jawaban yang SAMA — bukan "sesi
+     * berakhir" yang membuat siswa mengira gagal lalu mengulang.
+     */
+    private function jawabUlang(Request $r, ?string $txId, string $apa)
+    {
+        $lama = SesiKios::mentah($r->input('token'));
+        if (! $lama || ! $lama['selesai']) {
+            return null;
+        }
+        if ($txId && ($lama['hasil']['tx_id'] ?? null) === $txId) {
+            return response()->json(array_merge($lama['hasil']['jawab'], ['duplikat' => true]));
+        }
+
+        throw new ApiError(409, "Satu tap hanya untuk satu {$apa} — tempelkan kartu lagi");
+    }
+
+    private function tandaiSelesai(string $token, array $sesi, ?string $txId, array $jawab): void
+    {
+        $sesi['selesai'] = true;
+        $sesi['hasil'] = ['tx_id' => $txId, 'jawab' => $jawab];
+        SesiKios::simpan($token, $sesi);
+    }
+
+    /**
+     * Rentang periode riwayat. Batas bulan dihitung pada 00:00 WIB, bukan UTC:
+     * transaksi sore hari tanggal 31 tersimpan sebagai UTC hari yang sama tapi
+     * jam mundur 7 — memakai batas UTC akan membuangnya ke bulan berikutnya.
+     */
+    private function rentang(string $periode, $bulan): array
+    {
+        if ($periode === 'bulan') {
+            if (! preg_match('/^(\d{4})-(\d{2})$/', (string) $bulan, $m)) {
+                throw new ApiError(400, 'Bulan tidak dikenali');
+            }
+            [$th, $bl] = [(int) $m[1], (int) $m[2]];
+            if ($bl < 1 || $bl > 12 || $th < 2000 || $th > 2200) {
+                throw new ApiError(400, 'Bulan tidak dikenali');
+            }
+            $wib = new \DateTimeZone('Asia/Jakarta');
+            $utc = new \DateTimeZone('UTC');
+            $mulai = (new \DateTime("{$m[1]}-{$m[2]}-01 00:00:00", $wib))->setTimezone($utc);
+            $akhir = (new \DateTime("{$m[1]}-{$m[2]}-01 00:00:00", $wib))->modify('+1 month')->setTimezone($utc);
+
+            return [$mulai->format('Y-m-d\TH:i:s.v\Z'), $akhir->format('Y-m-d\TH:i:s.v\Z')];
+        }
+        if ($periode === '7') {
+            return [WaktuIso::awalHari(6), null];
+        }
+        if ($periode === '30') {
+            return [WaktuIso::awalHari(29), null];
+        }
+
+        return [WaktuIso::awalHariIni(), null];
+    }
+
+    /** Bekal awal layar kios setelah tap: identitas, jatah, dan menu yang benar-benar bisa dipakai. */
+    private function bekal(Siswa $s, string $token): array
+    {
+        $cfg = Pengaturan::sekolah();
+        $sudah = $this->donasiHariIni($s->id);
+        $g = Pengaturan::golongan($s->golongan);
+        $hariT = Transfer::hariIni($s->id);
+
+        // Menu transfer hanya muncul kalau memang bisa dipakai SEKARANG:
+        // dimatikan admin, golongan yang tidak diizinkan, jatah harian habis,
+        // atau saldo kurang dari nominal terkecil — semuanya berakhir sebagai
+        // tombol yang TIDAK ADA, bukan tombol yang menolak sesudah siswa
+        // mengetik NIS temannya di depan antrean.
+        $sisaKirim = max(0, $cfg['transfer_maks_harian'] - $hariT['kirim']);
+
+        return [
+            'token' => $token,
+            'siswa' => ['nama' => $s->nama, 'kelas' => $s->kelas, 'saldo' => $s->saldo,
+                'saldo_titipan' => $s->saldo_titipan, 'status' => $s->status, 'foto' => $s->foto],
+            'golongan' => ['kode' => $g?->kode, 'nama' => $g?->nama, 'jenis' => $g?->jenis],
+            'pin_bawaan' => Pin::tersimpan($s->id) === null,   // true = masih memakai NIS
+            'pin_siap' => Pin::siap($s),
+            'program' => DonasiController::daftar(false),
+            'donasi_hari_ini' => $sudah,
+            'sisa_donasi' => max(0, $cfg['donasi_maks_harian'] - $sudah),
+            'maks_donasi_harian' => $cfg['donasi_maks_harian'],
+            'transfer' => [
+                'bisa' => $cfg['transfer_aktif'] === 1 && (bool) $g?->transfer
+                    && $hariT['n_kirim'] < $cfg['transfer_maks_kali_harian']
+                    && $sisaKirim >= $cfg['transfer_min'] && $s->saldo >= $cfg['transfer_min'],
+                'min' => $cfg['transfer_min'],
+                'maks' => min($cfg['transfer_maks'], $sisaKirim, $s->saldo),
+                'sisa_harian' => $sisaKirim,
+                'sisa_kali' => max(0, $cfg['transfer_maks_kali_harian'] - $hariT['n_kirim']),
+            ],
+            'sesi_detik' => SesiKios::detikSesi(),
+            'transaksi' => Transaksi::where('siswa_id', $s->id)
+                ->select('tipe', 'tenant_nama', 'jumlah', 'saldo_sesudah', 'keterangan', 'created_at')
+                ->orderByDesc('created_at')->orderByDesc('id')->limit(5)->get(),
+        ];
+    }
+}
