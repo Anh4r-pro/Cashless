@@ -15,7 +15,7 @@ use Illuminate\Support\Collection;
  */
 class Ekspor
 {
-    public const JUDUL = ['Waktu (WIB)', 'Tipe', 'Siswa', 'Kelas', 'Tenant',
+    public const JUDUL = ['Waktu (WIB)', 'Tipe', 'Santri', 'Kelas', 'Tenant',
         'Jumlah (Rp)', 'Saldo Sesudah', 'Operator', 'Keterangan'];
 
     /** Satu baris transaksi, waktunya sudah digeser ke WIB. */

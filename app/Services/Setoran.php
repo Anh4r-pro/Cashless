@@ -38,7 +38,7 @@ class Setoran
 
         if ($keTitip > 0 && $s->saldo_titipan + $keTitip > $cfg['max_titipan']) {
             throw new ApiError(400,
-                'Titipan siswa akan menjadi ' . Rupiah::f($s->saldo_titipan + $keTitip) .
+                'Titipan santri akan menjadi ' . Rupiah::f($s->saldo_titipan + $keTitip) .
                 ', melebihi batas ' . Rupiah::f($cfg['max_titipan']) .
                 ' — naikkan batasnya di pengaturan atau kurangi nominal');
         }
@@ -58,7 +58,7 @@ class Setoran
             throw new ApiError(404, 'Pemegang kartu tidak ditemukan');
         }
         // Batas saldo & top up harian mengikuti golongan pemegangnya: kartu guru
-        // memang boleh menampung lebih banyak daripada kartu siswa.
+        // memang boleh menampung lebih banyak daripada kartu santri.
         $cfg = Pengaturan::untuk($s0);
         $bagi = self::bagi($s0, $jumlah, $cfg, (bool) ($opsi['keTitipan'] ?? false));
 

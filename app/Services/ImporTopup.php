@@ -166,7 +166,7 @@ class ImporTopup
         $hariIni = Kartu::hariIni();
         $paling = (new \DateTime($hariIni))->modify('-' . self::MUNDUR_MAKS_HARI . ' days')->format('Y-m-d');
 
-        // Simulasi saldo & titipan per siswa: dua baris untuk siswa yang sama
+        // Simulasi saldo & titipan per santri: dua baris untuk santri yang sama
         // harus menampilkan pembagian yang benar, bukan dua kali perhitungan
         // dari saldo awal.
         $bayangan = [];

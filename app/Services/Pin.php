@@ -24,7 +24,7 @@ class Pin
 
     public const MAKS = 20;
 
-    /** Panjang maksimal PIN yang boleh DIPILIH siswa sendiri. */
+    /** Panjang maksimal PIN yang boleh DIPILIH santri sendiri. */
     public const PIN_MAKS = 8;
 
     /** Rem per IP jauh lebih longgar daripada per kartu: satu kios melayani antrean. */

@@ -26,9 +26,9 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\RateLimiter;
 
 /**
- * Layar kios siswa (/kios) — dipasang di depan reader kartu, tanpa login.
+ * Layar kios santri (/kios) — dipasang di depan reader kartu, tanpa login.
  *
- * Siswa tap kartu untuk cek saldo, dan tap + PIN untuk berdonasi, mengirim
+ * Santri tap kartu untuk cek saldo, dan tap + PIN untuk berdonasi, mengirim
  * saldo ke teman, melihat riwayat, atau mengganti PIN sendiri.
  *
  * Layar ini terbaca antrean di belakang, dan satu-satunya bukti identitas adalah
@@ -92,7 +92,7 @@ class KiosController extends Controller
                 'ditolak' => "Masa berlaku kartu habis ({$s->berlaku_sampai})"]);
         }
 
-        // Siswa mengecek saldo di kios justru ketika merasa saldonya tipis —
+        // Santri mengecek saldo di kios justru ketika merasa saldonya tipis —
         // isi ulang dari titipan dikerjakan lebih dulu supaya angka di layar
         // sudah yang terbaru.
         $smart = SmartTopup::diam($s->id, 'tap kios');
@@ -163,7 +163,7 @@ class KiosController extends Controller
             if ($ubah === 0) {
                 $cek = Siswa::find($s->id);
                 if (! $cek) {
-                    throw new ApiError(404, 'Siswa tidak ditemukan');
+                    throw new ApiError(404, 'Santri tidak ditemukan');
                 }
                 if ($cek->status !== 'aktif') {
                     throw new ApiError(403, 'Kartu sedang diblokir — hubungi admin kantin');
@@ -175,7 +175,7 @@ class KiosController extends Controller
                 'tx_id' => $txId, 'tipe' => 'donasi', 'siswa_id' => $s2->id,
                 'siswa_nama' => $s2->nama, 'kelas' => $s2->kelas,
                 'jumlah' => -$jumlah, 'saldo_sesudah' => $s2->saldo,
-                'operator' => 'Kios Siswa', 'keterangan' => 'Donasi ' . $p->nama,
+                'operator' => 'Kios Santri', 'keterangan' => 'Donasi ' . $p->nama,
                 'donasi_id' => $p->id, 'created_at' => WaktuIso::sekarang(),
             ]);
 
@@ -319,7 +319,7 @@ class KiosController extends Controller
             Transaksi::create([
                 'tx_id' => $txId, 'tipe' => 'transfer_keluar', 'siswa_id' => $sBaru->id,
                 'siswa_nama' => $sBaru->nama, 'kelas' => $sBaru->kelas,
-                'jumlah' => -$jumlah, 'saldo_sesudah' => $sBaru->saldo, 'operator' => 'Kios Siswa',
+                'jumlah' => -$jumlah, 'saldo_sesudah' => $sBaru->saldo, 'operator' => 'Kios Santri',
                 'keterangan' => "Kirim ke {$pBaru->nama} (NIS {$pBaru->nis})",
                 'lawan_id' => $pBaru->id, 'lawan_nama' => $pBaru->nama, 'created_at' => $waktu,
             ]);
@@ -328,7 +328,7 @@ class KiosController extends Controller
             Transaksi::create([
                 'tx_id' => $txId ? $txId . '-r' : null, 'tipe' => 'transfer_masuk', 'siswa_id' => $pBaru->id,
                 'siswa_nama' => $pBaru->nama, 'kelas' => $pBaru->kelas,
-                'jumlah' => $jumlah, 'saldo_sesudah' => $pBaru->saldo, 'operator' => 'Kios Siswa',
+                'jumlah' => $jumlah, 'saldo_sesudah' => $pBaru->saldo, 'operator' => 'Kios Santri',
                 'keterangan' => "Terima dari {$sBaru->nama} (NIS {$sBaru->nis})",
                 'lawan_id' => $sBaru->id, 'lawan_nama' => $sBaru->nama, 'created_at' => $waktu,
             ]);
@@ -371,7 +371,7 @@ class KiosController extends Controller
         // saldo (pola jajan, siapa yang mengisi saldo) sementara layar kios
         // terbaca antrean di belakang — jadi kartu saja tidak cukup. Setelah
         // terbuka, ganti periode dan halaman berikutnya tidak meminta PIN lagi:
-        // kalau tiap halaman meminta PIN, siswa mengetik PIN berkali-kali di
+        // kalau tiap halaman meminta PIN, santri mengetik PIN berkali-kali di
         // depan orang banyak.
         if (! $sesi['riwayat']) {
             Pin::verifikasi($s, $r->input('pin'), $r);
@@ -397,7 +397,7 @@ class KiosController extends Controller
             ->orderByDesc('created_at')->orderByDesc('id')
             ->limit(self::RIWAYAT_LIMIT)->offset(($page - 1) * self::RIWAYAT_LIMIT)->get();
 
-        // Daftar bulan yang benar-benar punya transaksi — supaya siswa tidak
+        // Daftar bulan yang benar-benar punya transaksi — supaya santri tidak
         // memilih bulan kosong. Dipotong 12 bulan terakhir agar muat di layar.
         $bulanAda = Transaksi::where('siswa_id', $s->id)
             ->selectRaw('DISTINCT ' . SqlWaktu::periode('bulanan') . ' AS bulan')
@@ -425,9 +425,9 @@ class KiosController extends Controller
      */
     public function bukaLayar(Request $r)
     {
-        // Rem per alamat IP dan ketat, berbeda dari rem PIN siswa yang sengaja
+        // Rem per alamat IP dan ketat, berbeda dari rem PIN santri yang sengaja
         // dilonggarkan: sandi ini dipakai staf dari satu perangkat, jadi
-        // mengunci per perangkat tidak pernah mengganggu antrean siswa.
+        // mengunci per perangkat tidak pernah mengganggu antrean santri.
         $kunci = 'kioslayar:' . Rem::ip($r);
         Rem::periksa($kunci);
 
@@ -475,7 +475,7 @@ class KiosController extends Controller
     private function harusAktif(): void
     {
         if ((Pengaturan::sekolah()['kios_aktif'] ?? 0) !== 1) {
-            throw new ApiError(503, 'Kios siswa sedang ditutup admin');
+            throw new ApiError(503, 'Kios santri sedang ditutup admin');
         }
     }
 
@@ -497,7 +497,7 @@ class KiosController extends Controller
     /**
      * Kalau jaringan kios putus tepat setelah transaksi tercatat, kiriman ulang
      * dengan tx_id yang sama harus menerima jawaban yang SAMA — bukan "sesi
-     * berakhir" yang membuat siswa mengira gagal lalu mengulang.
+     * berakhir" yang membuat santri mengira gagal lalu mengulang.
      */
     private function jawabUlang(Request $r, ?string $txId, string $apa)
     {
@@ -562,7 +562,7 @@ class KiosController extends Controller
         // Menu transfer hanya muncul kalau memang bisa dipakai SEKARANG:
         // dimatikan admin, golongan yang tidak diizinkan, jatah harian habis,
         // atau saldo kurang dari nominal terkecil — semuanya berakhir sebagai
-        // tombol yang TIDAK ADA, bukan tombol yang menolak sesudah siswa
+        // tombol yang TIDAK ADA, bukan tombol yang menolak sesudah santri
         // mengetik NIS temannya di depan antrean.
         $sisaKirim = max(0, $cfg['transfer_maks_harian'] - $hariT['kirim']);
 

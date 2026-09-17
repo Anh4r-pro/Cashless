@@ -12,21 +12,21 @@ use Illuminate\Support\Facades\Log;
  *
  * Kartu hanya boleh memegang max_saldo, jadi kelebihan setoran orang tua
  * menunggu di titipan dan diteteskan ke kartu ketika saldonya menyentuh ambang.
- * Tujuannya satu: siswa yang titipannya masih banyak tidak boleh tertolak di
+ * Tujuannya satu: santri yang titipannya masih banyak tidak boleh tertolak di
  * kasir hanya karena angka di kartunya sudah tipis.
  */
 class SmartTopup
 {
     /**
-     * Aturan yang berlaku untuk satu siswa.
+     * Aturan yang berlaku untuk satu santri.
      *
      * Ambang dan nilai isi dimampatkan ke batas saldo yang berlaku SEKARANG,
      * supaya admin bebas menurunkan max_saldo tanpa harus menyetel ulang angka
-     * tiap siswa: yang terjadi paling banyak kartu diisi sampai batas baru.
+     * tiap santri: yang terjadi paling banyak kartu diisi sampai batas baru.
      */
     public static function aturan(Siswa $s, array $cfg): array
     {
-        // 'ikut' = mengikuti sakelar sekolah; 'aktif'/'mati' = keputusan khusus siswa ini.
+        // 'ikut' = mengikuti sakelar sekolah; 'aktif'/'mati' = keputusan khusus santri ini.
         $nyala = $s->smart_mode === 'aktif'
             || ($s->smart_mode !== 'mati' && ($cfg['smart_aktif'] ?? 0) === 1);
         $ambang = $s->smart_ambang !== null ? (int) $s->smart_ambang : (int) ($cfg['smart_ambang'] ?? 0);

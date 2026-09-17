@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Model;
 use App\Support\WaktuIso;
 
 /**
- * Program donasi yang ditawarkan di kios siswa.
+ * Program donasi yang ditawarkan di kios santri.
  */
 class DonasiProgram extends Model
 {

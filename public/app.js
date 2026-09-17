@@ -94,12 +94,13 @@ let cardHandler = null;   // handler tap khusus (modal, dsb.)
 const VIEWS = {
   superadmin: [
     ['dashboard', 'Dashboard'],
-    { grup: 'Saldo & Top Up', anak: [['saldo', 'Saldo Siswa'], ['massal', 'Topup Massal'],
+    { grup: 'Saldo & Top Up', anak: [['saldo', 'Saldo Santri'], ['massal', 'Topup Massal'],
                                      ['topup', 'Topup Ortu']] },
-    { grup: 'Pemegang Kartu', anak: [['siswa', 'Siswa'], ['sdm', 'SDM & Personil']] },
+    { grup: 'Pemegang Kartu', anak: [['santri', 'Santri'], ['sdm', 'SDM & Personil']] },
     { grup: 'Kantin', anak: [['tenant', 'Tenant'], ['menu-ajuan', 'Menu Tenant'],
                              ['donasi', 'Donasi']] },
     { grup: 'Laporan', anak: [['analitik', 'Analitik'], ['riwayat', 'Riwayat']] },
+    ['akun', 'Kelola Akun'],
   ],
   tenant: [
     ['kasir', 'Kasir'], ['menu', 'Menu'], ['dashboard', 'Dashboard'],
@@ -107,8 +108,49 @@ const VIEWS = {
   ],
 };
 
+/**
+ * Fitur minimal untuk BOLEH MEMBUKA tiap tab — cukup salah satu dimiliki.
+ *
+ * Ini semata supaya menu yang tidak berhak tidak usah digambar. Pagar yang
+ * sebenarnya ada di server (middleware `izin:`): daftar di bawah hidup di
+ * peramban, jadi siapa pun bisa mengubahnya, dan menyembunyikan tombol tidak
+ * pernah menjadi pengamanan.
+ */
+const IZIN_TAB = {
+  dashboard: ['dashboard.lihat', 'neraca.lihat', 'settings.lihat'],
+  saldo: ['saldo.lihat'],
+  massal: ['massal.lihat'],
+  topup: ['topup_ortu.lihat'],
+  santri: ['santri.lihat'],
+  sdm: ['sdm.lihat'],
+  tenant: ['tenant.lihat'],
+  'menu-ajuan': ['ajuan.lihat'],
+  donasi: ['donasi.lihat'],
+  analitik: ['analitik.lihat'],
+  riwayat: ['riwayat.lihat'],
+  akun: ['akun.lihat', 'akses.kelola'],
+};
+
+/** Apakah akun yang sedang masuk memegang fitur ini? */
+const boleh = (kode) => !!USER?.izin?.includes(kode);
+
+/** Apakah tab ini boleh digambar? Tab tanpa aturan (milik kasir) selalu boleh. */
+const bolehTab = (id) => !IZIN_TAB[id] || IZIN_TAB[id].some(boleh);
+
+/**
+ * Menu bar setelah disaring izin. Grup yang seluruh anaknya tertutup ikut
+ * hilang — induk kosong yang tetap tergambar hanya akan terbuka ke ruang hampa.
+ */
+function tabTampil(role) {
+  return (VIEWS[role] || []).map((t) => {
+    if (!t.grup) return bolehTab(t[0]) ? t : null;
+    const anak = t.anak.filter(([id]) => bolehTab(id));
+    return anak.length ? { grup: t.grup, anak } : null;
+  }).filter(Boolean);
+}
+
 /** Semua tab sebagai daftar rata, tanpa peduli ia di dalam grup atau tidak. */
-const tabDatar = (role) => VIEWS[role].flatMap((t) => (t.grup ? t.anak : [t]));
+const tabDatar = (role) => tabTampil(role).flatMap((t) => (t.grup ? t.anak : [t]));
 
 /**
  * Tandai tab yang sedang terbuka — termasuk menyalakan induknya supaya, saat
@@ -144,6 +186,9 @@ function showLogin() {
 function tabDariHash() {
   const h = (location.hash || '').replace(/^#/, '');
   const tabs = tabDatar(USER.role);
+  // Kategori akses bisa saja tidak menyisakan satu tab pun. Lebih baik layar
+  // kosong yang menjelaskan diri daripada galat yang tidak terbaca siapa pun.
+  if (!tabs.length) return '';
   return tabs.some(([id]) => id === h) ? h : tabs[0][0];
 }
 
@@ -159,9 +204,11 @@ function showApp() {
   $('#login').classList.add('hidden');
   $('#app').classList.remove('hidden');
   $('#hd-title').textContent = USER.role === 'tenant' ? `Kantin Imbos — ${USER.tenant_nama}` : 'Kantin Imbos';
-  $('#hd-user').textContent = `${USER.nama} (${USER.role})`;
+  $('#hd-user').textContent = USER.role === 'tenant'
+    ? `${USER.nama} (kasir)`
+    : `${USER.nama} · ${USER.kategori_nama || 'Akses Penuh'}`;
   const awal = tabDariHash();
-  gambarNav(VIEWS[USER.role], awal);
+  gambarNav(tabTampil(USER.role), awal);
   location.hash = awal;
   renderView(awal);
 }
@@ -187,6 +234,7 @@ function gambarNav(tabs, aktif) {
     b.onclick = () => {
       tandaiAktif(b.dataset.v);
       tutupSemuaGrup();
+      tutupMenuPonsel();
       location.hash = b.dataset.v;      // hashchange di bawah berhenti sendiri (sudah sama)
       renderView(b.dataset.v);
     };
@@ -207,6 +255,27 @@ function gambarNav(tabs, aktif) {
   });
 }
 
+/**
+ * Menu ponsel di balik tombol ☰.
+ *
+ * Kelas `.buka` hanya berpengaruh di bawah 760px (lihat style.css); di layar
+ * lebar menu bar selalu tergambar, jadi tombolnya tersembunyi dan kelas ini
+ * tidak mengubah apa pun. Menutup menu setiap kali tab dipilih penting: tanpa
+ * itu, daftar tegak tetap menutupi isi halaman yang baru saja dibuka.
+ */
+function tutupMenuPonsel() {
+  $('#nav')?.classList.remove('buka');
+  $('#btn-menu')?.setAttribute('aria-expanded', 'false');
+}
+
+$('#btn-menu').onclick = (e) => {
+  e.stopPropagation();
+  const nav = $('#nav');
+  const buka = !nav.classList.contains('buka');
+  nav.classList.toggle('buka', buka);
+  $('#btn-menu').setAttribute('aria-expanded', String(buka));
+};
+
 function tutupSemuaGrup() {
   document.querySelectorAll('#nav .nav-grup.buka').forEach((g) => {
     g.classList.remove('buka');
@@ -215,8 +284,15 @@ function tutupSemuaGrup() {
 }
 // Ketuk di luar menu menutup submenu yang terbuka lewat klik; Esc juga, supaya
 // papan ketik tidak terjebak di menu yang menggantung.
-addEventListener('click', tutupSemuaGrup);
-addEventListener('keydown', (e) => { if (e.key === 'Escape') tutupSemuaGrup(); });
+addEventListener('click', (e) => {
+  tutupSemuaGrup();
+  // Ketukan DI DALAM menu tidak menutupnya — kalau tidak, menu tertutup
+  // sebelum jari sempat mencapai tombol tab yang dituju.
+  if (!e.target.closest('#nav')) tutupMenuPonsel();
+});
+addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') { tutupSemuaGrup(); tutupMenuPonsel(); }
+});
 
 addEventListener('hashchange', () => {
   if (!USER) return;
@@ -230,12 +306,19 @@ addEventListener('hashchange', () => {
 function renderView(name) {
   activeView = name;
   cardHandler = null;
+  if (!name) {
+    $('#main').innerHTML = `<div class="panel"><h2>Belum ada menu yang terbuka</h2>
+      <p class="muted">Kategori akses <b>${esc(USER?.kategori_nama || '—')}</b> belum diberi satu pun
+        hak membuka menu. Mintalah pemegang akun dengan hak <b>Mengelola kategori akses</b>
+        untuk menyalakan fiturnya.</p></div>`;
+    return;
+  }
   const render = {
     kasir: kasirView, menu: menuView, riwayat: riwayatView,
     dashboard: USER?.role === 'tenant' ? dashTenantView : dashSAView,
-    saldo: saldoView, siswa: siswaView, tenant: tenantView, analitik: analitikView,
+    saldo: saldoView, santri: siswaView, tenant: tenantView, analitik: analitikView,
     donasi: donasiView, topup: topupOrtuView, 'menu-ajuan': menuAjuanView, sdm: sdmView,
-    massal: massalView,
+    massal: massalView, akun: akunView,
   }[name];
   if (render) render($('#main'));
 }
@@ -253,6 +336,7 @@ async function doLogin() {
 $('#btn-logout').onclick = async () => {
   await api('/api/logout', { method: 'POST' }).catch(() => {});
   history.replaceState(null, '', location.pathname);   // buang hash tab
+  tutupMenuPonsel();
   showLogin();
 };
 
@@ -296,7 +380,7 @@ function kasirView(el) {
   el.innerHTML = `
   <div class="row">
     <div class="panel">
-      <h2>Kartu Siswa</h2>
+      <h2>Kartu Santri</h2>
       <div class="tapzone" id="tapzone">
         <div class="big">💳</div>
         Tempelkan kartu untuk memulai transaksi<br>
@@ -400,7 +484,7 @@ function renderKasirSiswa(pesan) {
       <div class="saldo"><span class="muted">Saldo</span><br><b class="rp">${rp(s.saldo)}</b>
         ${s.saldo_titipan > 0
           // Titipan tidak bisa dibelanjakan, tapi kasir perlu tahu uangnya ada:
-          // siswa bersaldo tipis bisa diarahkan ke admin, bukan disuruh pulang.
+          // santri bersaldo tipis bisa diarahkan ke admin, bukan disuruh pulang.
           ? `<br><span class="muted" style="font-size:11px">titipan ${rp(s.saldo_titipan)}</span>` : ''}
       </div>
     </div>
@@ -600,7 +684,7 @@ function menuAjuanView(el) {
     <h2>Pengajuan Menu Tenant</h2>
     <p class="muted">Tenant mengusulkan menu baru, perubahan nama/harga, dan penghapusan menu.
       Daftar menu di kasir <b>tidak berubah</b> sampai Anda menyetujui — selama menunggu,
-      siswa tetap membayar dengan harga lama. Menandai menu habis/tersedia adalah keputusan
+      santri tetap membayar dengan harga lama. Menandai menu habis/tersedia adalah keputusan
       harian tenant dan tidak lewat sini.</p>
     <div class="quick" id="aju-filter">
       ${['menunggu', 'disetujui', 'ditolak', 'batal'].map((s) =>
@@ -619,7 +703,7 @@ function menuAjuanView(el) {
     </div>
     <p class="muted">Hanya tenant <b>koperasi</b> yang muncul di sini. Barang bertanda
       <b>non-makanan</b> memakai jatah belanja harian tersendiri (diatur di Dashboard) dan tidak
-      memotong jatah makan siswa. Kategori adalah keputusan sekolah — tenant tidak bisa
+      memotong jatah makan santri. Kategori adalah keputusan sekolah — tenant tidak bisa
       mengubahnya sendiri, termasuk lewat pengajuan menu.</p>
     <div id="kat-tenant"><p class="muted">memuat…</p></div>
   </div>`;
@@ -737,7 +821,7 @@ async function loadAjuanSA() {
       <h2>Tolak pengajuan?</h2>
       <p><b>${esc(a.tenant_nama)}</b> — ${esc(AJU_JENIS[a.jenis])}<br>${ajuanRingkas(a)}</p>
       <div class="field"><label>Alasan penolakan (wajib — dibaca tenant)</label>
-        <input id="aj-catatan" placeholder="mis. harga terlalu tinggi untuk siswa"></div>`,
+        <input id="aj-catatan" placeholder="mis. harga terlalu tinggi untuk santri"></div>`,
       async () => {
         await api(`/api/produk/ajuan/${a.id}/tolak`, { method: 'POST', body: { catatan: $('#aj-catatan').value } });
         toast('Pengajuan ditolak', 'ok');
@@ -779,7 +863,7 @@ function riwayatView(el) {
     </div>
     <p class="muted" id="rw-summary"></p>
     <div class="tblwrap"><table>
-      <thead><tr><th>Waktu</th><th>Siswa</th><th>Kelas</th><th>Tipe</th><th>Tenant</th>
+      <thead><tr><th>Waktu</th><th>Santri</th><th>Kelas</th><th>Tipe</th><th>Tenant</th>
       <th class="num">Jumlah</th><th class="num">Saldo Akhir</th><th>Operator</th><th>Keterangan</th></tr></thead>
       <tbody id="rw-body"></tbody>
     </table></div>
@@ -928,8 +1012,8 @@ async function dashSAView(el) {
     <div class="cards">
       <div class="statcard"><span class="muted">Belanja hari ini</span><br><b class="rp">${rp(d.belanja_hari_ini)}</b></div>
       <div class="statcard"><span class="muted">Top up hari ini</span><br><b class="rp">${rp(d.topup_hari_ini)}</b></div>
-      <div class="statcard"><span class="muted">Total saldo siswa (kewajiban)</span><br><b class="rp">${rp(d.total_saldo_siswa)}</b></div>
-      <div class="statcard"><span class="muted">Jumlah siswa</span><br><b>${d.jumlah_siswa.toLocaleString('id-ID')}</b></div>
+      <div class="statcard"><span class="muted">Total saldo santri (kewajiban)</span><br><b class="rp">${rp(d.total_saldo_siswa)}</b></div>
+      <div class="statcard"><span class="muted">Jumlah santri</span><br><b>${d.jumlah_siswa.toLocaleString('id-ID')}</b></div>
     </div>
     <div class="panel">
       <h2>Penghasilan & Tagihan Tenant</h2>
@@ -971,7 +1055,7 @@ async function dashSAView(el) {
       <h2>💰 Saldo Titipan & Smart Top Up</h2>
       <p class="muted">Kelebihan setoran orang tua yang tidak tertampung kartu disimpan sebagai
         <b>saldo titipan</b> — tidak bisa dibelanjakan, dan otomatis mengisi kartu begitu saldo
-        siswa turun sampai ambang. Setelan per siswa ada di menu <b>Saldo Siswa</b>.</p>
+        santri turun sampai ambang. Setelan per santri ada di menu <b>Saldo Santri</b>.</p>
       ${gridPengaturan(cfg.labels_titipan, cfg.settings)}
       <button class="savebtn" data-simpan="titipan">Simpan Pengaturan Titipan</button>
     </div>
@@ -986,7 +1070,7 @@ async function dashSAView(el) {
     </div>
     <div class="panel">
       <h2>🤝 Transfer Saldo Antar Teman</h2>
-      <p class="muted">Siswa mengirim sebagian saldonya lewat layar <b>Kios</b> dengan menyebut
+      <p class="muted">Santri mengirim sebagian saldonya lewat layar <b>Kios</b> dengan menyebut
         <b>NIS</b> temannya — tanpa uang tunai berpindah tangan. Batas di bawah ini sengaja jauh
         lebih ketat daripada batas belanja: fitur ini memindahkan uang tanpa ada barang yang
         diterima, jadi ia juga jalur yang paling mudah dipakai memeras uang jajan. Batas
@@ -1079,7 +1163,7 @@ function neracaPanel(n) {
       <h2 style="margin:0">🧮 Neraca Kas — Uang Masuk vs Kewajiban</h2>
       <button class="linkbtn" id="nr-muat">muat ulang</button>
     </div>
-    <p class="muted">Setiap rupiah yang masuk hanya bisa berada di empat tempat: saldo kartu siswa,
+    <p class="muted">Setiap rupiah yang masuk hanya bisa berada di empat tempat: saldo kartu santri,
       saldo titipan, hutang ke tenant, atau donasi terkumpul — sisanya sudah keluar sebagai setoran
       tenant, penarikan, atau potongan. Karena itu kedua kolom di bawah <b>wajib</b> bertemu di angka
       yang sama. Semua angka dihitung ulang dari buku besar setiap panel ini dibuka.</p>
@@ -1104,8 +1188,8 @@ function neracaPanel(n) {
       </div>
       <div class="nr-kolom">
         <h3>Kewajiban — uang yang bukan milik sekolah</h3>
-        ${nrBaris('Saldo di kartu siswa', k.saldo_kartu)}
-        ${nrBaris('Saldo cadangan siswa (titipan)', k.saldo_titipan,
+        ${nrBaris('Saldo di kartu santri', k.saldo_kartu)}
+        ${nrBaris('Saldo cadangan santri (titipan)', k.saldo_titipan,
           { catatan: 'sudah diterima, belum masuk kartu karena batas saldo' })}
         ${nrBaris('Hutang belum disetor ke tenant', k.hutang_tenant,
           { catatan: `penjualan tenant ${rp(n.penjualan_tenant)} − sudah disetor ${rp(n.keluar.tenant)}` })}
@@ -1132,7 +1216,7 @@ function neracaPanel(n) {
     ${belumDitetapkan ? `
       <div class="nr-saran">
         <p><b>Sistem ini dipasang di atas data yang sudah ada.</b> Ada <b class="rp">${rp(n.awal.terukur)}</b>
-          saldo siswa yang tidak punya catatan mutasi — hampir pasti data dummy/seed atau saldo
+          saldo santri yang tidak punya catatan mutasi — hampir pasti data dummy/seed atau saldo
           bawaan dari sistem sebelumnya. Selama ini belum diakui sebagai <i>saldo awal</i>, neraca
           akan selalu tampak tidak seimbang sebesar angka itu dan penyimpangan baru jadi sulit terlihat.</p>
         <button class="go" id="nr-tetapkan">Tetapkan ${rp(n.awal.terukur)} sebagai saldo awal</button>
@@ -1155,7 +1239,7 @@ function neracaPanel(n) {
           <span class="nr-cek-ikon">${p.ok ? '✔' : '⚠️'}</span>
           <div><b>${esc(p.label)}</b>
             ${p.ok ? '' : `<br><span class="nr-catatan">${esc(p.catatan ||
-              (p.jumlah_siswa !== undefined ? `${p.jumlah_siswa} siswa, selisih ${rp(p.nilai)}`
+              (p.jumlah_siswa !== undefined ? `${p.jumlah_siswa} santri, selisih ${rp(p.nilai)}`
                 : `nilai: ${typeof p.nilai === 'number' && Math.abs(p.nilai) > 1000 ? rp(p.nilai) : p.nilai}`))}</span>`}
           </div>
         </div>`).join('')}
@@ -1169,7 +1253,7 @@ function bindNeraca(n) {
   const tetap = $('#nr-tetapkan');
   if (tetap) tetap.onclick = () => openModal(`
     <h2>Tetapkan saldo awal?</h2>
-    <p>Saldo siswa sebesar <b class="rp">${rp(n.awal.terukur)}</b> yang tidak punya catatan mutasi
+    <p>Saldo santri sebesar <b class="rp">${rp(n.awal.terukur)}</b> yang tidak punya catatan mutasi
       akan diakui sebagai <b>saldo awal</b> sistem.</p>
     <p class="muted">Gunanya: neraca kembali seimbang, sehingga selisih yang muncul <b>setelah ini</b>
       benar-benar berarti ada yang salah. Angkanya dihitung server dari buku besar — tidak bisa
@@ -1474,14 +1558,14 @@ async function loadAnalitik() {
       ${d.scoped_tenant ? '' : `<div class="statcard"><span class="muted">Total top up</span><br><b>${rp(r.topup)}</b></div>`}
       <div class="statcard"><span class="muted">Jumlah transaksi</span><br><b>${r.n_beli.toLocaleString('id-ID')}</b></div>
       <div class="statcard"><span class="muted">Rata-rata / transaksi</span><br><b>${rp(r.rata2)}</b></div>
-      <div class="statcard"><span class="muted">Siswa bertransaksi</span><br><b>${r.siswa_unik.toLocaleString('id-ID')}</b></div>
+      <div class="statcard"><span class="muted">Santri bertransaksi</span><br><b>${r.siswa_unik.toLocaleString('id-ID')}</b></div>
       <div class="statcard"><span class="muted">Periode tertinggi</span><br><b>${r.hari_puncak ? esc(labelPeriode(r.hari_puncak)) : '—'}</b>
         ${r.hari_puncak ? `<br><span class="muted">${rp(r.belanja_puncak)}</span>` : ''}</div>
     </div>
 
     <div class="panel">
       <h2>Tren nilai transaksi</h2>
-      <p class="muted">Rupiah per periode${d.scoped_tenant ? '' : ' — belanja siswa dibanding top up dari admin'}.</p>
+      <p class="muted">Rupiah per periode${d.scoped_tenant ? '' : ' — belanja santri dibanding top up dari admin'}.</p>
       <div id="ch-nilai"></div>
     </div>
 
@@ -1517,9 +1601,9 @@ async function loadAnalitik() {
         <div id="ch-kelas"></div>
       </div>
       <div class="panel">
-        <h2>Siswa belanja terbanyak</h2>
+        <h2>Santri belanja terbanyak</h2>
         <div class="tblwrap"><table>
-          <thead><tr><th>Siswa</th><th>Kelas</th><th class="num">Transaksi</th><th class="num">Total</th></tr></thead>
+          <thead><tr><th>Santri</th><th>Kelas</th><th class="num">Transaksi</th><th class="num">Total</th></tr></thead>
           <tbody>${d.top_siswa.map((s) => `<tr><td>${esc(s.siswa_nama)}</td><td>${esc(s.kelas)}</td>
             <td class="num">${s.n}</td><td class="num rp">${rp(s.total)}</td></tr>`).join('') ||
             '<tr><td colspan="4" class="muted">Tidak ada data</td></tr>'}</tbody>
@@ -1534,7 +1618,7 @@ async function loadAnalitik() {
       <p class="muted">Angka di balik grafik di atas — bisa disalin ke Excel, atau gunakan menu Riwayat untuk unduhan lengkap.</p>
       <div class="tblwrap"><table>
         <thead><tr><th>Periode</th><th class="num">Belanja</th>${d.scoped_tenant ? '' : '<th class="num">Top up</th>'}
-        <th class="num">Jumlah transaksi</th><th class="num">Siswa aktif</th></tr></thead>
+        <th class="num">Jumlah transaksi</th><th class="num">Santri aktif</th></tr></thead>
         <tbody>${d.series.map((s) => `<tr><td>${esc(tipLabel(s.periode))}</td>
           <td class="num rp">${rp(s.belanja)}</td>${d.scoped_tenant ? '' : `<td class="num rp">${rp(s.topup)}</td>`}
           <td class="num">${s.n_beli.toLocaleString('id-ID')}</td>
@@ -1553,7 +1637,7 @@ async function loadAnalitik() {
     data: dataX,
     series: d.scoped_tenant
       ? [{ nama: 'Belanja', warna: VIZ.s1, nilai: d.series.map((s) => s.belanja) }]
-      : [{ nama: 'Belanja siswa', warna: VIZ.s1, nilai: d.series.map((s) => s.belanja) },
+      : [{ nama: 'Belanja santri', warna: VIZ.s1, nilai: d.series.map((s) => s.belanja) },
          { nama: 'Top up', warna: VIZ.s2, nilai: d.series.map((s) => s.topup) }],
     tinggi: 280,
   });
@@ -1561,7 +1645,7 @@ async function loadAnalitik() {
   vizBar($('#ch-frek'), {
     data: d.series.map((s, i) => ({
       label: dataX[i].label, tooltipLabel: dataX[i].tooltipLabel, nilai: s.n_beli,
-      tooltipExtra: `${s.siswa_aktif.toLocaleString('id-ID')} siswa aktif · ${rp(s.belanja)}`,
+      tooltipExtra: `${s.siswa_aktif.toLocaleString('id-ID')} santri aktif · ${rp(s.belanja)}`,
     })),
     namaDeret: 'Transaksi', warna: VIZ.s1, tinggi: 220,
   });
@@ -1584,24 +1668,24 @@ async function loadAnalitik() {
 
   vizHBar($('#ch-kelas'), {
     data: d.per_kelas.map((k) => ({ label: k.kelas || '—', nilai: k.total,
-      sub: `${k.n.toLocaleString('id-ID')} transaksi · ${k.siswa} siswa` })),
+      sub: `${k.n.toLocaleString('id-ID')} transaksi · ${k.siswa} santri` })),
     warna: VIZ.s1,
   });
 }
 
 // ╔══════════════════════════════════════════════════════════╗
-// ║ SUPERADMIN: SALDO SISWA — top up & potong tanpa tap kartu ║
+// ║ SUPERADMIN: SALDO SANTRI — top up & potong tanpa tap kartu ║
 // ╚══════════════════════════════════════════════════════════╝
-// Siswa dipilih lewat pencarian (nama/NIS/kelas/UID), jadi admin tidak perlu
+// Santri dipilih lewat pencarian (nama/NIS/kelas/UID), jadi admin tidak perlu
 // memegang kartu maupun reader. Tap kartu tetap jalan sebagai jalan pintas.
 const PRESET_TOPUP = [10000, 20000, 50000, 100000];
 const PRESET_POTONG = [5000, 10000, 20000, 50000];
 // Kategori alasan potongan kini datang dari server (bisa disunting admin lewat
-// tombol "kelola" di menu Saldo Siswa), bukan lagi daftar tetap di kode.
+// tombol "kelola" di menu Saldo Santri), bukan lagi daftar tetap di kode.
 let ALASAN_POTONG = [];
 
 let saldo = { siswa: null, mode: 'topup', nominal: null, batch: [], pilih: new Set() };
-let saldoPreselect = null;     // siswa yang dioper dari tab Siswa
+let saldoPreselect = null;     // santri yang dioper dari tab Santri
 
 function saldoView(el) {
   saldo = { siswa: saldoPreselect, mode: 'topup', nominal: null, batch: [], pilih: new Set() };
@@ -1609,7 +1693,7 @@ function saldoView(el) {
   el.innerHTML = `
   <div class="row">
     <div class="panel">
-      <h2 id="sd-target-title">1 · Pilih Siswa</h2>
+      <h2 id="sd-target-title">1 · Pilih Santri</h2>
       <div id="sd-target"></div>
     </div>
     <div class="panel">
@@ -1622,15 +1706,15 @@ function saldoView(el) {
       <div class="field"><label id="sd-jumlah-label">Nominal</label>
         <div class="quick" id="sd-quick"></div>
         ${inputUang({ id: 'sd-jumlah', placeholder: 'Nominal lain (Rp)' })}</div>
-      <div class="field hidden" id="sd-kurang-field"><label>Kalau saldo siswa kurang</label>
+      <div class="field hidden" id="sd-kurang-field"><label>Kalau saldo santri kurang</label>
         <select id="sd-kurang">
-          <option value="lewati">Lewati siswa itu (saldo tidak berubah)</option>
+          <option value="lewati">Lewati santri itu (saldo tidak berubah)</option>
           <option value="sebisanya">Potong sebisanya sampai saldo 0</option>
         </select></div>
       <div class="field hidden" id="sd-titipan-field">
         <label><input type="checkbox" id="sd-ke-titipan" style="width:auto"> Simpan kelebihan sebagai saldo titipan</label>
         <span class="hint-lembut">Kartu diisi sebanyak yang tertampung; sisanya menunggu di
-          titipan dan otomatis masuk kartu saat saldo siswa menipis.</span>
+          titipan dan otomatis masuk kartu saat saldo santri menipis.</span>
       </div>
       <div class="field"><label id="sd-ket-label">Keterangan</label>
         <div class="hidden" id="sd-kategori-wrap">
@@ -1656,7 +1740,7 @@ function saldoView(el) {
     <p class="muted">Top up dan pemotongan oleh admin, lengkap dengan operator dan alasannya.
       Riwayat penuh beserta ekspornya ada di menu Riwayat (filter tipe “penyesuaian admin”).</p>
     <div class="tblwrap"><table>
-      <thead><tr><th>Waktu</th><th>Siswa</th><th>Kelas</th><th>Tipe</th>
+      <thead><tr><th>Waktu</th><th>Santri</th><th>Kelas</th><th>Tipe</th>
       <th class="num">Jumlah</th><th class="num">Saldo Akhir</th><th>Oleh</th><th>Keterangan</th></tr></thead>
       <tbody id="sd-log"><tr><td colspan="8" class="muted">memuat…</td></tr></tbody>
     </table></div>
@@ -1801,11 +1885,11 @@ function sdRenderQuick() {
   const q = $('#sd-quick');
   q.innerHTML = list.map((n) => `<button data-n="${n}" class="rp">${rp(n)}</button>`).join('')
     + (sdPotong() ? '<button data-n="semua">Semua saldo</button>' : '');
-  $('#sd-jumlah-label').textContent = sdKolektif() ? 'Nominal per siswa' : 'Nominal';
+  $('#sd-jumlah-label').textContent = sdKolektif() ? 'Nominal per santri' : 'Nominal';
   q.querySelectorAll('button').forEach((b) => {
     b.onclick = () => {
       if (b.dataset.n === 'semua') {
-        if (!saldo.siswa) { toast('Pilih siswa dulu', 'err'); return; }
+        if (!saldo.siswa) { toast('Pilih santri dulu', 'err'); return; }
         saldo.nominal = saldo.siswa.saldo;
       } else {
         saldo.nominal = Number(b.dataset.n);
@@ -1818,14 +1902,14 @@ function sdRenderQuick() {
   });
 }
 
-// Panel kiri berganti isi mengikuti mode: satu siswa (cari/tap) atau satu kelas.
+// Panel kiri berganti isi mengikuti mode: satu santri (cari/tap) atau satu kelas.
 function sdRenderTarget() {
   const t = $('#sd-target');
-  $('#sd-target-title').textContent = sdKolektif() ? '1 · Pilih Kelas' : '1 · Pilih Siswa';
+  $('#sd-target-title').textContent = sdKolektif() ? '1 · Pilih Kelas' : '1 · Pilih Santri';
   if (!sdKolektif()) {
     t.innerHTML = `
       <p class="muted">Cari langsung tanpa kartu — ketik nama, NIS, kelas, atau UID.
-        Kalau reader tersedia, tap kartu di halaman ini juga memilih siswa.</p>
+        Kalau reader tersedia, tap kartu di halaman ini juga memilih santri.</p>
       <div class="field"><input id="sd-cari" autocomplete="off"
         placeholder="mis. Andi · 2024001 · 7A · 04A1B2C3"></div>
       <div id="sd-hasil" class="reslist"></div>
@@ -1841,9 +1925,9 @@ function sdRenderTarget() {
     return;
   }
   t.innerHTML = `
-    <p class="muted">Pilih kelas — seluruh siswanya masuk daftar, lalu hilangkan centang
-      siswa yang dikecualikan. Beberapa kelas boleh digabung dalam satu pemotongan.
-      Siswa berstatus blokir tidak dicentang otomatis.</p>
+    <p class="muted">Pilih kelas — seluruh santrinya masuk daftar, lalu hilangkan centang
+      santri yang dikecualikan. Beberapa kelas boleh digabung dalam satu pemotongan.
+      Santri berstatus blokir tidak dicentang otomatis.</p>
     <div class="filterbar">
       <div class="field"><label>Kelas</label><select id="sd-kelas"><option value="">memuat…</option></select></div>
       <button class="go" id="sd-tambah">+ Tambahkan kelas</button>
@@ -1871,11 +1955,11 @@ async function sdTambahKelas() {
   try {
     const d = await api('/api/siswa?limit=500&kelas=' + encodeURIComponent(kelas));
     const adaId = new Set(saldo.batch.map((s) => s.id));
-    // hanya siswa yang benar-benar di kelas itu (parameter kelas dicocokkan persis di server)
+    // hanya santri yang benar-benar di kelas itu (parameter kelas dicocokkan persis di server)
     const baru = d.siswa.filter((s) => !adaId.has(s.id));
     saldo.batch = saldo.batch.concat(baru);
     for (const s of baru) if (s.status === 'aktif') saldo.pilih.add(s.id);
-    toast(baru.length ? `${baru.length} siswa kelas ${kelas} ditambahkan` : `Kelas ${kelas} sudah ada di daftar`,
+    toast(baru.length ? `${baru.length} santri kelas ${kelas} ditambahkan` : `Kelas ${kelas} sudah ada di daftar`,
       baru.length ? 'ok' : '');
     sdRenderBatch();
     sdSync();
@@ -1883,7 +1967,7 @@ async function sdTambahKelas() {
   btn.disabled = false;
 }
 
-// Berapa yang benar-benar terpotong dari satu siswa dengan nominal & mode saat ini.
+// Berapa yang benar-benar terpotong dari satu santri dengan nominal & mode saat ini.
 function sdPotongEfektif(s) {
   const n = saldo.nominal || 0;
   if (!n) return 0;
@@ -1917,7 +2001,7 @@ function sdRenderBatch() {
     <div class="batchbar">
       <label><input type="checkbox" id="sd-all" style="width:auto"
         ${dipilih.length === saldo.batch.length ? 'checked' : ''}> pilih semua</label>
-      <span class="muted">${dipilih.length} dari ${saldo.batch.length} siswa dicentang</span>
+      <span class="muted">${dipilih.length} dari ${saldo.batch.length} santri dicentang</span>
     </div>
     <div class="tblwrap batchlist"><table>
       <thead><tr><th></th><th>Nama</th><th>Kelas</th><th class="num">Saldo</th><th class="num">Dipotong</th></tr></thead>
@@ -1945,7 +2029,7 @@ async function sdCari() {
   let d;
   try { d = await api('/api/siswa?limit=8&cari=' + encodeURIComponent(q)); }
   catch (e) { box.innerHTML = `<p class="muted">${esc(e.message)}</p>`; return; }
-  if (!d.siswa.length) { box.innerHTML = '<p class="muted">Tidak ada siswa cocok</p>'; return; }
+  if (!d.siswa.length) { box.innerHTML = '<p class="muted">Tidak ada santri cocok</p>'; return; }
   box.innerHTML = d.siswa.map((s) => `
     <button data-id="${s.id}">
       ${avatarHtml(s, true)}
@@ -1967,7 +2051,7 @@ async function sdCari() {
 async function saldoLookup(uid) {
   try {
     const d = await api('/api/card-lookup', { method: 'POST', body: { uid } });
-    if (!d.siswa) { toast('Kartu belum terdaftar — daftarkan di tab Siswa', 'err'); return; }
+    if (!d.siswa) { toast('Kartu belum terdaftar — daftarkan di tab Santri', 'err'); return; }
     if (sdKolektif()) {                      // tap kartu = tambahkan ke daftar batch
       if (!saldo.batch.some((s) => s.id === d.siswa.id)) saldo.batch.push(d.siswa);
       saldo.pilih.add(d.siswa.id);
@@ -1989,7 +2073,7 @@ function renderSaldoSiswa() {
       <div><b>${esc(s.nama)}</b><br><span class="muted">${esc(s.kelas)} · NIS ${esc(s.nis)}</span><br>
       <span class="badge ${s.status}">${s.status.toUpperCase()}</span></div>
       <div class="saldo"><span class="muted">Saldo</span><br><b class="rp">${rp(s.saldo)}</b><br>
-        <button class="linkbtn" id="sd-ganti">ganti siswa</button></div>
+        <button class="linkbtn" id="sd-ganti">ganti santri</button></div>
     </div>`;
   $('#sd-ganti').onclick = () => {
     saldo.siswa = null;
@@ -2002,7 +2086,7 @@ function renderSaldoSiswa() {
 }
 
 // ------------------------------------------------- panel saldo titipan
-// Titipan adalah uang siswa yang dipegang sekolah tetapi belum ada di kartu.
+// Titipan adalah uang santri yang dipegang sekolah tetapi belum ada di kartu.
 // Panel ini satu-satunya tempat admin memindahkannya, dan tiap tombolnya
 // berpasangan dengan satu jalur di server yang mencatat mutasinya.
 const TITIPAN_JENIS = {
@@ -2021,7 +2105,7 @@ async function muatPanelTitipan() {
   let d;
   try { d = await api(`/api/siswa/${s.id}/titipan`); }
   catch (e) { panel.innerHTML = `<p class="muted">Gagal memuat titipan: ${esc(e.message)}</p>`; return; }
-  // Siswa bisa saja sudah diganti selagi permintaan berjalan.
+  // Santri bisa saja sudah diganti selagi permintaan berjalan.
   if (!saldo.siswa || saldo.siswa.id !== d.siswa.id) return;
 
   const t = d.siswa;
@@ -2055,12 +2139,12 @@ async function muatPanelTitipan() {
         <td class="num ${m.jumlah < 0 ? 'minus' : 'plus'}">${m.jumlah < 0 ? '−' : '+'}${rp(Math.abs(m.jumlah))}</td>
         <td class="num rp">${rp(m.titipan_sesudah)}</td>
         <td>${esc(m.operator)}</td><td class="muted">${esc(m.keterangan)}</td></tr>`).join('')
-        || '<tr><td colspan="6" class="muted">Belum ada mutasi titipan untuk siswa ini</td></tr>'}</tbody>
+        || '<tr><td colspan="6" class="muted">Belum ada mutasi titipan untuk santri ini</td></tr>'}</tbody>
     </table></div>`;
 
   const segarkan = async () => {
     // Saldo kartu bisa berubah oleh tindakan di panel ini (pencairan), jadi
-    // kartu siswa di panel atas ikut disegarkan.
+    // kartu santri di panel atas ikut disegarkan.
     const lagi = await api(`/api/siswa/${t.id}/titipan`);
     saldo.siswa = { ...saldo.siswa, saldo: lagi.siswa.saldo, saldo_titipan: lagi.siswa.saldo_titipan };
     renderSaldoSiswa();
@@ -2072,7 +2156,7 @@ async function muatPanelTitipan() {
   $('#tt-setor').onclick = () => openModal(`
     <h2>Setor ke titipan</h2>
     <p class="muted"><b>${esc(t.nama)}</b> · titipan sekarang ${rp(t.saldo_titipan)}.
-      Uang ini tercatat atas nama siswa tetapi <b>belum bisa dibelanjakan</b> —
+      Uang ini tercatat atas nama santri tetapi <b>belum bisa dibelanjakan</b> —
       smart top up yang akan memindahkannya ke kartu sedikit-sedikit.</p>
     <div class="field"><label>Nominal (Rp)</label>
       ${inputUang({ id: 'm-jumlah', placeholder: 'mis. 500.000' })}</div>
@@ -2107,7 +2191,7 @@ async function muatPanelTitipan() {
 
   $('#tt-tarik').onclick = () => openModal(`
     <h2>Tarik titipan</h2>
-    <p class="muted">Untuk uang yang benar-benar dikembalikan ke orang tua (mis. siswa keluar/lulus).
+    <p class="muted">Untuk uang yang benar-benar dikembalikan ke orang tua (mis. santri keluar/lulus).
       Titipan <b>${esc(t.nama)}</b> sekarang ${rp(t.saldo_titipan)}.</p>
     <div class="field"><label>Nominal (Rp)</label>
       ${inputUang({ id: 'm-jumlah', nilai: t.saldo_titipan })}</div>
@@ -2127,8 +2211,8 @@ async function muatPanelTitipan() {
       (${rp(b.ambang)} → ${rp(b.isi)}).</p>
     <div class="field"><label>Mode</label><select id="m-mode">
       <option value="ikut" ${t.smart_mode === 'ikut' ? 'selected' : ''}>ikut pengaturan sekolah</option>
-      <option value="aktif" ${t.smart_mode === 'aktif' ? 'selected' : ''}>selalu nyala untuk siswa ini</option>
-      <option value="mati" ${t.smart_mode === 'mati' ? 'selected' : ''}>matikan untuk siswa ini</option>
+      <option value="aktif" ${t.smart_mode === 'aktif' ? 'selected' : ''}>selalu nyala untuk santri ini</option>
+      <option value="mati" ${t.smart_mode === 'mati' ? 'selected' : ''}>matikan untuk santri ini</option>
     </select></div>
     <div class="field"><label>Isi ulang saat saldo turun sampai (Rp)</label>
       ${inputUang({ id: 'm-ambang', nilai: t.smart_ambang ?? '',
@@ -2158,13 +2242,13 @@ function sdSync() {
   $('#sd-ket').placeholder = potong
     ? (sdKolektif() ? 'mis. Iuran kegiatan kelas' : 'mis. Penarikan tunai saldo')
     : 'mis. Setoran orang tua';
-  // Pilihan titipan hanya masuk akal pada top up satu siswa.
+  // Pilihan titipan hanya masuk akal pada top up satu santri.
   $('#sd-titipan-field').classList.toggle('hidden', potong);
 
   if (sdKolektif()) return sdSyncKolektif(n, ket);
 
   let pesan = '', ok = false;
-  if (!s) pesan = 'Pilih siswa dulu di panel sebelah kiri.';
+  if (!s) pesan = 'Pilih santri dulu di panel sebelah kiri.';
   else if (!n || n <= 0) pesan = 'Isi nominal — pilih nominal cepat atau ketik sendiri.';
   else if (potong && n > s.saldo) pesan = `⚠️ Melebihi saldo ${esc(s.nama)} (${rp(s.saldo)}).`;
   else if (potong && ket.length < 3) pesan = 'Alasan pemotongan wajib diisi (minimal 3 huruf).';
@@ -2207,22 +2291,22 @@ function sdSyncKolektif(n, ket) {
   const kelas = [...new Set(r.dipilih.map((s) => s.kelas).filter(Boolean))];
   let pesan = '', ok = false;
   if (!saldo.batch.length) pesan = 'Tambahkan kelas dulu di panel sebelah kiri.';
-  else if (!r.dipilih.length) pesan = 'Belum ada siswa yang dicentang.';
-  else if (!n || n <= 0) pesan = 'Isi nominal yang dipotong dari tiap siswa.';
-  else if (r.total <= 0) pesan = '⚠️ Tidak ada saldo yang bisa dipotong — semua siswa terpilih saldonya kurang.';
+  else if (!r.dipilih.length) pesan = 'Belum ada santri yang dicentang.';
+  else if (!n || n <= 0) pesan = 'Isi nominal yang dipotong dari tiap santri.';
+  else if (r.total <= 0) pesan = '⚠️ Tidak ada saldo yang bisa dipotong — semua santri terpilih saldonya kurang.';
   else if (ket.length < 3) pesan = 'Alasan pemotongan wajib diisi (minimal 3 huruf).';
   else {
     ok = true;
-    pesan = `<b>${r.dipilih.length} siswa</b>${kelas.length ? ' · kelas ' + esc(kelas.join(', ')) : ''}<br>
-      ${rp(n)} × ${r.kena.length + r.sebagian.length} siswa →
+    pesan = `<b>${r.dipilih.length} santri</b>${kelas.length ? ' · kelas ' + esc(kelas.join(', ')) : ''}<br>
+      ${rp(n)} × ${r.kena.length + r.sebagian.length} santri →
       total <b class="minus">−${rp(r.total)}</b>` +
-      (r.sebagian.length ? `<br><span class="muted">${r.sebagian.length} siswa dipotong sebagian (saldo habis)</span>` : '') +
-      (r.lewat.length ? `<br><span class="muted">${r.lewat.length} siswa dilewati karena saldonya kurang</span>` : '');
+      (r.sebagian.length ? `<br><span class="muted">${r.sebagian.length} santri dipotong sebagian (saldo habis)</span>` : '') +
+      (r.lewat.length ? `<br><span class="muted">${r.lewat.length} santri dilewati karena saldonya kurang</span>` : '');
   }
   $('#sd-preview').innerHTML = pesan;
   $('#sd-preview').className = 'preview' + (ok ? ' ok' : '');
   const btn = $('#btn-saldo');
-  btn.textContent = ok ? `Potong ${r.kena.length + r.sebagian.length} Siswa · ${rp(r.total)}` : 'Potong Kolektif';
+  btn.textContent = ok ? `Potong ${r.kena.length + r.sebagian.length} Santri · ${rp(r.total)}` : 'Potong Kolektif';
   btn.classList.add('danger');
   btn.disabled = !ok;
 }
@@ -2281,13 +2365,13 @@ function doSaldoKolektif() {
   const alasan = $('#sd-ket').value.trim();
   const sebisanya = $('#sd-kurang').value === 'sebisanya';
   openModal(`
-    <h2>Potong saldo ${r.kena.length + r.sebagian.length} siswa?</h2>
-    <p>${rp(n)} per siswa${kelas.length ? ` · kelas <b>${esc(kelas.join(', '))}</b>` : ''} —
-       total <b class="minus">${rp(r.total)}</b> ditarik dari saldo siswa.</p>
-    ${r.sebagian.length ? `<p class="muted">${r.sebagian.length} siswa saldonya kurang dan dipotong sebagian (sampai saldo 0).</p>` : ''}
-    ${r.lewat.length ? `<p class="muted">${r.lewat.length} siswa dilewati karena saldonya kurang — saldonya tidak berubah.</p>` : ''}
+    <h2>Potong saldo ${r.kena.length + r.sebagian.length} santri?</h2>
+    <p>${rp(n)} per santri${kelas.length ? ` · kelas <b>${esc(kelas.join(', '))}</b>` : ''} —
+       total <b class="minus">${rp(r.total)}</b> ditarik dari saldo santri.</p>
+    ${r.sebagian.length ? `<p class="muted">${r.sebagian.length} santri saldonya kurang dan dipotong sebagian (sampai saldo 0).</p>` : ''}
+    ${r.lewat.length ? `<p class="muted">${r.lewat.length} santri dilewati karena saldonya kurang — saldonya tidak berubah.</p>` : ''}
     <p class="muted">Alasan: “${esc(alasan)}”.<br>
-      Tercatat satu per satu atas nama <b>${esc(USER.nama)}</b> di riwayat tiap siswa
+      Tercatat satu per satu atas nama <b>${esc(USER.nama)}</b> di riwayat tiap santri
       dan tidak bisa dihapus — pembetulan dilakukan dengan top up balik.</p>`,
     async () => {
       const d = await api('/api/koreksi-massal', { method: 'POST', body: {
@@ -2307,7 +2391,7 @@ function doSaldoKolektif() {
       sdRenderBatch();
       sdSync();
       loadPenyesuaian();
-      toast(`✔ ${d.berhasil.length} siswa dipotong — total ${rp(d.total_dipotong)}`, 'ok');
+      toast(`✔ ${d.berhasil.length} santri dipotong — total ${rp(d.total_dipotong)}`, 'ok');
       setTimeout(() => hasilKolektifModal(d), 250);
     }, 'Ya, potong kolektif');
 }
@@ -2316,17 +2400,17 @@ function hasilKolektifModal(d) {
   openModal(`
     <h2>Hasil Pemotongan Kolektif</h2>
     <div class="cards" style="margin-bottom:12px">
-      <div class="statcard"><span class="muted">Berhasil dipotong</span><br><b>${d.berhasil.length} siswa</b></div>
+      <div class="statcard"><span class="muted">Berhasil dipotong</span><br><b>${d.berhasil.length} santri</b></div>
       <div class="statcard"><span class="muted">Total ditarik</span><br><b class="rp">${rp(d.total_dipotong)}</b></div>
     </div>
     ${d.dilewati.length ? `
-      <p class="muted">${d.dilewati.length} siswa dilewati — saldonya tidak berubah:</p>
+      <p class="muted">${d.dilewati.length} santri dilewati — saldonya tidak berubah:</p>
       <div class="tblwrap" style="max-height:220px; overflow:auto"><table>
         <thead><tr><th>Nama</th><th>Kelas</th><th class="num">Saldo</th><th>Alasan</th></tr></thead>
         <tbody>${d.dilewati.map((s) => `<tr><td>${esc(s.nama)}</td><td>${esc(s.kelas)}</td>
           <td class="num rp">${rp(s.saldo)}</td><td class="muted">${esc(s.alasan)}</td></tr>`).join('')}</tbody>
       </table></div>`
-    : '<p class="muted">Semua siswa terpilih berhasil dipotong.</p>'}`);
+    : '<p class="muted">Semua santri terpilih berhasil dipotong.</p>'}`);
   $('#m-cancel').textContent = 'Tutup';     // modal ini hanya melaporkan hasil
 }
 
@@ -2355,7 +2439,7 @@ async function loadPenyesuaian() {
 // ║ SUPERADMIN: DONASI (jenis, besaran, kios, rekap)           ║
 // ╚══════════════════════════════════════════════════════════╝
 // Yang diatur di sini menentukan apa yang muncul di layar kios siswa:
-// jenis donasi beserta PILIHAN BESARANNYA. Siswa tidak pernah bisa mengetik
+// jenis donasi beserta PILIHAN BESARANNYA. Santri tidak pernah bisa mengetik
 // nominal sendiri — server hanya menerima angka yang ada di daftar ini.
 let donasiRows = [];        // salinan yang sedang disunting di layar
 
@@ -2384,8 +2468,8 @@ function donasiView(el) {
         <h2>Jenis &amp; Besaran Donasi</h2>
         <button class="linkbtn" id="dn-tambah">+ Tambah jenis donasi</button>
       </div>
-      <p class="muted">Yang tampil di kios siswa hanya yang dicentang <b>tampil</b>.
-        Nominal ditulis dipisah koma — itulah tombol yang bisa dipilih siswa.
+      <p class="muted">Yang tampil di kios santri hanya yang dicentang <b>tampil</b>.
+        Nominal ditulis dipisah koma — itulah tombol yang bisa dipilih santri.
         Jenis donasi yang sudah pernah menerima donasi tidak bisa dihapus
         (jejak keuangan), tapi boleh disembunyikan.</p>
       <div id="dn-baris"></div>
@@ -2393,17 +2477,17 @@ function donasiView(el) {
     </div>
 
     <div class="panel">
-      <h2>Kios Siswa</h2>
+      <h2>Kios Santri</h2>
       <p class="muted">Layar kios dibuka di alamat <a href="/kios" target="_blank"><code>/kios</code></a> —
-        pasang di perangkat yang tercolok reader. Siswa cukup tap untuk cek saldo,
-        dan tap + PIN untuk berdonasi. PIN bawaan setiap siswa adalah NIS-nya;
-        siswa yang lupa PIN harus direset lewat menu <b>Siswa</b>.</p>
+        pasang di perangkat yang tercolok reader. Santri cukup tap untuk cek saldo,
+        dan tap + PIN untuk berdonasi. PIN bawaan setiap santri adalah NIS-nya;
+        santri yang lupa PIN harus direset lewat menu <b>Santri</b>.</p>
       <div class="field"><label>Layanan kios</label>
         <select id="dn-aktif"><option value="1">Aktif — kios melayani tap</option>
           <option value="0">Tutup — kios menolak semua tap</option></select></div>
       <div class="field"><label>Nominal donasi terkecil yang boleh didaftarkan</label>
         ${inputUang({ id: 'dn-min' })}</div>
-      <div class="field"><label>Maksimal donasi per siswa per hari</label>
+      <div class="field"><label>Maksimal donasi per santri per hari</label>
         ${inputUang({ id: 'dn-maks' })}</div>
       <button class="paybtn" id="dn-simpan-set">Simpan pengaturan kios</button>
 
@@ -2426,7 +2510,7 @@ function donasiView(el) {
   <div class="panel">
     <h2>20 Donasi Terakhir</h2>
     <div class="tblwrap"><table>
-      <thead><tr><th>Waktu</th><th>Siswa</th><th>Kelas</th><th>Jenis</th><th class="num">Jumlah</th></tr></thead>
+      <thead><tr><th>Waktu</th><th>Santri</th><th>Kelas</th><th>Jenis</th><th class="num">Jumlah</th></tr></thead>
       <tbody id="dn-terakhir"></tbody>
     </table></div>
   </div>`;
@@ -2469,7 +2553,7 @@ function dnGambarBaris() {
     <div class="dn-row">
       <div class="dn-row-atas">
         <input class="dn-nama" data-i="${i}" value="${esc(r.nama)}" maxlength="60" placeholder="nama jenis donasi">
-        <label class="kat-aktif" title="Tampilkan di kios siswa">
+        <label class="kat-aktif" title="Tampilkan di kios santri">
           <input type="checkbox" class="dn-aktif" data-i="${i}" ${r.aktif ? 'checked' : ''}> tampil
         </label>
         <button class="linkbtn" data-naik="${i}" ${i === 0 ? 'disabled' : ''} title="naikkan">↑</button>
@@ -2573,7 +2657,7 @@ async function muatRekapDonasi(hari) {
       ['Terkumpul seluruhnya', rp(d.total)],
       [`Terkumpul ${hari} hari`, rp(d.periode)],
       ['Hari ini', rp(d.hari_ini)],
-      ['Siswa berdonasi', `${d.donatur} siswa · ${d.n} transaksi`],
+      ['Santri berdonasi', `${d.donatur} santri · ${d.n} transaksi`],
     ].map(([l, v]) => `<div class="statcard"><span class="muted">${l}</span><br><b class="rp">${v}</b></div>`).join('');
 
     $('#dn-perprogram').innerHTML = d.per_program.map((p) => `
@@ -2595,7 +2679,7 @@ async function muatRekapDonasi(hari) {
 }
 
 // ╔══════════════════════════════════════════════════════════╗
-// ║ SUPERADMIN: SISWA                                         ║
+// ║ SUPERADMIN: SANTRI                                         ║
 // ╚══════════════════════════════════════════════════════════╝
 let siswaState = { page: 1 };
 
@@ -2608,7 +2692,7 @@ let GOLONGAN = [];
 const golDari = (kode) => GOLONGAN.find((g) => g.kode === kode) || { kode, nama: kode, label_unit: 'Kelas' };
 
 /**
- * Menu SDM & Personil dan menu Siswa adalah LAYAR YANG SAMA dengan saringan
+ * Menu SDM & Personil dan menu Santri adalah LAYAR YANG SAMA dengan saringan
  * golongan berbeda. Sengaja tidak digandakan: keduanya butuh tap-kartu, reset
  * PIN, hubungkan kartu, blokir, dan tombol saldo yang persis sama — menyalinnya
  * berarti dua tempat yang harus diperbaiki setiap kali salah satunya berubah.
@@ -2617,23 +2701,29 @@ function sdmView(el) { siswaView(el, true); }
 
 function siswaView(el, sdm) {
   siswaState = { page: 1, sdm: !!sdm };
-  const judul = sdm ? 'SDM &amp; Personil Khusus' : 'Data Siswa';
+  const t = ISTILAH(sdm);
+  const judul = sdm ? 'SDM &amp; Personil Khusus' : 'Data Santri';
+  const bolehImpor = boleh(`${sdm ? 'sdm' : 'santri'}.impor`);
+  const bolehTambah = boleh(`${sdm ? 'sdm' : 'santri'}.tambah`);
   el.innerHTML = `<div class="panel">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px">
       <h2 style="margin:0">${judul} <span class="muted" id="sw-count"></span></h2>
-      <div style="display:flex; gap:10px">
-        ${sdm ? '<button class="linkbtn" id="btn-golongan">⚙ kelola golongan</button>' : ''}
-        <button class="linkbtn" id="btn-add-siswa">+ Tambah ${sdm ? 'personil' : 'siswa'}</button>
+      <div style="display:flex; gap:10px; flex-wrap:wrap">
+        ${sdm && boleh('golongan.kelola') ? '<button class="linkbtn" id="btn-golongan">⚙ kelola golongan</button>' : ''}
+        ${bolehImpor ? `<button class="linkbtn" id="btn-impor">⬆ Impor ${esc(t.orang)} dari Excel</button>` : ''}
+        ${bolehTambah ? `<button class="linkbtn" id="btn-add-siswa">+ Tambah ${esc(t.orang)}</button>` : ''}
       </div>
     </div>
     ${sdm ? `<p class="muted">Guru, karyawan, tamu, dan personil VIP memakai kartu, saldo, kasir,
-      dan kios yang sama dengan siswa — yang berbeda hanya <b>golongan</b>-nya, dan tiap golongan
+      dan kios yang sama dengan santri — yang berbeda hanya <b>golongan</b>-nya, dan tiap golongan
       punya batas belanja serta hak aksesnya sendiri. Semua saldo mereka tetap masuk ke satu
       neraca kas yang sama.</p>` : ''}
+    <div id="sw-impor"></div>
     <div class="filterbar">
-      <div class="field"><label>Cari</label><input id="sw-cari" placeholder="nama / NIS / NISN / UID"></div>
+      <div class="field"><label>Cari</label>
+        <input id="sw-cari" placeholder="nama / ${esc(t.nomorSingkat)}${sdm ? '' : ' / NISN'} / UID"></div>
       ${sdm ? `<div class="field"><label>Golongan</label><select id="sw-gol"></select></div>` : ''}
-      <div class="field"><label>${sdm ? 'Unit / kelas' : 'Kelas'}</label><select id="sw-kelas"><option value="">semua</option></select></div>
+      <div class="field"><label>${sdm ? 'Unit' : 'Kelas'}</label><select id="sw-kelas"><option value="">semua</option></select></div>
       <div class="field"><label>Status</label><select id="sw-status">
         <option value="">semua</option><option>aktif</option><option>blokir</option></select></div>
       ${sdm ? '' : `<div class="field"><label>Portal ortu</label><select id="sw-ortu">
@@ -2653,9 +2743,15 @@ function siswaView(el, sdm) {
     </div>
   </div>`;
 
+  // Daftar Unit untuk SDM datang dari KODE (lewat /api/kelas), bukan dari data:
+  // pilihannya harus tetap lengkap walau belum ada personil di unit tersebut.
   api('/api/kelas').then((d) => {
-    $('#sw-kelas').innerHTML += d.kelas.map((k) => `<option>${esc(k)}</option>`).join('');
-  });
+    UNIT_SDM = d.unit_sdm || UNIT_SDM;
+    const pilihan = sdm ? UNIT_SDM : d.kelas;
+    $('#sw-kelas').innerHTML = '<option value="">semua</option>' +
+      pilihan.map((k) => `<option>${esc(k)}</option>`).join('');
+  }).catch(() => {});
+
   const reload = () => { siswaState.page = 1; loadSiswa(); };
   $('#sw-cari').addEventListener('input', debounce(reload, 300));
   $('#sw-kelas').onchange = reload;
@@ -2664,12 +2760,26 @@ function siswaView(el, sdm) {
   if ($('#sw-gol')) $('#sw-gol').onchange = reload;
   $('#sw-prev').onclick = () => { if (siswaState.page > 1) { siswaState.page--; loadSiswa(); } };
   $('#sw-next').onclick = () => { siswaState.page++; loadSiswa(); };
-  $('#btn-add-siswa').onclick = () => siswaModal(null);
+  if ($('#btn-add-siswa')) $('#btn-add-siswa').onclick = () => siswaModal(null);
   if ($('#btn-golongan')) $('#btn-golongan').onclick = kelolaGolonganModal;
+  if ($('#btn-impor')) $('#btn-impor').onclick = () => imporKartuPanel(!!sdm);
   loadSiswa();
 }
 
-/** Golongan yang tampil di menu SDM: semuanya kecuali siswa. */
+/**
+ * Istilah yang berbeda antara kedua layar.
+ *
+ * Fungsinya sama persis — nomor induk yang khas, dipakai sebagai PIN bawaan
+ * kios dan alamat transfer — tapi sebutannya mengikuti yang dipakai pesantren:
+ * santri punya NIS, pegawai punya NIY / nomor pegawai.
+ */
+const ISTILAH = (sdm) => sdm
+  ? { orang: 'personil', nomor: 'NIY / Nomor Pegawai', nomorSingkat: 'NIY', unit: 'Unit' }
+  : { orang: 'santri', nomor: 'NIS', nomorSingkat: 'NIS', unit: 'Kelas' };
+
+let UNIT_SDM = ['Pengasuhan', 'SMP', 'SMA', 'Ekskul', 'RT', 'LE', 'Lainnya'];
+
+/** Golongan yang tampil di menu SDM: semuanya kecuali santri. */
 const golonganSdm = () => GOLONGAN.filter((g) => g.kode !== 'siswa');
 const kodeSdm = () => golonganSdm().map((g) => g.kode).join(',') || 'sdm';
 
@@ -2688,7 +2798,7 @@ async function loadSiswa() {
   if ($('#sw-kelas').value) p.set('kelas', $('#sw-kelas').value);
   if ($('#sw-status').value) p.set('status', $('#sw-status').value);
   if ($('#sw-ortu')?.value) p.set('ortu', $('#sw-ortu').value);
-  // Tanpa parameter golongan server hanya mengirim siswa; menu SDM menyebut
+  // Tanpa parameter golongan server hanya mengirim santri; menu SDM menyebut
   // sisanya secara eksplisit supaya golongan yang ditambahkan admin ikut tampil.
   if (sdm) p.set('golongan', $('#sw-gol')?.value || kodeSdm());
   const d = await api('/api/siswa?' + p);
@@ -2699,16 +2809,17 @@ async function loadSiswa() {
   const selGol = $('#sw-gol');
   if (selGol && !selGol.dataset.terisi) {
     selGol.dataset.terisi = '1';
-    selGol.innerHTML = `<option value="${esc(kodeSdm())}">semua non-siswa</option>` +
+    selGol.innerHTML = `<option value="${esc(kodeSdm())}">semua non-santri</option>` +
       golonganSdm().map((g) => `<option value="${esc(g.kode)}">${esc(g.nama)}</option>`).join('');
   }
-  $('#sw-count').textContent = `— ${d.total.toLocaleString('id-ID')} ${sdm ? 'personil' : 'siswa'}` +
+  $('#sw-count').textContent = `— ${d.total.toLocaleString('id-ID')} ${sdm ? 'personil' : 'santri'}` +
     ` · total saldo ${rp(d.total_saldo)}` +
     (d.total_titipan ? ` · titipan ${rp(d.total_titipan)}` : '');
   $('#sw-body').innerHTML = d.siswa.map((s) => `
     <tr>
       <td>${avatarHtml(s, true)}</td>
-      <td><b>${esc(s.nama)}</b>${sdm ? '' : ''}</td>
+      <td><b>${esc(s.nama)}</b>${sdm && s.nis
+        ? `<br><span class="muted">NIY ${esc(s.nis)}</span>` : ''}</td>
       <td>${sdm ? esc(golDari(s.golongan).nama) : esc(s.kelas)}</td>
       <td>${sdm
         ? `${esc(s.kelas || '—')}${s.jabatan ? `<br><span class="muted">${esc(s.jabatan)}</span>` : ''}`
@@ -2722,17 +2833,17 @@ async function loadSiswa() {
       <td>${s.pin_kustom
         ? '<span class="badge aktif">diganti sendiri</span>'
         : String(s.nis || '').replace(/\D/g, '').length >= 4
-          ? '<span class="muted">bawaan (NIS)</span>'
-          : '<span class="badge blokir">NIS belum ada</span>'}</td>
-      <td style="white-space:nowrap">
-        <button class="linkbtn" data-act="saldo" data-id="${s.id}">saldo</button> ·
-        <button class="linkbtn" data-act="edit" data-id="${s.id}">ubah</button> ·
-        <button class="linkbtn" data-act="kartu" data-id="${s.id}">kartu</button> ·
-        <button class="linkbtn" data-act="pin" data-id="${s.id}">reset PIN</button> ·
-        <button class="linkbtn" data-act="blokir" data-id="${s.id}">${s.status === 'aktif' ? 'blokir' : 'aktifkan'}</button>
-      </td>
+          ? `<span class="muted">bawaan (${esc(ISTILAH(sdm).nomorSingkat)})</span>`
+          : `<span class="badge blokir">${esc(ISTILAH(sdm).nomorSingkat)} belum ada</span>`}</td>
+      <td style="white-space:nowrap">${[
+        boleh('saldo.lihat') ? `<button class="linkbtn" data-act="saldo" data-id="${s.id}">saldo</button>` : '',
+        boleh(`${sdm ? 'sdm' : 'santri'}.ubah`) ? `<button class="linkbtn" data-act="edit" data-id="${s.id}">ubah</button>` : '',
+        boleh(`${sdm ? 'sdm' : 'santri'}.kartu`) ? `<button class="linkbtn" data-act="kartu" data-id="${s.id}">kartu</button>` : '',
+        boleh(`${sdm ? 'sdm' : 'santri'}.reset_pin`) ? `<button class="linkbtn" data-act="pin" data-id="${s.id}">reset PIN</button>` : '',
+        boleh(`${sdm ? 'sdm' : 'santri'}.ubah`) ? `<button class="linkbtn" data-act="blokir" data-id="${s.id}">${s.status === 'aktif' ? 'blokir' : 'aktifkan'}</button>` : '',
+      ].filter(Boolean).join(' · ') || '<span class="muted">—</span>'}</td>
     </tr>`).join('') ||
-    `<tr><td colspan="10" class="muted">Tidak ada ${sdm ? 'personil' : 'siswa'} cocok filter</td></tr>`;
+    `<tr><td colspan="10" class="muted">Tidak ada ${sdm ? 'personil' : 'santri'} cocok filter</td></tr>`;
   const maxPage = Math.max(1, Math.ceil(d.total / d.limit));
   $('#sw-pageinfo').textContent = `hal ${siswaState.page} / ${maxPage}`;
   $('#sw-prev').disabled = siswaState.page <= 1;
@@ -2740,7 +2851,7 @@ async function loadSiswa() {
 
   document.querySelectorAll('#sw-body .linkbtn').forEach((b) => {
     const s = siswaState.rows.find((x) => x.id === Number(b.dataset.id));
-    // "saldo" melompat ke tab Saldo Siswa dengan siswa ini sudah terpilih
+    // "saldo" melompat ke tab Saldo Santri dengan santri ini sudah terpilih
     if (b.dataset.act === 'saldo') b.onclick = () => {
       saldoPreselect = s;
       tandaiAktif('saldo');
@@ -2749,7 +2860,7 @@ async function loadSiswa() {
     };
     if (b.dataset.act === 'edit') b.onclick = () => siswaModal(s);
     if (b.dataset.act === 'kartu') b.onclick = () => assignCardModal(s);
-    // Reset PIN kios: satu-satunya jalan keluar untuk siswa yang lupa PIN —
+    // Reset PIN kios: satu-satunya jalan keluar untuk santri yang lupa PIN —
     // sengaja hanya lewat admin, bukan lewat kios.
     if (b.dataset.act === 'pin') b.onclick = () => resetPinModal(s);
     if (b.dataset.act === 'blokir') b.onclick = async () => {
@@ -2777,15 +2888,19 @@ async function siswaLookupCard(uid) {
 
 function resetPinModal(s) {
   const nisLayak = String(s.nis || '').replace(/\D/g, '').length >= 4;
+  // Sebutan nomor induk mengikuti golongan kartunya, bukan tab tempat tombol
+  // ditekan: kartu SDM bisa saja muncul di hasil pencarian layar mana pun.
+  const t = ISTILAH(s.golongan !== 'siswa');
   openModal(`
     <h2>Reset PIN Kios</h2>
     <p>PIN kios <b>${esc(s.nama)}</b> (${esc(s.kelas)}) akan dikembalikan ke
-      <b>PIN bawaan, yaitu NIS-nya</b>${s.nis ? `: <code>${esc(s.nis)}</code>` : ''}.</p>
-    <p class="muted">Pakai ini kalau siswa lupa PIN — siswa tidak bisa meresetnya sendiri
+      <b>PIN bawaan, yaitu ${esc(t.nomorSingkat)}-nya</b>${s.nis ? `: <code>${esc(s.nis)}</code>` : ''}.</p>
+    <p class="muted">Pakai ini kalau yang bersangkutan lupa PIN — PIN tidak bisa direset sendiri
       di kios. Kartu yang terlanjur terkunci karena salah PIN ikut terbuka.
-      Mintalah siswa segera mengganti PIN lagi lewat kios.</p>
-    ${nisLayak ? '' : `<p class="preview">NIS siswa ini belum diisi (atau kurang dari 4 angka),
-      jadi PIN bawaannya belum bisa dipakai. Isi NIS lewat tombol <b>ubah</b> dulu.</p>`}`,
+      Mintalah PIN segera diganti lagi lewat kios.</p>
+    ${nisLayak ? '' : `<p class="preview">${esc(t.nomorSingkat)} kartu ini belum diisi (atau kurang
+      dari 4 angka), jadi PIN bawaannya belum bisa dipakai. Isi ${esc(t.nomorSingkat)} lewat tombol
+      <b>ubah</b> dulu.</p>`}`,
     async () => {
       const d = await api(`/api/siswa/${s.id}/reset-pin`, { method: 'POST' });
       toast(d.pesan, d.siap ? 'ok' : 'err');
@@ -2796,7 +2911,7 @@ function resetPinModal(s) {
 function siswaModal(s) {
   const sdm = siswaState.sdm;
   // Golongan bawaan formulir baru mengikuti tab tempat tombolnya ditekan:
-  // menambah orang dari menu SDM tidak masuk akal berakhir sebagai siswa.
+  // menambah orang dari menu SDM tidak masuk akal berakhir sebagai santri.
   const kodeAwal = s?.golongan || (sdm ? (golonganSdm()[0]?.kode || 'sdm') : 'siswa');
   // Kalau daftar golongan belum sempat termuat, formulir tetap bisa dipakai
   // dengan golongan yang sedang berlaku — lebih baik daripada select kosong.
@@ -2804,7 +2919,7 @@ function siswaModal(s) {
   if (!pilihan.length) pilihan.push({ kode: kodeAwal, nama: kodeAwal, label_unit: 'Kelas' });
   const g0 = golDari(kodeAwal);
   openModal(`
-    <h2>${s ? 'Ubah Data' : 'Tambah'} ${sdm ? 'Personil' : 'Siswa'}</h2>
+    <h2>${s ? 'Ubah Data' : 'Tambah'} ${sdm ? 'Personil' : 'Santri'}</h2>
     ${s ? `<div style="display:flex; gap:12px; align-items:center; margin-bottom:12px">
       ${avatarHtml(s)}
       <div class="field" style="flex:1; margin:0"><label>Foto (JPG/PNG, maks 3MB)</label>
@@ -2815,11 +2930,10 @@ function siswaModal(s) {
       <span class="muted set-hint" id="m-gol-hint"></span></div>
     <div class="field"><label>Nama</label><input id="m-nama" value="${esc(s?.nama || '')}"></div>
     <div class="field"><label id="m-kelas-label">${esc(g0.label_unit || 'Kelas')}</label>
-      <input id="m-kelas" value="${esc(s?.kelas || '')}" placeholder="7A"></div>
-    <div class="field"><label>NIS / nomor kartu</label>
+      <span id="m-kelas-wrap"></span></div>
+    <div class="field"><label id="m-nis-label">NIS</label>
       <input id="m-nis" value="${esc(s?.nis || '')}">
-      <span class="muted set-hint">Harus khas — dipakai sebagai PIN bawaan kios, alamat transfer
-        antar teman, dan kunci masuk portal wali.</span></div>
+      <span class="muted set-hint" id="m-nis-hint"></span></div>
     <div class="field"><label>UID kartu (opsional — bisa juga tap kartu sekarang)</label>
       <input id="m-uid" value="${esc(s?.card_uid || '')}" placeholder="tap kartu atau ketik manual"></div>
     <div class="field" id="m-khusus-wrap">
@@ -2869,9 +2983,38 @@ function siswaModal(s) {
   // ikut berubah seketika. Bagian portal wali disembunyikan (bukan sekadar
   // diabaikan) untuk golongan yang memang tidak dilayani portal, supaya admin
   // tidak mengisi data yang tidak akan pernah dipakai.
+  /**
+   * Isian Unit berganti bentuk mengikuti golongan.
+   *
+   * Santri mengetik kelasnya bebas (7A, 8B, …) karena daftarnya berubah tiap
+   * tahun ajaran. SDM memilih dari daftar tetap, supaya tabel tidak berisi
+   * campuran "SMP", "Smp", dan "S M P" yang menyulitkan saringan. Nilai lama
+   * yang berada DI LUAR daftar tetap dipertahankan sebagai pilihan tambahan —
+   * kalau tidak, menyunting kartu lama diam-diam memindahkannya ke unit lain.
+   */
+  const gambarUnit = (g) => {
+    const wrap = $('#m-kelas-wrap');
+    const nilai = $('#m-kelas') ? $('#m-kelas').value : (s?.kelas || '');
+    if (g.kode === 'siswa') {
+      wrap.innerHTML = '<input id="m-kelas" placeholder="7A">';
+      $('#m-kelas').value = nilai;
+      return;
+    }
+    const daftar = nilai && !UNIT_SDM.includes(nilai) ? [nilai, ...UNIT_SDM] : UNIT_SDM;
+    wrap.innerHTML = `<select id="m-kelas">
+      ${nilai ? '' : '<option value="">— pilih unit —</option>'}
+      ${daftar.map((u) => `<option ${u === nilai ? 'selected' : ''}>${esc(u)}</option>`).join('')}
+    </select>`;
+  };
+
   const sinkronGolongan = () => {
     const g = golDari($('#m-golongan').value);
+    const t = ISTILAH(g.kode !== 'siswa');
     $('#m-kelas-label').textContent = g.label_unit || 'Kelas';
+    gambarUnit(g);
+    $('#m-nis-label').textContent = `${t.nomor} / nomor kartu`;
+    $('#m-nis-hint').textContent = 'Harus khas — dipakai sebagai PIN bawaan kios dan alamat ' +
+      'transfer antar teman' + (g.portal_ortu ? ', serta kunci masuk portal wali.' : '.');
     $('#m-ortu-set').classList.toggle('hidden', !g.portal_ortu);
     $('#m-khusus-wrap').classList.toggle('hidden', g.kode === 'siswa');
     const batas = ['max_saldo', 'max_belanja_harian', 'max_beli_harian']
@@ -2986,7 +3129,7 @@ function golonganFormModal(g, cfg, sesudah) {
       <option value="tamu">tamu / undangan</option></select></div>`}
     <div class="field"><label>Hak akses</label>
       <label class="cek"><input type="checkbox" id="gf-aktif" ${g === null || g?.aktif ? 'checked' : ''}
-        ${g?.kode === 'siswa' ? 'disabled' : ''}> golongan aktif${g?.kode === 'siswa' ? ' (golongan siswa tidak bisa dinonaktifkan)' : ''}</label>
+        ${g?.kode === 'siswa' ? 'disabled' : ''}> golongan aktif${g?.kode === 'siswa' ? ' (golongan santri tidak bisa dinonaktifkan)' : ''}</label>
       <label class="cek"><input type="checkbox" id="gf-ortu" ${g?.portal_ortu ? 'checked' : ''}> bisa dibuka lewat portal wali</label>
       <label class="cek"><input type="checkbox" id="gf-kios" ${g === null || g?.kios ? 'checked' : ''}> boleh memakai layar kios</label>
       <label class="cek"><input type="checkbox" id="gf-transfer" ${g === null || g?.transfer ? 'checked' : ''}> boleh mengirim saldo ke teman</label>
@@ -3027,16 +3170,16 @@ function assignCardModal(s, presetUid) {
   const rows = siswaState.rows || [];
   openModal(`
     <h2>Hubungkan Kartu</h2>
-    <div class="field"><label>Siswa</label>
+    <div class="field"><label>Santri</label>
       ${s ? `<input disabled value="${esc(s.nama)} (${esc(s.kelas)})">`
-          : `<input id="m-cari-siswa" placeholder="ketik nama siswa…"><div id="m-hasil"></div>
+          : `<input id="m-cari-siswa" placeholder="ketik nama santri…"><div id="m-hasil"></div>
              <input type="hidden" id="m-sid" value="">`}
     </div>
     <div class="field"><label>UID kartu — tempelkan kartu sekarang, atau ketik manual</label>
       <input id="m-uid" value="${esc(presetUid || '')}" placeholder="menunggu tap kartu…"></div>`,
     async () => {
       const sid = s ? s.id : Number($('#m-sid').value);
-      if (!sid) throw new Error('Pilih siswa dulu');
+      if (!sid) throw new Error('Pilih santri dulu');
       const d = await api('/api/assign-card', { method: 'POST', body: { siswa_id: sid, uid: $('#m-uid').value } });
       toast(`✔ Kartu terhubung ke ${d.siswa.nama}`, 'ok');
       loadSiswa();
@@ -3168,13 +3311,13 @@ function massalView(el) {
     <p class="muted">Kolomnya: <b>No · NIS · Nama Santri · Nominal Topup ·
       Tanggal Uang Diterima (DD/MM/YYYY) · Metode Pembayaran (Tunai / Transfer Bank / QRIS)</b>.
       Jangan mengubah baris judul — kolom dikenali dari judulnya. Template versi
-      “berisi daftar siswa” sudah memuat NIS &amp; nama, jadi bendahara hanya mengisi
+      “berisi daftar santri” sudah memuat NIS &amp; nama, jadi bendahara hanya mengisi
       nominal, tanggal, dan metode.</p>
     <div class="filterbar">
       <button class="go" id="ms-tpl">⬇ Template kosong</button>
-      <div class="field"><label>Kelas (untuk template berisi daftar siswa)</label>
+      <div class="field"><label>Kelas (untuk template berisi daftar santri)</label>
         <select id="ms-kelas"><option value="">semua kelas</option></select></div>
-      <button id="ms-tpl-isi">⬇ Template berisi daftar siswa</button>
+      <button id="ms-tpl-isi">⬇ Template berisi daftar santri</button>
     </div>
   </div>
 
@@ -3186,7 +3329,7 @@ function massalView(el) {
       Simpan kelebihan sebagai saldo titipan</label>
     <span class="hint-lembut">Tanpa ini, baris yang nominalnya tidak tertampung kartu dianggap gagal.</span>
     <label><input type="checkbox" id="ms-nama" style="width:auto">
-      Terapkan juga baris yang namanya berbeda dari data siswa</label>
+      Terapkan juga baris yang namanya berbeda dari data santri</label>
     <span class="hint-lembut">Nama berbeda biasanya berarti NIS salah ketik — biarkan mati kecuali
       Anda sudah memeriksanya satu per satu.</span>
     <div style="margin-top:12px"><button class="go" id="ms-pra" disabled>Periksa berkas</button></div>
@@ -3287,7 +3430,7 @@ function massalRenderPratinjau() {
       <div class="statcard"><span class="muted">Mengendap di titipan</span><br><b class="rp">${rp(r.total_titipan)}</b></div>
     </div>
     <p class="muted">Lembar <b>${esc(pra.lembar)}</b> · berkas <b>${esc(pra.nama_berkas)}</b><br>${metode}
-      ${r.n_nama_beda ? `<br>⚠️ ${r.n_nama_beda} baris namanya berbeda dari data siswa` : ''}
+      ${r.n_nama_beda ? `<br>⚠️ ${r.n_nama_beda} baris namanya berbeda dari data santri` : ''}
       ${r.n_kembar ? `<br>ℹ️ ${r.n_kembar} baris memakai NIS yang sudah muncul di baris lain
         (boleh saja bila memang dua setoran)` : ''}</p>
 
@@ -3331,7 +3474,7 @@ function massalRenderPratinjau() {
       <p><b>${rp(r.total)}</b> akan masuk ke rekening siswa: ${rp(r.total_saldo)} ke kartu dan
         ${rp(r.total_titipan)} mengendap sebagai titipan.</p>
       <p class="muted">Tercatat atas nama <b>${esc(USER.nama)}</b>, satu baris riwayat per setoran.
-        Pembatalan hanya bisa lewat pemotongan saldo manual di menu Saldo Siswa, jadi pastikan
+        Pembatalan hanya bisa lewat pemotongan saldo manual di menu Saldo Santri, jadi pastikan
         rekapnya sudah cocok dengan uang yang benar-benar diterima.</p>`,
       () => massalTerapkan(ulang), 'Ya, terapkan');
   };
@@ -3360,7 +3503,7 @@ async function massalTerapkan(izinkanUlang) {
         <div class="statcard"><span class="muted">Masuk kartu</span><br><b class="rp">${rp(i.total_saldo)}</b></div>
         <div class="statcard"><span class="muted">Ke titipan</span><br><b class="rp">${rp(i.total_titipan)}</b></div>
         ${d.smart?.n ? `<div class="statcard"><span class="muted">Isi ulang otomatis</span><br>
-          <b>${d.smart.n} siswa</b><br><span class="muted">${rp(d.smart.total)}</span></div>` : ''}
+          <b>${d.smart.n} santri</b><br><span class="muted">${rp(d.smart.total)}</span></div>` : ''}
       </div>
       <p class="muted">Batch <code>${esc(i.batch_id)}</code> — rinciannya bisa dibuka lagi
         dari Riwayat Impor di bawah, dan tiap setorannya muncul di menu Riwayat sebagai top up.</p>
@@ -3413,7 +3556,7 @@ async function muatRiwayatImpor() {
 
 // ================================================ TOPUP ORTU (superadmin)
 // Antrean konfirmasi pembayaran yang dikirim orang tua dari portal /ortu.
-// Menyetujui di sini benar-benar menambah saldo kartu siswa, jadi tombolnya
+// Menyetujui di sini benar-benar menambah saldo kartu santri, jadi tombolnya
 // melewati DUA konfirmasi — modal rincian lalu modal "yakin" — dan server pun
 // menolak persetujuan yang datang tanpa penanda konfirmasi kedua.
 
@@ -3442,9 +3585,9 @@ function topupOrtuView(el) {
       </div>
     </div>
     <p class="muted">Cocokkan tiap pengajuan dengan mutasi rekening sekolah sebelum menyetujui.
-      Persetujuan langsung menambah saldo kartu siswa dan tercatat di <b>Riwayat</b> sebagai top up.</p>
+      Persetujuan langsung menambah saldo kartu santri dan tercatat di <b>Riwayat</b> sebagai top up.</p>
     <div class="tblwrap"><table>
-      <thead><tr><th>Diajukan</th><th>Siswa</th><th>Kelas</th><th class="num">Nominal</th>
+      <thead><tr><th>Diajukan</th><th>Santri</th><th>Kelas</th><th class="num">Nominal</th>
         <th>Metode</th><th>Tgl bayar</th><th>Pengirim</th><th>Bukti</th><th>Status</th><th></th></tr></thead>
       <tbody id="tp-baris"></tbody>
     </table></div>
@@ -3489,7 +3632,7 @@ function topupOrtuView(el) {
         ${inputUang({ id: 'tp-min' })}</div>
       <div class="field"><label>Nominal terbesar satu pengajuan</label>
         ${inputUang({ id: 'tp-maks' })}</div>
-      <div class="field"><label>Maksimal pengajuan menunggu per siswa</label>
+      <div class="field"><label>Maksimal pengajuan menunggu per santri</label>
         <input id="tp-antre" inputmode="numeric"></div>
       <button class="paybtn" id="tp-simpan-batas">Simpan batas pengajuan</button>
       <p class="muted" id="tp-catatan">Batas <b>max saldo</b> dan <b>max top up harian</b> di menu
@@ -3646,7 +3789,7 @@ function tpSetujuiModal(p) {
     <p class="muted">Periksa dulu rinciannya terhadap mutasi rekening sekolah.</p>
     <div class="tp-konfirm">
       <dl>
-        <dt>Siswa</dt><dd>${esc(p.siswa_nama)}${p.kelas ? ' · ' + esc(p.kelas) : ''}</dd>
+        <dt>Santri</dt><dd>${esc(p.siswa_nama)}${p.kelas ? ' · ' + esc(p.kelas) : ''}</dd>
         <dt>Nominal</dt><dd>${rp(p.jumlah)}</dd>
         <dt>Metode</dt><dd>${esc(TP_METODE[p.metode] || p.metode)}</dd>
         <dt>Tanggal bayar</dt><dd>${esc(p.tgl_bayar)}</dd>
@@ -3673,7 +3816,7 @@ function tpKonfirmasiKedua(p) {
       top up harian), sisanya mengendap di titipan dan otomatis mengisi kartu saat saldo menipis.
       Tanpa ini, persetujuan akan gagal dan pengajuan tetap menunggu.</span>
     <p class="muted">Setelah ini pembatalan hanya bisa lewat pemotongan saldo manual
-       di menu <b>Saldo Siswa</b>.</p>`,
+       di menu <b>Saldo Santri</b>.</p>`,
     async () => {
       const d = await api(`/api/topup-ortu/${p.id}/setujui`,
         { method: 'POST', body: { konfirmasi: true, ke_titipan: !!$('#m-ke-titipan').checked } });
@@ -3707,3 +3850,442 @@ function tpTolakModal(p) {
 api('/api/me')
   .then((d) => { if (d.authed) { USER = d.user; showApp(); } else showLogin(); })
   .catch(() => showLogin());
+
+// ╔════════════════════════════════════════════════════════════════════════╗
+// ║ KELOLA AKUN — akun pengguna & kategori akses                           ║
+// ╚════════════════════════════════════════════════════════════════════════╝
+// Kategori akses menggantikan peran tetap yang dulu ditulis di kode. Satu
+// kategori memegang sekumpulan sakelar fitur, dan tiap akun sisi admin memilih
+// satu kategori. Granularitasnya per AKSI — "lihat" terpisah dari "tambah",
+// "ubah", dan "hapus" — supaya pembatasan yang muncul kemudian cukup dimatikan
+// lewat sakelar, tanpa menyentuh kode lagi.
+//
+// Yang digambar di sini hanyalah cermin: setiap sakelar punya pasangannya di
+// server (middleware `izin:`), dan itulah yang benar-benar menutup endpoint.
+
+let akses = { akun: [], kategori: [], katalog: [], pilih: new Set() };
+
+function akunView(el) {
+  const bolehKelolaAkun = boleh('akun.kelola');
+  const bolehKelolaAkses = boleh('akses.kelola');
+
+  el.innerHTML = `
+  <div class="panel">
+    <div class="kat-head">
+      <h2 style="margin:0">Akun Pengguna <span class="muted" id="ak-count"></span></h2>
+      <div style="display:flex; gap:10px">
+        <button class="linkbtn" id="ak-sandi">🔑 ganti sandi saya</button>
+        ${bolehKelolaAkun ? '<button class="linkbtn" id="ak-tambah">+ Tambah akun</button>' : ''}
+      </div>
+    </div>
+    <p class="muted">Akun <b>kasir</b> tidak diurus di sini — satu akun kasir melekat pada satu
+      tenant dan dibuat bersama tenantnya di menu <b>Kantin → Tenant</b>. Yang bisa ditambah di
+      layar ini adalah akun sisi admin, dan hak masing-masing ditentukan kategori aksesnya.</p>
+    <div class="tblwrap"><table>
+      <thead><tr><th>Nama</th><th>Username</th><th>Kategori Akses</th><th>Jenis</th><th></th></tr></thead>
+      <tbody id="ak-body"><tr><td colspan="5" class="muted">memuat…</td></tr></tbody>
+    </table></div>
+  </div>
+
+  ${bolehKelolaAkses ? `<div class="panel">
+    <div class="kat-head">
+      <h2 style="margin:0">Kategori Akses</h2>
+      <button class="linkbtn" id="ka-tambah">+ Kategori baru</button>
+    </div>
+    <p class="muted">Tiap kategori adalah sekumpulan sakelar. Matikan sebuah sakelar dan menunya
+      hilang dari layar pemegang kategori itu <i>sekaligus</i> endpoint-nya ditutup di server —
+      bukan sekadar tombolnya disembunyikan.</p>
+    <div id="ka-list"><p class="muted">memuat…</p></div>
+  </div>` : ''}`;
+
+  if ($('#ak-tambah')) $('#ak-tambah').onclick = () => akunModal(null);
+  if ($('#ka-tambah')) $('#ka-tambah').onclick = () => kategoriAksesModal(null);
+  $('#ak-sandi').onclick = gantiSandiModal;
+
+  muatAkun();
+  if (bolehKelolaAkses) muatKategoriAkses();
+}
+
+async function muatAkun() {
+  let d;
+  try { d = await api('/api/akun'); }
+  catch (e) { $('#ak-body').innerHTML = `<tr><td colspan="5" class="minus">${esc(e.message)}</td></tr>`; return; }
+
+  akses.akun = d.akun;
+  akses.kategoriRingkas = d.kategori;
+  const admin = d.akun.filter((a) => a.role === 'superadmin');
+  $('#ak-count').textContent = `— ${admin.length} akun admin · ${d.akun.length - admin.length} akun kasir`;
+
+  $('#ak-body').innerHTML = d.akun.map((a) => {
+    const kasir = a.role === 'tenant';
+    return `<tr>
+      <td><b>${esc(a.nama)}</b></td>
+      <td><code>${esc(a.username)}</code></td>
+      <td>${kasir
+        ? `<span class="muted">— (kasir ${esc(a.tenant_nama || '?')})</span>`
+        : esc(a.kategori_nama || '—')}</td>
+      <td><span class="badge ${kasir ? 'nonaktif' : 'aktif'}">${kasir ? 'kasir' : 'admin'}</span></td>
+      <td style="white-space:nowrap">${kasir
+        ? '<span class="muted">lewat menu Tenant</span>'
+        : (boleh('akun.kelola')
+          ? `<button class="linkbtn" data-akun-ubah="${a.id}">ubah</button> ·
+             <button class="linkbtn danger" data-akun-hapus="${a.id}">hapus</button>`
+          : '<span class="muted">—</span>')}</td>
+    </tr>`;
+  }).join('');
+
+  document.querySelectorAll('#ak-body [data-akun-ubah]').forEach((b) => {
+    b.onclick = () => akunModal(akses.akun.find((x) => x.id === Number(b.dataset.akunUbah)));
+  });
+  document.querySelectorAll('#ak-body [data-akun-hapus]').forEach((b) => {
+    b.onclick = () => hapusAkunModal(akses.akun.find((x) => x.id === Number(b.dataset.akunHapus)));
+  });
+}
+
+function akunModal(a) {
+  const kategori = akses.kategoriRingkas || [];
+  openModal(`
+    <h2>${a ? 'Ubah Akun' : 'Tambah Akun Admin'}</h2>
+    <div class="field"><label>Nama lengkap</label>
+      <input id="au-nama" value="${esc(a?.nama || '')}" placeholder="mis. Ustadz Ahmad"></div>
+    <div class="field"><label>Username</label>
+      <input id="au-user" value="${esc(a?.username || '')}" placeholder="huruf kecil, tanpa spasi">
+      <span class="muted set-hint">3–30 karakter: huruf kecil, angka, titik, strip, garis bawah.</span></div>
+    <div class="field"><label>${a ? 'Sandi baru <span class="muted">(kosongkan bila tidak diganti)</span>' : 'Sandi'}</label>
+      <input id="au-sandi" type="text" autocomplete="new-password" placeholder="minimal 8 karakter">
+      <span class="muted set-hint">Minimal 8 karakter. Sandi ditulis terbaca di sini supaya bisa
+        dicatat dan diserahkan — gantilah setelah akunnya dipakai pertama kali.</span></div>
+    <div class="field"><label>Kategori akses</label>
+      <select id="au-kategori">${kategori.map((k) =>
+        `<option value="${k.id}" ${k.id === a?.kategori_id ? 'selected' : ''}>${esc(k.nama)}</option>`).join('')}</select>
+      <span class="muted set-hint">Kategori inilah yang menentukan menu dan aksi apa saja yang
+        bisa dijalankan akun ini.</span></div>
+    ${a ? `<p class="muted">Mengganti sandi, username, atau kategori akan <b>menutup sesi</b> akun
+      ini di semua peramban — pemegangnya harus masuk lagi.</p>` : ''}`,
+    async () => {
+      const body = {
+        nama: $('#au-nama').value,
+        username: $('#au-user').value,
+        kategori_id: Number($('#au-kategori').value),
+      };
+      if ($('#au-sandi').value) body.password = $('#au-sandi').value;
+      if (a) await api('/api/akun/' + a.id, { method: 'PUT', body });
+      else await api('/api/akun', { method: 'POST', body });
+      toast('✔ Akun tersimpan', 'ok');
+      muatAkun();
+      if (boleh('akses.kelola')) muatKategoriAkses();
+    }, a ? 'Simpan' : 'Buat akun');
+}
+
+function hapusAkunModal(a) {
+  openModal(`
+    <h2>Hapus akun ${esc(a.nama)}?</h2>
+    <p>Akun <code>${esc(a.username)}</code> (${esc(a.kategori_nama || '—')}) akan dihapus dan
+      sesinya ditutup. Riwayat transaksi yang sudah tercatat atas namanya <b>tidak ikut hilang</b> —
+      nama operator disimpan sebagai teks di tiap transaksi.</p>
+    <p class="muted">Kalau yang bersangkutan hanya berhenti sementara, lebih baik pindahkan
+      kategorinya ke yang tanpa hak apa pun daripada dihapus.</p>`,
+    async () => {
+      await api('/api/akun/' + a.id, { method: 'DELETE' });
+      toast('✔ Akun dihapus', 'ok');
+      muatAkun();
+    }, 'Hapus akun');
+}
+
+function gantiSandiModal() {
+  openModal(`
+    <h2>Ganti Sandi Saya</h2>
+    <p class="muted">Berlaku untuk akun <b>${esc(USER.nama)}</b> (<code>${esc(USER.role)}</code>).
+      Sesi Anda di peramban lain akan ditutup, sesi yang sedang dipakai ini tetap hidup.</p>
+    <div class="field"><label>Sandi lama</label>
+      <input id="gs-lama" type="password" autocomplete="current-password"></div>
+    <div class="field"><label>Sandi baru</label>
+      <input id="gs-baru" type="password" autocomplete="new-password" placeholder="minimal 8 karakter"></div>
+    <div class="field"><label>Ulangi sandi baru</label>
+      <input id="gs-ulang" type="password" autocomplete="new-password"></div>`,
+    async () => {
+      if ($('#gs-baru').value !== $('#gs-ulang').value) throw new Error('Ulangan sandi baru tidak sama');
+      const d = await api('/api/akun/saya/sandi', { method: 'PUT', body: {
+        password_lama: $('#gs-lama').value, password_baru: $('#gs-baru').value,
+      }});
+      toast('✔ ' + d.pesan, 'ok');
+    }, 'Ganti sandi');
+}
+
+// ------------------------------------------------------- kategori akses
+
+async function muatKategoriAkses() {
+  let d, k;
+  try {
+    [d, k] = await Promise.all([api('/api/akses/kategori'), api('/api/akses/katalog')]);
+  } catch (e) {
+    $('#ka-list').innerHTML = `<p class="minus">${esc(e.message)}</p>`;
+    return;
+  }
+  akses.kategori = d.kategori;
+  akses.katalog = k.katalog;
+  const totalFitur = k.katalog.reduce((n, g) => n + g.fitur.length, 0);
+
+  $('#ka-list').innerHTML = d.kategori.map((x) => `
+    <div class="gol-baris">
+      <div class="gol-kepala">
+        <b>${esc(x.nama)}</b>
+        ${x.terkunci ? '<span class="badge aktif">terkunci</span>' : ''}
+        ${x.bawaan && !x.terkunci ? '<span class="badge nonaktif">bawaan</span>' : ''}
+        <span class="muted">${x.fitur.length} / ${totalFitur} fitur · ${x.n_akun} akun</span>
+        <span style="margin-left:auto; white-space:nowrap">
+          <button class="linkbtn" data-ka-lihat="${x.id}">${x.terkunci ? 'lihat' : 'ubah'}</button>
+          ${x.terkunci ? '' : ` · <button class="linkbtn danger" data-ka-hapus="${x.id}">hapus</button>`}
+        </span>
+      </div>
+      <i>${esc(x.deskripsi || 'Tanpa keterangan.')}</i>
+    </div>`).join('');
+
+  document.querySelectorAll('#ka-list [data-ka-lihat]').forEach((b) => {
+    b.onclick = () => kategoriAksesModal(akses.kategori.find((x) => x.id === Number(b.dataset.kaLihat)));
+  });
+  document.querySelectorAll('#ka-list [data-ka-hapus]').forEach((b) => {
+    b.onclick = () => hapusKategoriModal(akses.kategori.find((x) => x.id === Number(b.dataset.kaHapus)));
+  });
+}
+
+/**
+ * Penyunting sakelar. Kategori terkunci dibuka dalam keadaan HANYA BACA:
+ * ia yang menjamin selalu ada akun yang bisa membuka layar ini kembali,
+ * jadi tidak ada satu pun jalan untuk mengubahnya dari antarmuka.
+ */
+function kategoriAksesModal(k) {
+  const kunci = !!k?.terkunci;
+  const punya = new Set(k?.fitur || []);
+
+  const grid = akses.katalog.map((g, gi) => `
+    <fieldset class="izin-grup">
+      <legend>${esc(g.grup)}
+        ${kunci ? '' : `<span class="izin-aksi">
+          <button type="button" class="linkbtn" data-grup-on="${gi}">semua</button> ·
+          <button type="button" class="linkbtn" data-grup-off="${gi}">tidak satu pun</button></span>`}
+      </legend>
+      ${g.fitur.map((f) => `
+        <label class="izin-baris">
+          <input type="checkbox" data-fitur="${esc(f.kode)}"
+            ${punya.has(f.kode) ? 'checked' : ''} ${kunci ? 'disabled' : ''}>
+          <span>${esc(f.label)}</span>
+          <code>${esc(f.kode)}</code>
+        </label>`).join('')}
+    </fieldset>`).join('');
+
+  openModal(`
+    <h2>${k ? (kunci ? 'Kategori: ' : 'Ubah Kategori: ') + esc(k.nama) : 'Kategori Akses Baru'}</h2>
+    ${kunci ? `<p class="preview">Kategori ini <b>dikunci</b> dan selalu memegang seluruh fitur —
+      termasuk fitur yang ditambahkan pada pembaruan berikutnya. Inilah yang menjamin sekolah tidak
+      pernah terkunci keluar dari pengelolaan aksesnya sendiri, jadi ia tidak bisa disunting
+      maupun dihapus.</p>` : ''}
+    <div class="field"><label>Nama kategori</label>
+      <input id="kf-nama" value="${esc(k?.nama || '')}" ${kunci ? 'disabled' : ''}
+        placeholder="mis. Bendahara Pondok" maxlength="60"></div>
+    <div class="field"><label>Keterangan</label>
+      <input id="kf-desk" value="${esc(k?.deskripsi || '')}" ${kunci ? 'disabled' : ''}
+        placeholder="untuk siapa kategori ini" maxlength="300"></div>
+    <div class="izin-grid">${grid}</div>`,
+    kunci ? null : async () => {
+      const fitur = [...document.querySelectorAll('.izin-grid [data-fitur]')]
+        .filter((c) => c.checked).map((c) => c.dataset.fitur);
+      const body = { nama: $('#kf-nama').value, deskripsi: $('#kf-desk').value, fitur };
+      if (k) await api('/api/akses/kategori/' + k.id, { method: 'PUT', body });
+      else await api('/api/akses/kategori', { method: 'POST', body });
+      toast('✔ Kategori tersimpan', 'ok');
+      muatKategoriAkses();
+      muatAkun();
+    }, 'Simpan kategori');
+
+  if (kunci) return;
+  const kotak = (gi) => {
+    const set = document.querySelectorAll('.izin-grid fieldset')[gi].querySelectorAll('[data-fitur]');
+    return [...set];
+  };
+  document.querySelectorAll('[data-grup-on]').forEach((b) => {
+    b.onclick = () => kotak(Number(b.dataset.grupOn)).forEach((c) => { c.checked = true; });
+  });
+  document.querySelectorAll('[data-grup-off]').forEach((b) => {
+    b.onclick = () => kotak(Number(b.dataset.grupOff)).forEach((c) => { c.checked = false; });
+  });
+}
+
+function hapusKategoriModal(k) {
+  openModal(`
+    <h2>Hapus kategori ${esc(k.nama)}?</h2>
+    ${k.n_akun
+      ? `<p class="minus">Masih ada <b>${k.n_akun} akun</b> memakai kategori ini. Pindahkan
+         akunnya dulu ke kategori lain — kalau tidak, hak mereka justru akan melebar.</p>`
+      : '<p>Kategori ini belum dipakai akun mana pun, jadi aman dihapus.</p>'}`,
+    k.n_akun ? null : async () => {
+      await api('/api/akses/kategori/' + k.id, { method: 'DELETE' });
+      toast('✔ Kategori dihapus', 'ok');
+      muatKategoriAkses();
+    }, 'Hapus kategori');
+}
+
+// ╔════════════════════════════════════════════════════════════════════════╗
+// ║ IMPOR KOLEKTIF PEMEGANG KARTU — santri & SDM dari berkas Excel        ║
+// ╚════════════════════════════════════════════════════════════════════════╝
+// Alurnya SELALU dua langkah dan sengaja sama dengan Topup Massal: berkas
+// diperiksa lebih dulu (tidak ada data yang dibuat), baru diterapkan. Berkas
+// yang sama dikirim dua kali dan diurai ULANG di server, dengan sidik SHA-256
+// sebagai pengikat bahwa keduanya memang berkas yang sama — admin tidak mungkin
+// memeriksa satu berkas lalu menerapkan berkas lain.
+
+let imporKartu = null;
+
+function imporKartuPanel(sdm) {
+  const jenis = sdm ? 'sdm' : 'santri';
+  const t = ISTILAH(sdm);
+  imporKartu = null;
+
+  const kolom = sdm
+    ? 'No · NIY/Nomor Pegawai · Nama Personil · Unit · Golongan · Jabatan · Berlaku Sampai'
+    : 'No · NIS · Nama Santri · Kelas · NISN · Tanggal Lahir · No HP Wali';
+
+  $('#sw-impor').innerHTML = `
+  <div class="panel" style="border-left:4px solid var(--gold)">
+    <div class="kat-head">
+      <h2 style="margin:0">Tambah ${esc(t.orang)} kolektif dari Excel</h2>
+      <button class="linkbtn" id="im-tutup">tutup ✕</button>
+    </div>
+
+    <p class="muted"><b>1 · Unduh template.</b> Kolomnya: <b>${esc(kolom)}</b>.
+      Jangan mengubah baris judul — kolom dikenali dari judulnya, bukan urutannya.
+      Template sudah memuat pemeriksa isi sel dan satu lembar <b>Petunjuk</b>.</p>
+    <div class="filterbar">
+      <button class="go" id="im-tpl">⬇ Template ${esc(t.orang)} (.xlsx)</button>
+    </div>
+
+    <p class="muted"><b>2 · Unggah &amp; periksa.</b> Tidak ada data yang dibuat pada langkah ini.</p>
+    <div class="field"><label>Berkas .xlsx atau .csv (maks 4MB, 1000 baris)</label>
+      <input type="file" id="im-file"
+        accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></div>
+    <p class="muted">${esc(t.nomorSingkat)} <b>wajib diisi</b> dan harus khas. Nomor yang sudah
+      terdaftar ditolak — itulah yang membuat berkas yang tidak sengaja diunggah dua kali
+      tidak pernah menghasilkan kartu kembar.</p>
+    <div style="margin-top:10px"><button class="go" id="im-periksa" disabled>Periksa berkas</button></div>
+
+    <div id="im-hasil"></div>
+  </div>`;
+
+  const unduh = (url) => {
+    const a = document.createElement('a');
+    a.href = url;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+  $('#im-tpl').onclick = () => unduh('/api/impor-kartu/template?jenis=' + jenis);
+  $('#im-tutup').onclick = () => { $('#sw-impor').innerHTML = ''; imporKartu = null; };
+  $('#im-file').addEventListener('change', () => {
+    $('#im-periksa').disabled = !$('#im-file').files[0];
+    $('#im-hasil').innerHTML = '';
+    imporKartu = null;
+  });
+  $('#im-periksa').onclick = () => imporKartuPratinjau(jenis);
+  $('#sw-impor').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+async function imporKartuPratinjau(jenis) {
+  const f = $('#im-file').files[0];
+  if (!f) return;
+  const btn = $('#im-periksa');
+  btn.disabled = true;
+  $('#im-hasil').innerHTML = '<p class="muted">membaca berkas…</p>';
+  try {
+    const data = await fileToDataUrl(f);
+    const pra = await api('/api/impor-kartu/pratinjau', { method: 'POST', body: {
+      jenis, nama_berkas: f.name, data,
+    }});
+    imporKartu = { jenis, nama: f.name, data, pra };
+    imporKartuRender();
+  } catch (e) {
+    $('#im-hasil').innerHTML = `<p class="minus">${esc(e.message)}</p>
+      <p class="muted">Pakai template resmi dari langkah 1, dan pastikan baris judul kolom
+        masih ada di lembar yang sama dengan datanya.</p>`;
+  }
+  btn.disabled = false;
+}
+
+function imporKartuRender() {
+  const { pra, jenis } = imporKartu;
+  const r = pra.ringkas;
+  const sdm = jenis === 'sdm';
+  const t = ISTILAH(sdm);
+  const unit = Object.entries(r.per_unit).map(([u, n]) => `${esc(u)}: <b>${n}</b>`).join(' · ');
+
+  $('#im-hasil').innerHTML = `
+    <div class="panel" style="margin:12px 0 0">
+      <h2>3 · Hasil pemeriksaan <span class="muted">— lembar ${esc(pra.lembar)}</span></h2>
+      <div class="cards">
+        <div class="statcard"><span class="muted">Baris terbaca</span><br><b>${r.n_baris}</b></div>
+        <div class="statcard"><span class="muted">Siap dibuat</span><br><b class="plus">${r.n_siap}</b></div>
+        <div class="statcard"><span class="muted">Gagal</span><br><b class="${r.n_gagal ? 'minus' : ''}">${r.n_gagal}</b></div>
+      </div>
+      ${unit ? `<p class="muted">Sebaran ${esc(t.unit.toLowerCase())} — ${unit}</p>` : ''}
+      ${r.n_catatan ? `<p class="muted">${r.n_catatan} baris punya catatan (lihat kolom keterangan).
+        Baris bercatatan tetap dibuat.</p>` : ''}
+
+      <div class="tblwrap"><table>
+        <thead><tr><th>Baris</th><th></th><th>${esc(t.nomorSingkat)}</th><th>Nama</th>
+        <th>${esc(t.unit)}</th>${sdm ? '<th>Golongan</th>' : '<th>Tgl lahir</th>'}<th>Keterangan</th></tr></thead>
+        <tbody>${pra.baris.map((b) => `<tr>
+          <td>${b.baris}</td>
+          <td><span class="badge ${b.status === 'siap' ? 'aktif' : 'blokir'}">${b.status}</span></td>
+          <td><code>${esc(b.nis || '—')}</code></td>
+          <td>${esc(b.nama || '—')}</td>
+          <td>${esc(b.kelas || '—')}</td>
+          <td>${sdm ? esc(b.golongan) : esc(b.tgl_lahir || '—')}</td>
+          <td class="${b.status === 'siap' ? 'muted' : 'minus'}">${esc(b.pesan || '')}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>
+
+      ${r.n_siap
+        ? `<div style="margin-top:12px">
+             <button class="go" id="im-terapkan">Terapkan — buat ${r.n_siap} ${esc(t.orang)}</button>
+             <span class="hint-lembut">Baris yang gagal dilewati; sisanya tetap dibuat.</span>
+           </div>`
+        : '<p class="minus" style="margin-top:12px">Tidak ada baris yang siap — perbaiki berkasnya lalu periksa lagi.</p>'}
+    </div>`;
+
+  if ($('#im-terapkan')) $('#im-terapkan').onclick = imporKartuTerapkan;
+}
+
+async function imporKartuTerapkan() {
+  const { jenis, nama, data, pra } = imporKartu;
+  const t = ISTILAH(jenis === 'sdm');
+  const btn = $('#im-terapkan');
+  btn.disabled = true;
+  btn.textContent = 'membuat…';
+  try {
+    const d = await api('/api/impor-kartu/terapkan', { method: 'POST', body: {
+      jenis, nama_berkas: nama, data, sidik: pra.sidik,
+    }});
+    toast(`✔ ${d.n_dibuat} ${t.orang} dibuat`, 'ok');
+    $('#im-hasil').innerHTML = `
+      <div class="panel" style="margin:12px 0 0">
+        <h2>Selesai</h2>
+        <div class="cards">
+          <div class="statcard"><span class="muted">Berhasil dibuat</span><br><b class="plus">${d.n_dibuat}</b></div>
+          <div class="statcard"><span class="muted">Dilewati</span><br><b class="${d.n_gagal ? 'minus' : ''}">${d.n_gagal}</b></div>
+        </div>
+        <p class="muted">Kartu NFC belum terpasang — tempelkan kartunya satu per satu lewat tombol
+          <b>kartu</b> di tabel. PIN kios bawaan setiap orang adalah ${esc(t.nomorSingkat)}-nya.</p>
+        ${d.gagal.length ? `<div class="tblwrap"><table>
+          <thead><tr><th>Baris</th><th>${esc(t.nomorSingkat)}</th><th>Nama</th><th>Sebab gagal</th></tr></thead>
+          <tbody>${d.gagal.map((b) => `<tr><td>${b.baris}</td><td><code>${esc(b.nis || '—')}</code></td>
+            <td>${esc(b.nama || '—')}</td><td class="minus">${esc(b.pesan)}</td></tr>`).join('')}</tbody>
+        </table></div>` : ''}
+      </div>`;
+    $('#im-file').value = '';
+    imporKartu = null;
+    loadSiswa();
+  } catch (e) {
+    toast(e.message, 'err');
+    btn.disabled = false;
+    btn.textContent = 'Coba terapkan lagi';
+  }
+}

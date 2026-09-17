@@ -6,10 +6,15 @@ use App\Models\AlasanPotong;
 use App\Models\DonasiNominal;
 use App\Models\DonasiProgram;
 use App\Models\Golongan;
+use App\Models\KategoriAkses;
+use App\Models\KategoriAksesFitur;
 use App\Models\KiosConfig;
 use App\Models\Setting;
+use App\Models\User;
+use App\Services\Izin;
 use App\Models\TopupInfo;
 use Illuminate\Database\Seeder;
+use App\Support\WaktuIso;
 use Illuminate\Support\Facades\Hash;
 
 /**
@@ -22,10 +27,10 @@ class PengaturanSeeder extends Seeder
     {
         $angka = [
             // batas pokok
-            'max_saldo' => 500000,           // saldo siswa tidak boleh melebihi ini
-            'max_topup_harian' => 300000,    // total top up per siswa per hari
-            'max_beli_harian' => 10,         // jumlah transaksi pembelian per siswa per hari
-            'max_belanja_harian' => 100000,  // akumulasi nominal belanja per siswa per hari
+            'max_saldo' => 500000,           // saldo santri tidak boleh melebihi ini
+            'max_topup_harian' => 300000,    // total top up per santri per hari
+            'max_beli_harian' => 10,         // jumlah transaksi pembelian per santri per hari
+            'max_belanja_harian' => 100000,  // akumulasi nominal belanja per santri per hari
             'max_per_transaksi' => 50000,    // nominal maksimal satu transaksi pembelian
 
             'kios_aktif' => 1,
@@ -35,7 +40,7 @@ class PengaturanSeeder extends Seeder
             'topup_ortu_aktif' => 1,
             'topup_ortu_min' => 10000,
             'topup_ortu_maks' => 300000,
-            'topup_ortu_antre' => 3,         // maks pengajuan menunggu per siswa
+            'topup_ortu_antre' => 3,         // maks pengajuan menunggu per santri
 
             // saldo titipan & smart top up
             'titipan_aktif' => 1,
@@ -103,7 +108,7 @@ class PengaturanSeeder extends Seeder
                 foreach ([
                     'Penarikan tunai saldo',
                     'Koreksi kelebihan top up',
-                    'Pengembalian saldo (siswa keluar/lulus)',
+                    'Pengembalian saldo (santri keluar/lulus)',
                     'Pembayaran di luar kantin',
                 ] as $i => $teksAlasan) {
                     AlasanPotong::create(['teks' => $teksAlasan, 'urutan' => $i]);
@@ -114,6 +119,61 @@ class PengaturanSeeder extends Seeder
 
         $this->golongan();
         $this->donasi();
+        $this->kategoriAkses();
+    }
+
+    /**
+     * Kategori akses bawaan.
+     *
+     * "Akses Penuh" DITEGAKKAN ULANG setiap kali seeder jalan: ia terkunci,
+     * dan keberadaannya yang menjamin selalu ada jalan masuk ke pengelolaan
+     * akun sekalipun kategori lain disetel keliru. Tiga kategori contoh
+     * lainnya hanya dipasang sekali — sesudah itu sepenuhnya milik admin,
+     * termasuk kalau mereka menghapusnya.
+     */
+    private function kategoriAkses(): void
+    {
+        foreach (Izin::bawaan() as $i => $b) {
+            if (! $b['terkunci'] && Setting::find('kategori_akses_terisi')) {
+                continue;
+            }
+            $k = KategoriAkses::firstOrCreate(['nama' => $b['nama']], [
+                'deskripsi' => $b['deskripsi'],
+                'terkunci' => $b['terkunci'],
+                'bawaan' => true,
+                'urutan' => $b['urutan'],
+                'created_at' => WaktuIso::sekarang(),
+            ]);
+
+            // Kategori terkunci memegang seluruh katalog apa adanya — termasuk
+            // fitur yang baru ditambahkan pada pemutakhiran berikutnya, jadi
+            // barisnya ditulis ulang setiap kali seeder dijalankan.
+            if ($b['terkunci']) {
+                KategoriAksesFitur::where('kategori_id', $k->id)->delete();
+                foreach ($b['fitur'] as $f) {
+                    KategoriAksesFitur::create(['kategori_id' => $k->id, 'fitur' => $f]);
+                }
+
+                continue;
+            }
+            if ($k->wasRecentlyCreated) {
+                foreach ($b['fitur'] as $f) {
+                    KategoriAksesFitur::firstOrCreate(['kategori_id' => $k->id, 'fitur' => $f]);
+                }
+            }
+        }
+        Setting::firstOrCreate(['key' => 'kategori_akses_terisi'], ['value' => 1]);
+
+        // Akun sisi admin yang belum punya kategori dinaikkan ke "Akses Penuh".
+        // Tanpa langkah ini, pemasangan sistem izin di atas basis data yang
+        // sudah berjalan meninggalkan baris tanpa kategori — yang memang tetap
+        // berhak penuh (lihat Izin::milik), tapi tidak terbaca begitu di layar
+        // Kelola Akun, dan itu justru jenis kekaburan yang berbahaya pada
+        // daftar hak akses.
+        if ($penuh = KategoriAkses::where('terkunci', 1)->first()) {
+            User::where('role', 'superadmin')->whereNull('kategori_id')
+                ->update(['kategori_id' => $penuh->id]);
+        }
     }
 
     /**
@@ -127,7 +187,7 @@ class PengaturanSeeder extends Seeder
             $baris = [
                 // kode, nama, label_unit, jenis, urutan, ortu, kios, transfer,
                 // saldo, topup/hr, beli/hr, belanja/hr, per-tx, nm/hr, nm x/hr, nm/tx
-                ['siswa', 'Siswa', 'Kelas', 'siswa', 0, 1, 1, 1, null, null, null, null, null, null, null, null],
+                ['siswa', 'Santri', 'Kelas', 'siswa', 0, 1, 1, 1, null, null, null, null, null, null, null, null],
                 ['sdm', 'SDM / Pegawai', 'Unit', 'internal', 1, 0, 1, 1, 2000000, 1000000, 30, 300000, 200000, 300000, 10, 300000],
                 ['tamu', 'Tamu', 'Instansi', 'tamu', 2, 0, 1, 0, 500000, 500000, 20, 200000, 100000, 100000, 5, 100000],
                 ['vip', 'VIP / Undangan', 'Keterangan', 'tamu', 3, 0, 1, 0, 5000000, 5000000, 50, 1000000, 500000, 500000, 20, 500000],
@@ -145,10 +205,17 @@ class PengaturanSeeder extends Seeder
             Setting::create(['key' => 'golongan_terisi', 'value' => 1]);
         }
 
-        // Jaring pengaman: golongan 'siswa' harus selalu ada, berapa pun yang
+        // Penyesuaian istilah pesantren: golongan bawaan yang NAMANYA masih
+        // 'Santri' diubah menjadi 'Santri'. Hanya menyentuh baris yang masih
+        // memakai nama bawaan — nama yang sudah disunting admin dibiarkan.
+        Golongan::where('kode', 'siswa')->where('nama', 'Siswa')->update(['nama' => 'Santri']);
+
+        // Jaring pengaman: golongan 'santri' harus selalu ada, berapa pun yang
         // dihapus admin — tanpa barisnya, setiap kartu lama kehilangan aturannya.
+        // KODE-nya tetap 'santri' (tersimpan di ribuan baris data dan di kunci
+        // asing), yang berubah hanya NAMA yang terbaca di layar.
         Golongan::firstOrCreate(['kode' => 'siswa'], [
-            'nama' => 'Siswa', 'label_unit' => 'Kelas', 'jenis' => 'siswa',
+            'nama' => 'Santri', 'label_unit' => 'Kelas', 'jenis' => 'siswa',
             'bawaan' => true, 'urutan' => 0, 'portal_ortu' => true,
         ]);
     }

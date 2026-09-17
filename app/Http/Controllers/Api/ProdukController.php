@@ -17,7 +17,7 @@ use Illuminate\Support\Facades\DB;
  * Menu & barang jualan, beserta alur pengajuan perubahannya.
  *
  * Tenant MENGUSULKAN, superadmin MEMUTUSKAN. Daftar menu yang dipakai kasir
- * tidak pernah berubah sampai ada putusan setuju — selama menunggu, siswa tetap
+ * tidak pernah berubah sampai ada putusan setuju — selama menunggu, santri tetap
  * membayar dengan harga lama, jadi tidak ada kenaikan harga diam-diam.
  *
  * Yang sengaja TIDAK lewat persetujuan: menandai menu habis/tersedia. Itu
@@ -151,6 +151,7 @@ class ProdukController extends Controller
     public function daftarAjuan(Request $r)
     {
         $u = $this->wajibPeran($r, 'tenant', 'superadmin');
+        $this->izinJikaAdmin($r, $u, 'ajuan.lihat');
         $q = ProdukAjuan::query()
             ->join('tenant', 'tenant.id', '=', 'produk_ajuan.tenant_id')
             ->select('produk_ajuan.*', 'tenant.nama as tenant_nama');

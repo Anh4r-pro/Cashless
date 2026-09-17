@@ -28,7 +28,7 @@ class KasirController extends Controller
      *
      * NISN, tanggal lahir, dan nomor HP wali sengaja TIDAK ada di sini: ketiganya
      * adalah kunci masuk portal wali. Layar kasir dipakai penjaga kantin yang
-     * bukan pegawai sekolah, dan mengembalikan baris siswa apa adanya berarti
+     * bukan pegawai sekolah, dan mengembalikan baris santri apa adanya berarti
      * membagikan kredensial portal setiap anak yang menempelkan kartunya.
      */
     private const KOLOM_KARTU = [
@@ -50,7 +50,7 @@ class KasirController extends Controller
             return response()->json(['uid' => $uid, 'siswa' => null]);
         }
 
-        // Isi ulang dikerjakan SEBELUM kasir melihat saldo: kalau tidak, siswa
+        // Isi ulang dikerjakan SEBELUM kasir melihat saldo: kalau tidak, santri
         // yang titipannya masih banyak tetap tertolak karena angka di layar
         // sudah tipis.
         $smart = SmartTopup::diam($s->id, 'tap kartu');
@@ -65,7 +65,7 @@ class KasirController extends Controller
             'siswa' => $s->only(self::KOLOM_KARTU),
             'tap_token' => TapToken::terbitkan($s->id),
             // Kasir perlu melihat SEKARANG bahwa yang di depannya tamu atau
-            // guru, bukan siswa — batas belanjanya berbeda, dan foto saja tidak
+            // guru, bukan santri — batas belanjanya berbeda, dan foto saja tidak
             // menjelaskan itu.
             'golongan' => $g?->only(['kode', 'nama', 'jenis', 'label_unit']),
             'kedaluwarsa' => Kartu::kedaluwarsa($s),
@@ -138,14 +138,14 @@ class KasirController extends Controller
                 if ($ubah === 0) {
                     $s = Siswa::find($siswaId);
                     if (! $s) {
-                        throw new ApiError(404, 'Siswa tidak ditemukan');
+                        throw new ApiError(404, 'Santri tidak ditemukan');
                     }
                     if ($s->status !== 'aktif') {
                         throw new ApiError(403, 'Kartu diblokir');
                     }
                     // Titipan tidak bisa dibelanjakan langsung, tapi kasir perlu
                     // tahu uangnya ada — supaya bisa minta admin mencairkannya,
-                    // bukan menyuruh siswa pulang.
+                    // bukan menyuruh santri pulang.
                     throw new ApiError(402, 'Saldo tidak cukup (saldo ' . Rupiah::f($s->saldo) .
                         ($s->saldo_titipan > 0 ? ', titipan ' . Rupiah::f($s->saldo_titipan) . ' belum dicairkan' : '') . ')');
                 }
@@ -197,7 +197,7 @@ class KasirController extends Controller
             $x = Keranjang::ringkas($items, $tenant, $cfg);
             // Total dari klien ikut diperiksa: kalau berbeda, harga di layar
             // kasir sudah tidak sama dengan harga di basis data — lebih baik
-            // gagal daripada menagih siswa dengan angka yang tidak dilihat siapa pun.
+            // gagal daripada menagih santri dengan angka yang tidak dilihat siapa pun.
             if ($r->input('jumlah') !== null && (int) floor((float) $r->input('jumlah')) !== $x['total']) {
                 throw new ApiError(409,
                     'Total di layar (' . Rupiah::f((int) floor((float) $r->input('jumlah'))) . ') tidak sama dengan ' .
@@ -224,7 +224,7 @@ class KasirController extends Controller
 
         if ($makanan > 0) {
             if ($h['n_mk'] >= $cfg['max_beli_harian']) {
-                throw new ApiError(429, "Siswa sudah {$h['n_mk']}x belanja hari ini (batas {$cfg['max_beli_harian']}x/hari)");
+                throw new ApiError(429, "Santri sudah {$h['n_mk']}x belanja hari ini (batas {$cfg['max_beli_harian']}x/hari)");
             }
             if (($h['total'] - $h['nm']) + $makanan > $cfg['max_belanja_harian']) {
                 throw new ApiError(429,
@@ -235,7 +235,7 @@ class KasirController extends Controller
         if ($nonmakanan > 0) {
             if ($h['n_nm'] >= $cfg['max_beli_nonmakanan_harian']) {
                 throw new ApiError(429,
-                    "Siswa sudah {$h['n_nm']}x belanja non-makanan hari ini (batas {$cfg['max_beli_nonmakanan_harian']}x/hari)");
+                    "Santri sudah {$h['n_nm']}x belanja non-makanan hari ini (batas {$cfg['max_beli_nonmakanan_harian']}x/hari)");
             }
             if ($h['nm'] + $nonmakanan > $cfg['max_nonmakanan_harian']) {
                 throw new ApiError(429,

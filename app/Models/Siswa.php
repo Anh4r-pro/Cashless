@@ -6,7 +6,7 @@ use App\Support\WaktuIso;
 use Illuminate\Database\Eloquent\Model;
 
 /**
- * Pemegang kartu — siswa maupun SDM, tamu, dan VIP.
+ * Pemegang kartu — santri maupun SDM, tamu, dan VIP.
  *
  * Satu tabel untuk semuanya adalah keputusan yang disengaja: seluruh buku besar
  * (transaksi, titipan_mutasi, settlement, neraca) menunjuk ke sini. Memecah SDM

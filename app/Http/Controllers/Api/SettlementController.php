@@ -16,6 +16,7 @@ class SettlementController extends Controller
     public function index(Request $r)
     {
         $u = $this->wajibPeran($r, 'tenant', 'superadmin');
+        $this->izinJikaAdmin($r, $u, 'dashboard.lihat');
         $tid = $u->role === 'tenant' ? $u->tenant_id : ((int) $r->query('tenant_id') ?: null);
 
         $q = Settlement::query()

@@ -19,7 +19,7 @@ use Illuminate\Support\Facades\DB;
  *
  * Nominal donasi TIDAK pernah datang bebas dari klien: yang diterima server
  * hanya angka yang persis ada di daftar nominal milik program itu. Besaran
- * donasi dengan begitu sepenuhnya keputusan sekolah, bukan ketikan siswa.
+ * donasi dengan begitu sepenuhnya keputusan sekolah, bukan ketikan santri.
  */
 class DonasiController extends Controller
 {
@@ -31,9 +31,9 @@ class DonasiController extends Controller
 
     /** Pengaturan kios & batas donasi — kelompok tersendiri di layar admin. */
     public const KIOS_LABELS = [
-        'kios_aktif' => ['label' => 'Kios siswa melayani tap', 'unit' => 'onoff'],
+        'kios_aktif' => ['label' => 'Kios santri melayani tap', 'unit' => 'onoff'],
         'donasi_min' => ['label' => 'Nominal donasi terkecil', 'unit' => 'rp'],
-        'donasi_maks_harian' => ['label' => 'Max donasi siswa / hari', 'unit' => 'rp'],
+        'donasi_maks_harian' => ['label' => 'Max donasi santri / hari', 'unit' => 'rp'],
     ];
 
     public function program(Request $r)
@@ -103,7 +103,7 @@ class DonasiController extends Controller
                 $nominal[] = $v;
             }
             if (! $nominal) {
-                throw new ApiError(400, "\"{$nama}\" belum punya pilihan nominal — siswa tidak akan bisa memilih apa pun");
+                throw new ApiError(400, "\"{$nama}\" belum punya pilihan nominal — santri tidak akan bisa memilih apa pun");
             }
             if (count($nominal) > self::MAX_NOMINAL_PER_PROGRAM) {
                 throw new ApiError(400, 'Maksimal ' . self::MAX_NOMINAL_PER_PROGRAM . ' pilihan nominal per jenis donasi');
@@ -194,7 +194,7 @@ class DonasiController extends Controller
             $v = (int) floor((float) $b[$key]);
             if ($key === 'kios_aktif') {
                 if ($v !== 0 && $v !== 1) {
-                    throw new ApiError(400, 'Kios siswa hanya bisa aktif (1) atau tutup (0)');
+                    throw new ApiError(400, 'Kios santri hanya bisa aktif (1) atau tutup (0)');
                 }
             } elseif ($v <= 0) {
                 throw new ApiError(400, "Nilai \"{$def['label']}\" harus lebih dari nol");

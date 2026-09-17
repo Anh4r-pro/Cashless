@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\DB;
 class Rekap
 {
     /**
-     * Belanja siswa hari ini, dipisah makanan & non-makanan.
+     * Belanja santri hari ini, dipisah makanan & non-makanan.
      *
      * Dipisah karena jatahnya memang terpisah: transaksi yang isinya hanya
      * handuk tidak boleh memakai jatah "10x jajan/hari", dan sebungkus nasi

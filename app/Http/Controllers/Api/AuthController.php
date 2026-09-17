@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Models\SesiStaf;
 use App\Models\User;
+use App\Services\Izin;
 use App\Services\Sesi;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -44,12 +45,7 @@ class AuthController extends Controller
         RateLimiter::clear($kunci);
 
         $token = Sesi::buatStaf($u);
-        $res = response()->json(['ok' => true, 'user' => [
-            'nama' => $u->nama,
-            'role' => $u->role,
-            'tenant_id' => $u->tenant_id,
-            'tenant_nama' => $u->tenant?->nama,
-        ]]);
+        $res = response()->json(['ok' => true, 'user' => self::profil($u)]);
 
         return Sesi::pasangCookie($res, 'sid', $token, (int) (Sesi::TTL_STAF_MS / 1000));
     }
@@ -61,12 +57,29 @@ class AuthController extends Controller
             return response()->json(['authed' => false]);
         }
 
-        return response()->json(['authed' => true, 'user' => [
+        return response()->json(['authed' => true, 'user' => self::profil($u)]);
+    }
+
+    /**
+     * Profil yang dikirim ke frontend.
+     *
+     * `izin` ikut dikirim supaya menu yang tidak berhak dibuka tidak usah
+     * digambar sama sekali. Itu SEMATA kenyamanan tampilan — pagar yang
+     * sebenarnya tetap middleware `izin:` di sisi server, karena daftar ini
+     * ada di peramban dan karenanya bisa diubah siapa pun yang mau.
+     */
+    private static function profil(User $u): array
+    {
+        return [
             'nama' => $u->nama,
             'role' => $u->role,
             'tenant_id' => $u->tenant_id,
             'tenant_nama' => $u->tenant?->nama,
-        ]]);
+            'kategori_id' => $u->kategori_id,
+            'kategori_nama' => $u->kategori?->nama
+                ?? ($u->role === 'superadmin' ? 'Akses Penuh (bawaan)' : null),
+            'izin' => Izin::milik($u),
+        ];
     }
 
     public function logout(Request $r)

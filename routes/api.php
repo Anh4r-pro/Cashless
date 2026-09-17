@@ -1,6 +1,9 @@
 <?php
 
+use App\Http\Controllers\Api\AksesController;
+use App\Http\Controllers\Api\AkunController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\ImporKartuController;
 use App\Http\Controllers\Api\KasirController;
 use App\Http\Controllers\Api\AnalitikController;
 use App\Http\Controllers\Api\DashboardController;
@@ -40,21 +43,24 @@ Route::post('beli', [KasirController::class, 'beli'])->middleware('peran:tenant'
 
 // --- uang masuk & keluar di luar kasir (eksklusif superadmin) --------------
 Route::middleware('peran:superadmin')->group(function () {
-    Route::post('topup', [SaldoController::class, 'topup']);
-    Route::post('koreksi', [SaldoController::class, 'koreksi']);
-    Route::post('koreksi-massal', [SaldoController::class, 'koreksiMassal']);
+    Route::post('topup', [SaldoController::class, 'topup'])->middleware('izin:saldo.topup');
+    Route::post('koreksi', [SaldoController::class, 'koreksi'])->middleware('izin:saldo.koreksi');
+    Route::post('koreksi-massal', [SaldoController::class, 'koreksiMassal'])->middleware('izin:saldo.koreksi_massal');
 
-    Route::post('titipan/setor', [SaldoController::class, 'titipanSetor']);
-    Route::post('titipan/tarik', [SaldoController::class, 'titipanTarik']);
-    Route::post('titipan/cairkan', [SaldoController::class, 'titipanCairkan']);
-    Route::get('siswa/{id}/titipan', [SaldoController::class, 'titipanSiswa']);
-    Route::put('siswa/{id}/smart', [SaldoController::class, 'smart']);
+    Route::post('titipan/setor', [SaldoController::class, 'titipanSetor'])->middleware('izin:titipan.setor');
+    Route::post('titipan/tarik', [SaldoController::class, 'titipanTarik'])->middleware('izin:titipan.tarik');
+    Route::post('titipan/cairkan', [SaldoController::class, 'titipanCairkan'])->middleware('izin:titipan.cairkan');
+    Route::get('siswa/{id}/titipan', [SaldoController::class, 'titipanSiswa'])->middleware('izin:saldo.lihat');
+    Route::put('siswa/{id}/smart', [SaldoController::class, 'smart'])->middleware('izin:titipan.smart');
 });
 
 // --- pemegang kartu, golongan, tenant -------------------------------------
 Route::get('golongan', [GolonganController::class, 'index'])->middleware('peran:superadmin,tenant');
 
 Route::middleware('peran:superadmin')->group(function () {
+    // Hak akses rute pemegang kartu diperiksa DI DALAM controller: satu endpoint
+    // melayani layar Santri dan layar SDM sekaligus, dan lingkupnya baru
+    // ketahuan setelah golongan yang diminta dibaca.
     Route::get('siswa', [SiswaController::class, 'index']);
     Route::post('siswa', [SiswaController::class, 'store']);
     Route::put('siswa/{id}', [SiswaController::class, 'update']);
@@ -63,14 +69,14 @@ Route::middleware('peran:superadmin')->group(function () {
     Route::post('siswa/{id}/reset-pin', [SiswaController::class, 'resetPin']);
     Route::post('assign-card', [SiswaController::class, 'assignCard']);
 
-    Route::post('golongan', [GolonganController::class, 'store']);
-    Route::put('golongan/{id}', [GolonganController::class, 'update']);
-    Route::delete('golongan/{id}', [GolonganController::class, 'destroy']);
+    Route::post('golongan', [GolonganController::class, 'store'])->middleware('izin:golongan.kelola');
+    Route::put('golongan/{id}', [GolonganController::class, 'update'])->middleware('izin:golongan.kelola');
+    Route::delete('golongan/{id}', [GolonganController::class, 'destroy'])->middleware('izin:golongan.kelola');
 
-    Route::get('tenants', [TenantController::class, 'index']);
-    Route::post('tenants', [TenantController::class, 'store']);
-    Route::put('tenants/{id}', [TenantController::class, 'update']);
-    Route::delete('tenants/{id}', [TenantController::class, 'destroy']);
+    Route::get('tenants', [TenantController::class, 'index'])->middleware('izin:tenant.lihat');
+    Route::post('tenants', [TenantController::class, 'store'])->middleware('izin:tenant.tambah');
+    Route::put('tenants/{id}', [TenantController::class, 'update'])->middleware('izin:tenant.ubah');
+    Route::delete('tenants/{id}', [TenantController::class, 'destroy'])->middleware('izin:tenant.hapus');
 });
 
 // --- menu: tenant mengusulkan, superadmin memutuskan ----------------------
@@ -86,9 +92,9 @@ Route::middleware('peran:tenant')->group(function () {
 });
 
 Route::middleware('peran:superadmin')->group(function () {
-    Route::put('produk/{id}/kategori', [ProdukController::class, 'kategori']);
-    Route::post('produk/ajuan/{id}/setujui', [ProdukController::class, 'setujui']);
-    Route::post('produk/ajuan/{id}/tolak', [ProdukController::class, 'tolak']);
+    Route::put('produk/{id}/kategori', [ProdukController::class, 'kategori'])->middleware('izin:produk.kategori');
+    Route::post('produk/ajuan/{id}/setujui', [ProdukController::class, 'setujui'])->middleware('izin:ajuan.putuskan');
+    Route::post('produk/ajuan/{id}/tolak', [ProdukController::class, 'tolak'])->middleware('izin:ajuan.putuskan');
 });
 
 // --- riwayat, ekspor, setoran tenant, dashboard ----------------------------
@@ -100,9 +106,9 @@ Route::middleware('peran:tenant,superadmin')->group(function () {
 });
 
 Route::middleware('peran:superadmin')->group(function () {
-    Route::post('settlements', [SettlementController::class, 'store']);
-    Route::post('settlements/{id}/bukti', [SettlementController::class, 'bukti']);
-    Route::get('dashboard', [DashboardController::class, 'admin']);
+    Route::post('settlements', [SettlementController::class, 'store'])->middleware('izin:dashboard.setor');
+    Route::post('settlements/{id}/bukti', [SettlementController::class, 'bukti'])->middleware('izin:dashboard.setor');
+    Route::get('dashboard', [DashboardController::class, 'admin'])->middleware('izin:dashboard.lihat');
 });
 Route::get('dashboard-tenant', [DashboardController::class, 'tenant'])->middleware('peran:tenant');
 
@@ -110,12 +116,12 @@ Route::get('dashboard-tenant', [DashboardController::class, 'tenant'])->middlewa
 Route::get('kelas', [PengaturanController::class, 'kelas'])->middleware('peran:tenant,superadmin');
 
 Route::middleware('peran:superadmin')->group(function () {
-    Route::get('settings', [PengaturanController::class, 'index']);
-    Route::put('settings', [PengaturanController::class, 'simpan']);
-    Route::get('neraca', [PengaturanController::class, 'neraca']);
-    Route::post('neraca/saldo-awal', [PengaturanController::class, 'saldoAwal']);
-    Route::get('alasan-potong', [PengaturanController::class, 'alasan']);
-    Route::put('alasan-potong', [PengaturanController::class, 'simpanAlasan']);
+    Route::get('settings', [PengaturanController::class, 'index'])->middleware('izin:settings.lihat');
+    Route::put('settings', [PengaturanController::class, 'simpan'])->middleware('izin:settings.ubah');
+    Route::get('neraca', [PengaturanController::class, 'neraca'])->middleware('izin:neraca.lihat');
+    Route::post('neraca/saldo-awal', [PengaturanController::class, 'saldoAwal'])->middleware('izin:neraca.saldo_awal');
+    Route::get('alasan-potong', [PengaturanController::class, 'alasan'])->middleware('izin:saldo.lihat,saldo.alasan');
+    Route::put('alasan-potong', [PengaturanController::class, 'simpanAlasan'])->middleware('izin:saldo.alasan');
 });
 
 // --- analitik penjualan ---------------------------------------------------
@@ -136,15 +142,15 @@ Route::middleware('ortu')->group(function () {
 
 // --- donasi: admin menentukan jenis & besarannya ---------------------------
 Route::middleware('peran:superadmin')->group(function () {
-    Route::get('donasi/program', [DonasiController::class, 'program']);
-    Route::put('donasi/program', [DonasiController::class, 'simpanProgram']);
-    Route::get('donasi/pengaturan', [DonasiController::class, 'pengaturan']);
-    Route::put('donasi/pengaturan', [DonasiController::class, 'simpanPengaturan']);
-    Route::get('donasi/rekap', [DonasiController::class, 'rekap']);
-    Route::put('kios/sandi-layar', [KiosController::class, 'sandiLayar']);
+    Route::get('donasi/program', [DonasiController::class, 'program'])->middleware('izin:donasi.lihat');
+    Route::put('donasi/program', [DonasiController::class, 'simpanProgram'])->middleware('izin:donasi.program');
+    Route::get('donasi/pengaturan', [DonasiController::class, 'pengaturan'])->middleware('izin:donasi.lihat');
+    Route::put('donasi/pengaturan', [DonasiController::class, 'simpanPengaturan'])->middleware('izin:donasi.pengaturan');
+    Route::get('donasi/rekap', [DonasiController::class, 'rekap'])->middleware('izin:donasi.lihat');
+    Route::put('kios/sandi-layar', [KiosController::class, 'sandiLayar'])->middleware('izin:kios.pengaturan');
 });
 
-// --- layar kios siswa: tanpa login, dipagari tap kartu + PIN ---------------
+// --- layar kios santri: tanpa login, dipagari tap kartu + PIN ---------------
 Route::get('kios/info', [KiosController::class, 'info']);
 Route::post('kios/tap', [KiosController::class, 'tap']);
 Route::post('kios/donasi', [KiosController::class, 'donasi']);
@@ -157,10 +163,10 @@ Route::post('kios/selesai', [KiosController::class, 'selesai']);
 
 // --- top up massal dari berkas Excel/CSV (dua langkah: pratinjau, terapkan) -
 Route::middleware('peran:superadmin')->group(function () {
-    Route::get('topup-massal/template', [TopupMassalController::class, 'template']);
-    Route::post('topup-massal/pratinjau', [TopupMassalController::class, 'pratinjau']);
-    Route::post('topup-massal/terapkan', [TopupMassalController::class, 'terapkan']);
-    Route::get('topup-massal/riwayat', [TopupMassalController::class, 'riwayat']);
+    Route::get('topup-massal/template', [TopupMassalController::class, 'template'])->middleware('izin:massal.template');
+    Route::post('topup-massal/pratinjau', [TopupMassalController::class, 'pratinjau'])->middleware('izin:massal.lihat');
+    Route::post('topup-massal/terapkan', [TopupMassalController::class, 'terapkan'])->middleware('izin:massal.terapkan');
+    Route::get('topup-massal/riwayat', [TopupMassalController::class, 'riwayat'])->middleware('izin:massal.lihat');
 });
 
 // --- top up mandiri orang tua ---------------------------------------------
@@ -171,9 +177,36 @@ Route::middleware('ortu')->group(function () {
 });
 
 Route::middleware('peran:superadmin')->group(function () {
-    Route::get('topup-ortu', [TopupOrtuController::class, 'antrean']);
-    Route::post('topup-ortu/{id}/setujui', [TopupOrtuController::class, 'setujui']);
-    Route::post('topup-ortu/{id}/tolak', [TopupOrtuController::class, 'tolak']);
-    Route::get('topup-ortu/pengaturan', [TopupOrtuController::class, 'pengaturan']);
-    Route::put('topup-ortu/pengaturan', [TopupOrtuController::class, 'simpanPengaturan']);
+    Route::get('topup-ortu', [TopupOrtuController::class, 'antrean'])->middleware('izin:topup_ortu.lihat');
+    Route::post('topup-ortu/{id}/setujui', [TopupOrtuController::class, 'setujui'])->middleware('izin:topup_ortu.putuskan');
+    Route::post('topup-ortu/{id}/tolak', [TopupOrtuController::class, 'tolak'])->middleware('izin:topup_ortu.putuskan');
+    Route::get('topup-ortu/pengaturan', [TopupOrtuController::class, 'pengaturan'])->middleware('izin:topup_ortu.lihat,topup_ortu.pengaturan');
+    Route::put('topup-ortu/pengaturan', [TopupOrtuController::class, 'simpanPengaturan'])->middleware('izin:topup_ortu.pengaturan');
 });
+
+// --- pendaftaran kolektif pemegang kartu dari Excel (dua langkah) ----------
+// Izinnya (santri.impor / sdm.impor) diperiksa di controller, karena jenisnya
+// baru diketahui setelah parameter `jenis` dibaca.
+Route::middleware('peran:superadmin')->group(function () {
+    Route::get('impor-kartu/template', [ImporKartuController::class, 'template']);
+    Route::post('impor-kartu/pratinjau', [ImporKartuController::class, 'pratinjau']);
+    Route::post('impor-kartu/terapkan', [ImporKartuController::class, 'terapkan']);
+});
+
+// --- kategori akses & akun pengguna ---------------------------------------
+Route::middleware('peran:superadmin')->group(function () {
+    Route::get('akses/katalog', [AksesController::class, 'katalog']);
+    Route::get('akses/kategori', [AksesController::class, 'index']);
+    Route::post('akses/kategori', [AksesController::class, 'store']);
+    Route::put('akses/kategori/{id}', [AksesController::class, 'update']);
+    Route::delete('akses/kategori/{id}', [AksesController::class, 'destroy']);
+
+    Route::get('akun', [AkunController::class, 'index']);
+    Route::post('akun', [AkunController::class, 'store']);
+    Route::put('akun/{id}', [AkunController::class, 'update']);
+    Route::delete('akun/{id}', [AkunController::class, 'destroy']);
+});
+
+// Ganti sandi sendiri: terbuka untuk SETIAP staf yang sudah masuk, termasuk
+// akun kasir. Tanpa ini, seorang kasir yang sandinya bocor harus menunggu admin.
+Route::put('akun/saya/sandi', [AkunController::class, 'gantiSandi'])->middleware('masuk');

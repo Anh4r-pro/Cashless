@@ -12,17 +12,17 @@ use Illuminate\Support\Facades\Storage;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Penyaji berkas unggahan (foto siswa, bukti setoran, gambar QRIS).
+ * Penyaji berkas unggahan (foto santri, bukti setoran, gambar QRIS).
  *
  * Berkas ini TIDAK diletakkan di public/ karena tiap berkas punya pemiliknya:
- * bukti setoran seorang siswa bukan berkas yang boleh dibuka siapa saja yang
+ * bukti setoran seorang santri bukan berkas yang boleh dibuka siapa saja yang
  * menebak namanya. Staf yang sudah masuk boleh melihat semuanya; selain itu ada
  * dua perkecualian, masing-masing dibatasi berkas yang memang menjadi urusan
  * pemegang sesi itu sendiri:
  *
  *   - wali yang sedang masuk portal: foto anaknya, bukti bayar yang ia sendiri
  *     unggah, dan gambar QRIS sekolah yang sedang berlaku;
- *   - layar kios yang sedang memegang sesi tap: foto siswa itu saja. Tokennya
+ *   - layar kios yang sedang memegang sesi tap: foto santri itu saja. Tokennya
  *     dikirim lewat ?kios=… karena tag <img> tidak bisa mengirim header.
  */
 class UnggahanController

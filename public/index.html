@@ -38,6 +38,11 @@
 <header>
   <img src="/img/logo-imbos.png" alt="" class="hd-logo">
   <h1><span id="hd-title">Kantin Imbos</span></h1>
+  <!-- Tombol ☰ hanya tampil di layar sempit (diatur CSS). Menu bar TETAP ada
+       di DOM pada lebar berapa pun — lencana, penandaan tab aktif, dan lompatan
+       antar-tab semuanya mencari `#nav button[data-v=…]`. -->
+  <button id="btn-menu" class="hd-menu" aria-label="Buka menu" aria-expanded="false"
+    aria-controls="nav">☰</button>
   <nav id="nav"></nav>
   <span id="hd-user" class="hd-user"></span>
   <button id="btn-logout">Keluar</button>

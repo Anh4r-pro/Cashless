@@ -139,11 +139,11 @@ class Neraca
     }
 
     /**
-     * Siswa yang saldonya tidak sama dengan baris TERAKHIR buku besarnya.
+     * Santri yang saldonya tidak sama dengan baris TERAKHIR buku besarnya.
      *
      * Ini pemeriksa perubahan saldo di luar jalur aplikasi — sunting langsung
      * di basis data, atau bug yang lupa mencatat. Tiap transaksi menyimpan
-     * saldo_sesudah, jadi baris terakhir seorang siswa wajib sama dengan
+     * saldo_sesudah, jadi baris terakhir seorang santri wajib sama dengan
      * saldonya sekarang.
      */
     private static function driftSaldo(): array
@@ -225,7 +225,7 @@ class Neraca
                 ? 'Kewajiban lebih besar dari uang yang pernah masuk. Kalau ini pemasangan baru di ' .
                   'atas data lama/dummy, tetapkan saldo awal; kalau bukan, ada saldo yang muncul ' .
                   'tanpa uangnya masuk.'
-                : 'Uang masuk lebih besar dari kewajiban yang tercatat — mungkin ada saldo siswa ' .
+                : 'Uang masuk lebih besar dari kewajiban yang tercatat — mungkin ada saldo santri ' .
                   'yang dikurangi tanpa catatan, atau saldo awal yang diakui terlalu besar.'),
         ]];
 
@@ -246,7 +246,7 @@ class Neraca
                 'kode' => 'drift_saldo', 'label' => 'Saldo kartu cocok dengan baris terakhir buku besar',
                 'ok' => $drift['n'] === 0, 'nilai' => $drift['selisih'], 'jumlah_siswa' => $drift['n'],
                 'catatan' => $drift['n'] === 0 ? '' :
-                    "{$drift['n']} siswa saldonya tidak sama dengan catatan transaksi terakhirnya. " .
+                    "{$drift['n']} santri saldonya tidak sama dengan catatan transaksi terakhirnya. " .
                     'Berarti saldo pernah diubah di luar aplikasi.',
             ],
             ['kode' => 'drift_titipan', 'label' => 'Saldo titipan cocok dengan buku besar titipan',

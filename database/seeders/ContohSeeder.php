@@ -2,6 +2,7 @@
 
 namespace Database\Seeders;
 
+use App\Models\KategoriAkses;
 use App\Models\Produk;
 use App\Models\Siswa;
 use App\Models\Tenant;
@@ -29,7 +30,12 @@ class ContohSeeder extends Seeder
         // Hanya tenant berjenis koperasi yang boleh punya barang non-makanan.
         $t3 = Tenant::create(['nama' => 'Koperasi Sekolah', 'pemilik' => 'Ibu Rina', 'jenis' => 'koperasi']);
 
-        User::create(['username' => 'superadmin', 'password' => 'super123', 'nama' => 'Super Admin', 'role' => 'superadmin']);
+        // Akun bawaan ditempatkan di kategori terkunci "Akses Penuh" supaya
+        // layar Kelola Akun menampilkannya sebagaimana adanya, bukan sebagai
+        // baris tanpa kategori yang diam-diam memegang segalanya.
+        $penuh = KategoriAkses::where('terkunci', 1)->first();
+        User::create(['username' => 'superadmin', 'password' => 'super123', 'nama' => 'Super Admin',
+            'role' => 'superadmin', 'kategori_id' => $penuh?->id]);
         User::create(['username' => 'sari', 'password' => 'sari123', 'nama' => 'Ibu Sari', 'role' => 'tenant', 'tenant_id' => $t1->id]);
         User::create(['username' => 'budi', 'password' => 'budi123', 'nama' => 'Bapak Budi', 'role' => 'tenant', 'tenant_id' => $t2->id]);
         User::create(['username' => 'koperasi', 'password' => 'koperasi123', 'nama' => 'Ibu Rina', 'role' => 'tenant', 'tenant_id' => $t3->id]);

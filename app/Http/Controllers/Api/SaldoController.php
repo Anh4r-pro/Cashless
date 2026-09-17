@@ -80,14 +80,14 @@ class SaldoController extends Controller
         }
 
         return response()->json(DB::transaction(function () use ($siswaId, $jumlah, $user, $keterangan, $txId) {
-            // Kartu blokir tetap boleh dipotong — justru saldo siswa keluar
+            // Kartu blokir tetap boleh dipotong — justru saldo santri keluar
             // yang perlu dikembalikan. Saldo tidak boleh minus (dijaga di WHERE).
             $ubah = Siswa::where('id', $siswaId)->where('saldo', '>=', $jumlah)
                 ->update(['saldo' => DB::raw("saldo - {$jumlah}")]);
             if ($ubah === 0) {
                 $s = Siswa::find($siswaId);
                 if (! $s) {
-                    throw new ApiError(404, 'Siswa tidak ditemukan');
+                    throw new ApiError(404, 'Santri tidak ditemukan');
                 }
                 throw new ApiError(402, 'Saldo tidak cukup untuk dipotong (saldo ' . Rupiah::f($s->saldo) . ')');
             }
@@ -101,7 +101,7 @@ class SaldoController extends Controller
     /**
      * Potong saldo kolektif (mis. satu kelas). Seluruh batch berjalan dalam SATU
      * transaksi: kalau gagal di tengah, tidak ada saldo yang terlanjur berubah.
-     * Siswa bersaldo kurang tidak menggagalkan batch — dilaporkan balik supaya
+     * Santri bersaldo kurang tidak menggagalkan batch — dilaporkan balik supaya
      * admin bisa menindaklanjuti.
      */
     public function koreksiMassal(Request $r)
@@ -109,7 +109,7 @@ class SaldoController extends Controller
         $user = $this->wajibPeran($r, 'superadmin');
         $jumlah = (int) floor((float) $r->input('jumlah'));
         $keterangan = mb_substr(trim((string) $r->input('keterangan', '')), 0, 300);
-        // 'lewati' = siswa bersaldo kurang dilewati utuh (bawaan);
+        // 'lewati' = santri bersaldo kurang dilewati utuh (bawaan);
         // 'sebisanya' = dipotong sampai saldo habis.
         $modeKurang = $r->input('saldo_kurang') === 'sebisanya' ? 'sebisanya' : 'lewati';
         $ids = array_values(array_unique(array_filter(array_map(
@@ -122,10 +122,10 @@ class SaldoController extends Controller
             throw new ApiError(400, 'Alasan pemotongan wajib diisi (minimal 3 huruf)');
         }
         if (! $ids) {
-            throw new ApiError(400, 'Belum ada siswa yang dipilih');
+            throw new ApiError(400, 'Belum ada santri yang dipilih');
         }
         if (count($ids) > self::MAX_BATCH) {
-            throw new ApiError(400, 'Maksimal ' . self::MAX_BATCH . ' siswa sekali potong');
+            throw new ApiError(400, 'Maksimal ' . self::MAX_BATCH . ' santri sekali potong');
         }
 
         // batch_id menjaga idempotensi: tiap baris memakai tx_id
@@ -155,7 +155,7 @@ class SaldoController extends Controller
                 $s = Siswa::find($id);
                 if (! $s) {
                     $dilewati[] = ['id' => $id, 'nama' => '—', 'kelas' => '', 'saldo' => 0,
-                        'alasan' => 'Siswa tidak ditemukan'];
+                        'alasan' => 'Santri tidak ditemukan'];
 
                     continue;
                 }
@@ -220,7 +220,7 @@ class SaldoController extends Controller
             'mutasi' => $hasil['mutasi'], 'smart' => $smart]);
     }
 
-    /** Tarik titipan (uang dikembalikan tunai ke orang tua / siswa keluar). */
+    /** Tarik titipan (uang dikembalikan tunai ke orang tua / santri keluar). */
     public function titipanTarik(Request $r)
     {
         $user = $this->wajibPeran($r, 'superadmin');
@@ -241,7 +241,7 @@ class SaldoController extends Controller
             if ($ubah === 0) {
                 $s = Siswa::find($siswaId);
                 if (! $s) {
-                    throw new ApiError(404, 'Siswa tidak ditemukan');
+                    throw new ApiError(404, 'Santri tidak ditemukan');
                 }
                 throw new ApiError(402, 'Titipan tidak cukup (titipan ' . Rupiah::f($s->saldo_titipan) . ')');
             }
@@ -263,13 +263,13 @@ class SaldoController extends Controller
         return response()->json(['ok' => true, ...DB::transaction(function () use ($siswaId, $cfg, $user, $minta) {
             $s0 = Siswa::find($siswaId);
             if (! $s0) {
-                throw new ApiError(404, 'Siswa tidak ditemukan');
+                throw new ApiError(404, 'Santri tidak ditemukan');
             }
             if ($s0->status !== 'aktif') {
                 throw new ApiError(403, 'Kartu diblokir — pulihkan dulu atau tarik titipannya');
             }
             if ($s0->saldo_titipan <= 0) {
-                throw new ApiError(400, 'Siswa ini tidak punya saldo titipan');
+                throw new ApiError(400, 'Santri ini tidak punya saldo titipan');
             }
             $ruang = $cfg['max_saldo'] - $s0->saldo;
             if ($ruang <= 0) {
@@ -290,7 +290,7 @@ class SaldoController extends Controller
                     'saldo_titipan' => DB::raw("saldo_titipan - {$isi}"),
                 ]);
             if ($ubah === 0) {
-                throw new ApiError(409, 'Saldo siswa berubah barusan — coba lagi');
+                throw new ApiError(409, 'Saldo santri berubah barusan — coba lagi');
             }
             $s = Siswa::find($siswaId);
             $ket = 'Pencairan titipan ke kartu oleh admin';
@@ -302,13 +302,13 @@ class SaldoController extends Controller
         })]);
     }
 
-    /** Riwayat titipan seorang siswa + setelan smart top up yang berlaku baginya. */
+    /** Riwayat titipan seorang santri + setelan smart top up yang berlaku baginya. */
     public function titipanSiswa(Request $r, int $id)
     {
         $this->wajibPeran($r, 'superadmin');
         $s = Siswa::find($id);
         if (! $s) {
-            throw new ApiError(404, 'Siswa tidak ditemukan');
+            throw new ApiError(404, 'Santri tidak ditemukan');
         }
 
         return response()->json([
@@ -319,13 +319,13 @@ class SaldoController extends Controller
         ]);
     }
 
-    /** Setelan smart top up khusus seorang siswa (mengalahkan pengaturan sekolah). */
+    /** Setelan smart top up khusus seorang santri (mengalahkan pengaturan sekolah). */
     public function smart(Request $r, int $id)
     {
         $this->wajibPeran($r, 'superadmin');
         $s = Siswa::find($id);
         if (! $s) {
-            throw new ApiError(404, 'Siswa tidak ditemukan');
+            throw new ApiError(404, 'Santri tidak ditemukan');
         }
         $cfg = Pengaturan::sekolah();
 

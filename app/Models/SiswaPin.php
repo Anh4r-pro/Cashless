@@ -5,11 +5,11 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 
 /**
- * PIN kios siswa. Tabel terpisah dari `siswa`, bukan kolom di sana: banyak
- * endpoint mengembalikan baris siswa apa adanya ke klien, jadi menaruh hash
+ * PIN kios santri. Tabel terpisah dari `santri`, bukan kolom di sana: banyak
+ * endpoint mengembalikan baris santri apa adanya ke klien, jadi menaruh hash
  * di tabel utama berisiko ikut terkirim ke layar admin/kasir tanpa disadari.
  *
- * TIDAK ada baris = PIN masih bawaan (NIS siswa). Admin mereset PIN dengan
+ * TIDAK ada baris = PIN masih bawaan (NIS santri). Admin mereset PIN dengan
  * menghapus barisnya, bukan menulis nilai bawaan.
  */
 class SiswaPin extends Model

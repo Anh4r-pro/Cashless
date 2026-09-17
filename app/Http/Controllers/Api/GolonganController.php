@@ -102,7 +102,7 @@ class GolonganController extends Controller
         $isi = [
             'nama' => $nama,
             'label_unit' => mb_substr(trim((string) ($b['label_unit'] ?? $g->label_unit)), 0, 30) ?: 'Unit',
-            // Golongan 'siswa' tidak boleh dinonaktifkan: seluruh data lama
+            // Golongan berkode 'siswa' (tampil sebagai "Santri") tidak boleh dinonaktifkan: seluruh data lama
             // menunjuk ke sana, dan mematikannya membuat ribuan kartu kehilangan
             // aturannya.
             'aktif' => $g->kode === 'siswa' ? true
@@ -130,7 +130,7 @@ class GolonganController extends Controller
         if ($g->bawaan) {
             throw new ApiError(409, "\"{$g->nama}\" golongan bawaan — nonaktifkan saja, jangan dihapus");
         }
-        // Kartu yatim tanpa golongan akan diam-diam jatuh ke aturan 'siswa'.
+        // Kartu yatim tanpa golongan akan diam-diam jatuh ke aturan golongan berkode 'siswa'.
         // Lebih baik menolak sekarang daripada menemukannya lewat batas belanja
         // yang aneh berbulan-bulan kemudian.
         $n = Siswa::where('golongan', $g->kode)->count();

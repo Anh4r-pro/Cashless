@@ -30,6 +30,7 @@ class AnalitikController extends Controller
     public function umum(Request $r)
     {
         $u = $this->wajibPeran($r, 'tenant', 'superadmin');
+        $this->izinJikaAdmin($r, $u, 'analitik.lihat');
         $q = $r->query();
         $gran = SqlWaktu::granularitasSah($r->query('granularitas'));
         $P = SqlWaktu::periode($gran);
@@ -105,6 +106,7 @@ class AnalitikController extends Controller
     public function menu(Request $r)
     {
         $u = $this->wajibPeran($r, 'tenant', 'superadmin');
+        $this->izinJikaAdmin($r, $u, 'analitik.lihat');
         $q = $r->query();
         $batas = min(200, max(5, (int) $r->query('limit', 50) ?: 50));
 
@@ -186,6 +188,7 @@ class AnalitikController extends Controller
     public function menuTren(Request $r)
     {
         $u = $this->wajibPeran($r, 'tenant', 'superadmin');
+        $this->izinJikaAdmin($r, $u, 'analitik.lihat');
         $q = $r->query();
         $gran = SqlWaktu::granularitasSah($r->query('granularitas'));
         $P = SqlWaktu::periode($gran);

@@ -4,7 +4,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * Nominal donasi TIDAK bebas diketik siswa: hanya pilihan yang didaftarkan
+ * Nominal donasi TIDAK bebas diketik santri: hanya pilihan yang didaftarkan
  * admin di donasi_nominal yang diterima server.
  */
 return new class extends Migration {

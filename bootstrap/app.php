@@ -5,6 +5,7 @@ use App\Http\Middleware\SesiOrtuMiddleware;
 use App\Http\Middleware\SesiStafMiddleware;
 use App\Http\Middleware\WajibMasuk;
 use App\Http\Middleware\WajibOrtu;
+use App\Http\Middleware\WajibIzin;
 use App\Http\Middleware\WajibPeran;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -58,6 +59,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'masuk' => WajibMasuk::class,
             'peran' => WajibPeran::class,
+            'izin' => WajibIzin::class,
             'ortu' => WajibOrtu::class,
         ]);
 

@@ -4,7 +4,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * Pemegang kartu — siswa maupun SDM/tamu/VIP. Sengaja satu tabel: seluruh buku
+ * Pemegang kartu — santri maupun SDM/tamu/VIP. Sengaja satu tabel: seluruh buku
  * besar (transaksi, titipan_mutasi, settlement, neraca) menunjuk ke sini, dan
  * memecahnya berarti memecah buku besarnya juga.
  */
@@ -49,10 +49,10 @@ return new class extends Migration {
         });
 
         /**
-         * PIN kios. Tabel terpisah, bukan kolom di siswa: banyak endpoint
-         * mengembalikan baris siswa apa adanya, jadi hash di sana berisiko
+         * PIN kios. Tabel terpisah, bukan kolom di santri: banyak endpoint
+         * mengembalikan baris santri apa adanya, jadi hash di sana berisiko
          * ikut terkirim ke layar admin/kasir tanpa disadari.
-         * Tidak ada baris = PIN masih bawaan (NIS siswa).
+         * Tidak ada baris = PIN masih bawaan (NIS santri).
          */
         Schema::create('siswa_pin', function (Blueprint $t) {
             $t->foreignId('siswa_id')->primary()->constrained('siswa');

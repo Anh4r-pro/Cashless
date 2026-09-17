@@ -191,8 +191,8 @@ class TopupMassalController extends Controller
                     'keTitipan' => $keTitipan,
                     'operator' => $user->nama,
                     'keterangan' => $ket,
-                    // Idempotensi per BARIS, bukan per siswa: satu berkas boleh
-                    // memuat dua setoran untuk siswa yang sama tanpa yang kedua
+                    // Idempotensi per BARIS, bukan per santri: satu berkas boleh
+                    // memuat dua setoran untuk santri yang sama tanpa yang kedua
                     // dianggap duplikat.
                     'txId' => "impor-{$batchId}-b{$b['baris']}",
                     'refTitipan' => "impor-{$batchId}-b{$b['baris']}",
@@ -222,7 +222,7 @@ class TopupMassalController extends Controller
             return ['impor_id' => $impor->id, 'perluSmart' => array_keys($perluSmart)];
         });
 
-        // Isi ulang otomatis dijalankan SETELAH batch tersimpan: siswa bersaldo
+        // Isi ulang otomatis dijalankan SETELAH batch tersimpan: santri bersaldo
         // tipis langsung mendapat tetesan dari titipan yang baru masuk.
         $nSmart = 0;
         $rpSmart = 0;
@@ -277,7 +277,7 @@ class TopupMassalController extends Controller
 
         // Batas atas = paling banyak yang mungkin diterima satu baris: jatah
         // top up harian ditambah titipan yang masih boleh menampung. Sengaja
-        // longgar (bukan sepersis aturan server, yang bergantung saldo siswa
+        // longgar (bukan sepersis aturan server, yang bergantung saldo santri
         // saat itu) supaya Excel tidak pernah menolak nominal yang sah.
         $maksNominal = $cfg['max_topup_harian'] + $cfg['max_titipan'];
         $nomMin = 1000;
@@ -301,8 +301,8 @@ class TopupMassalController extends Controller
                 'Nomor tidak valid', 'Kolom No hanya boleh berisi angka urut.'],
 
             ['B', DataValidation::TYPE_TEXTLENGTH, DataValidation::OPERATOR_BETWEEN, '3', '20',
-                'NIS siswa',
-                'Harus sama dengan NIS pada data siswa (3–20 karakter). Nama siswa akan dicocokkan dengan NIS ini.',
+                'NIS santri',
+                'Harus sama dengan NIS pada data santri (3–20 karakter). Nama santri akan dicocokkan dengan NIS ini.',
                 'NIS tidak valid', 'NIS harus 3–20 karakter. Jangan menulis nama di kolom ini.'],
 
             ['D', DataValidation::TYPE_CUSTOM, null,
@@ -360,7 +360,7 @@ class TopupMassalController extends Controller
             'Cara mengisi berkas top up massal',
             '',
             '1. Isi satu baris untuk satu setoran. Kolom No hanya penomoran, boleh diabaikan.',
-            '2. NIS harus sama dengan NIS pada data siswa. Jangan mengubah judul kolom dan jangan menghapus baris judul — kolom dikenali dari judulnya.',
+            '2. NIS harus sama dengan NIS pada data santri. Jangan mengubah judul kolom dan jangan menghapus baris judul — kolom dikenali dari judulnya.',
             '3. Nama Santri wajib diisi dan dicocokkan dengan NIS. Kalau namanya berbeda, barisnya tidak akan diterapkan sebelum admin menyatakan sadar — pengaman agar uang tidak masuk ke kartu anak lain.',
             '4. Nominal Topup: ANGKA saja, tanpa "Rp" dan tanpa titik ribuan. Contoh: 50000 (bukan Rp50.000). Harus kelipatan Rp100.',
             '5. Tanggal Uang Diterima: persis DD/MM/YYYY dengan angka nol di depan, contoh 05/08/2026. Tanggal di masa depan atau lebih dari 365 hari yang lalu ditolak.',

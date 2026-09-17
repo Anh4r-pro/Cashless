@@ -4,7 +4,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * Golongan pemegang kartu (siswa / SDM / tamu / VIP).
+ * Golongan pemegang kartu (santri / SDM / tamu / VIP).
  * Kolom max_* adalah PENIMPA batas sekolah, bukan batas kedua:
  * NULL berarti "ikut pengaturan sekolah", bukan nol.
  */
@@ -13,7 +13,7 @@ return new class extends Migration {
     {
         Schema::create('golongan', function (Blueprint $t) {
             $t->id();
-            $t->string('kode')->unique();                 // dirujuk siswa.golongan
+            $t->string('kode')->unique();                 // dirujuk santri.golongan
             $t->string('nama');
             $t->string('label_unit')->default('Kelas');
             $t->enum('jenis', ['siswa', 'internal', 'tamu'])->default('internal');

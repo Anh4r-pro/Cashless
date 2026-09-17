@@ -10,7 +10,7 @@ use App\Models\Tenant;
  * Mengubah rincian keranjang dari kasir menjadi angka yang layak dipercaya.
  *
  * Harga SELALU diambil dari tabel produk, tidak pernah dari kiriman klien:
- * layar kasir boleh keliru atau tertinggal versi, tetapi yang menagih siswa
+ * layar kasir boleh keliru atau tertinggal versi, tetapi yang menagih santri
  * harus angka yang tercatat di basis data.
  *
  * Yang menentukan kategori makanan/non-makanan juga kolom produk.kategori —

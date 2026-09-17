@@ -31,9 +31,9 @@ return [
     'disks' => [
 
         /*
-         * Unggahan aplikasi (foto siswa, bukti setoran, gambar QRIS).
+         * Unggahan aplikasi (foto santri, bukti setoran, gambar QRIS).
          * TIDAK di bawah public/: tiap berkas dilayani lewat controller yang
-         * memeriksa hak akses dulu — bukti setoran seorang siswa bukan berkas
+         * memeriksa hak akses dulu — bukti setoran seorang santri bukan berkas
          * yang boleh dibuka siapa saja yang menebak namanya.
          */
         'unggahan' => [

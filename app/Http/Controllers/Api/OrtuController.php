@@ -68,7 +68,7 @@ class OrtuController extends Controller
             throw $gagal();
         }
 
-        // Golongan yang bukan siswa (SDM, tamu) tidak punya wali yang perlu
+        // Golongan yang bukan santri (SDM, tamu) tidak punya wali yang perlu
         // memantau, dan datanya justru lebih peka. Ditutup di sini, bukan
         // diserahkan ke kecocokan data — kartu guru pun punya tanggal lahir.
         $gol = Pengaturan::golongan($s->golongan);

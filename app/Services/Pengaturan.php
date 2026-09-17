@@ -61,7 +61,7 @@ class Pengaturan
         return $cfg;
     }
 
-    /** Satu golongan menurut kodenya; jatuh ke 'siswa' bila kodenya tidak dikenal. */
+    /** Satu golongan menurut kodenya; jatuh ke kode 'siswa' bila kodenya tidak dikenal. */
     public static function golongan(?string $kode): ?Golongan
     {
         return Golongan::where('kode', $kode ?: 'siswa')->first()

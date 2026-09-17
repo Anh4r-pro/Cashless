@@ -19,13 +19,16 @@ class CerminSqlite extends Command
 {
     protected $signature = 'kantin:cermin-sqlite {tujuan : Path berkas SQLite yang akan ditulis}';
 
-    protected $description = 'Tulis cermin SQLite (siswa + transaksi) untuk harness suite uji warisan';
+    protected $description = 'Tulis cermin SQLite (santri + transaksi) untuk harness suite uji warisan';
 
     public function handle(): int
     {
         $tujuan = $this->argument('tujuan');
         @unlink($tujuan);
 
+        // Nama tabel di cermin ini sengaja tetap `siswa`, bukan `santri`:
+        // yang membacanya adalah suite uji warisan dari repo Node, dan
+        // kuerinya menyebut nama tabel itu apa adanya.
         $db = new \PDO('sqlite:' . $tujuan);
         $db->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
         $db->exec('CREATE TABLE siswa (

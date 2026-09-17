@@ -7,7 +7,7 @@ use App\Models\Siswa;
 use Illuminate\Support\Facades\Cache;
 
 /**
- * Sesi layar kios siswa — dibuka dengan tap kartu, berumur pendek.
+ * Sesi layar kios santri — dibuka dengan tap kartu, berumur pendek.
  *
  * Disimpan di cache, bukan memori proses: PHP-FPM melayani tiap permintaan di
  * proses yang berbeda, jadi peta dalam memori akan hilang di antara dua ketukan
@@ -18,12 +18,12 @@ use Illuminate\Support\Facades\Cache;
  *     TIDAK langsung dibuang, melainkan disimpan bersama jawabannya sampai
  *     kedaluwarsa: kalau jaringan kios putus tepat setelah donasi tercatat,
  *     kiriman ulang dengan tx_id yang sama menerima jawaban yang sama — bukan
- *     "sesi berakhir" yang membuat siswa mengira gagal lalu berdonasi dua kali.
+ *     "sesi berakhir" yang membuat santri mengira gagal lalu berdonasi dua kali.
  *   - `cari` — satu tap kartu sendiri cukup untuk menyisir seluruh NIS sekolah
  *     dan memanen daftar nama; NIS adalah PIN bawaan kios, jadi daftar itu bukan
  *     data sepele.
  *   - `riwayat` — PIN diminta sekali per tap, bukan tiap halaman: kalau tiap
- *     halaman meminta PIN, siswa mengetik PIN berkali-kali di depan antrean.
+ *     halaman meminta PIN, santri mengetik PIN berkali-kali di depan antrean.
  */
 class SesiKios
 {
@@ -57,7 +57,7 @@ class SesiKios
     }
 
     /**
-     * @return array{token:string, sesi:array, siswa:Siswa}
+     * @return array{token:string, sesi:array, santri:Santri}
      */
     public static function ambil(?string $tokenMentah): array
     {
@@ -101,7 +101,7 @@ class SesiKios
         Cache::forget(self::kunci((string) $token));
     }
 
-    /** Tutup semua sesi milik satu siswa (NIS atau statusnya baru berubah). */
+    /** Tutup semua sesi milik satu santri (NIS atau statusnya baru berubah). */
     public static function tutupSemua(int $siswaId): void
     {
         foreach (Cache::get(self::kunciSiswa($siswaId), []) as $token) {

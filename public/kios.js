@@ -1,6 +1,6 @@
 'use strict';
 /*
- * Kios Siswa — layar mandiri yang dipasang di depan reader kartu.
+ * Kios Santri — layar mandiri yang dipasang di depan reader kartu.
  *
  * Aturan alur (ditegakkan juga di server, ini hanya cerminannya di layar):
  *   - Cek saldo cukup TAP.
@@ -9,7 +9,7 @@
  *   - Lupa PIN tidak ada jalan keluarnya di sini — harus ke admin kantin.
  *
  * Tidak ada login dan tidak ada cookie: sesi kios berumur pendek, hidup di
- * memori server, dan ditutup begitu siswa selesai / diam terlalu lama.
+ * memori server, dan ditutup begitu santri selesai / diam terlalu lama.
  */
 
 const $ = (s) => document.querySelector(s);
@@ -72,8 +72,8 @@ async function api(path, body) {
 
 // ========================================================== keadaan layar
 let INFO = { aktif: true, program: [], maks_donasi_harian: 0 };
-let SESI = null;            // hasil /api/kios/tap untuk siswa yang sedang di depan layar
-let layar = 'idle';         // idle | siswa | program | nominal | pin | riwayat | hasil | tutup
+let SESI = null;            // hasil /api/kios/tap untuk santri yang sedang di depan layar
+let layar = 'idle';         // idle | santri | program | nominal | pin | riwayat | hasil | tutup
 let alur = null;            // rincian alur yang sedang berjalan (donasi / ganti pin / riwayat)
 let RIW = null;             // riwayat yang sedang dibaca — dibuang bersama sesi
 let pin = '';               // isian PIN sementara — tidak pernah disimpan ke mana pun
@@ -81,7 +81,7 @@ let sisaDetik = 0;
 let jamTimer = null;
 
 // ========================================================== hitung mundur
-// Sesi kios ditutup sendiri kalau siswa meninggalkan layar tanpa menekan
+// Sesi kios ditutup sendiri kalau santri meninggalkan layar tanpa menekan
 // "Selesai" — kartu berikutnya tidak boleh menumpang sesi orang sebelumnya.
 let mundurTimer = null;
 function mulaiMundur(detik) {
@@ -95,7 +95,7 @@ function mulaiMundur(detik) {
   }, 1000);
 }
 function hentikanMundur() { clearInterval(mundurTimer); mundurTimer = null; }
-/** Setiap sentuhan siswa memperpanjang waktu layar. */
+/** Setiap sentuhan santri memperpanjang waktu layar. */
 function segarkanMundur() { if (mundurTimer && SESI) sisaDetik = SESI.sesi_detik || 60; }
 
 // ====================================================== mode layar penuh
@@ -146,8 +146,8 @@ function perbaruiGembok() {
   if (perluKunci && !TERKUNCI) {
     TERKUNCI = true;
     sandi = '';
-    // Layar penuh lepas saat ada siswa di depan layar → tutup sesinya. Data
-    // siswa tidak boleh tertinggal di balik gembok untuk dibaca orang lain.
+    // Layar penuh lepas saat ada santri di depan layar → tutup sesinya. Data
+    // santri tidak boleh tertinggal di balik gembok untuk dibaca orang lain.
     if (SESI) selesai(false);
   }
   if (!perluKunci) TERKUNCI = false;
@@ -249,13 +249,13 @@ async function kartuDitempel(uid) {
   if (uid === tapTerakhir.uid && now - tapTerakhir.at < 2000) return;   // anti baca ganda
   tapTerakhir = { uid, at: now };
   pin = '';                       // buang sisa ketikan reader di layar PIN
-  // Tap kapan saja langsung membuka sesi baru: kalau siswa berikutnya sudah
-  // menempel kartu, layar tidak boleh tertinggal di data siswa sebelumnya.
+  // Tap kapan saja langsung membuka sesi baru: kalau santri berikutnya sudah
+  // menempel kartu, layar tidak boleh tertinggal di data santri sebelumnya.
   try {
     const d = await api('/api/kios/tap', { uid });
     if (!d.terdaftar) { SESI = null; RIW = null; layar = 'tutup'; render({ pesan: 'Kartu ini belum terdaftar. Silakan ke admin kantin.' }); return; }
     SESI = d;
-    pin = ''; alur = null; RIW = null;   // riwayat siswa sebelumnya tidak boleh tertinggal di layar
+    pin = ''; alur = null; RIW = null;   // riwayat santri sebelumnya tidak boleh tertinggal di layar
     layar = 'siswa';
     render();
     mulaiMundur(d.sesi_detik || 60);
@@ -315,7 +315,7 @@ function idleHtml() {
   if (!INFO.aktif) {
     return `<div class="k-idle">
       <img class="k-logo" src="/img/logo-imbos.png" alt="Logo IMBOS">
-      <h1>Kios Siswa sedang ditutup</h1>
+      <h1>Kios Santri sedang ditutup</h1>
       <p class="k-sub">Silakan hubungi admin kantin.</p>
     </div>`;
   }
@@ -326,7 +326,7 @@ function idleHtml() {
     </div>`).join('');
   return `<div class="k-idle">
     <img class="k-logo" src="/img/logo-imbos.png" alt="Logo IMBOS">
-    <h1>Kios Siswa Kantin Imbos</h1>
+    <h1>Kios Santri Kantin Imbos</h1>
     <div class="k-tapzone"><span class="k-tap-ikon">${IKON.kartu}</span>
       <b>Tempelkan kartu ke pembaca</b>
       <span class="k-sub">Cek saldo cukup tap · Donasi: tap lalu masukkan PIN</span>
@@ -501,7 +501,7 @@ function nominalHtml() {
 /**
  * Boleh-tidaknya mengirim, beserta alasannya kalau tidak. Tombolnya sengaja
  * tetap terlihat (dalam keadaan mati) ketika alasannya bersifat sementara —
- * "jatah hari ini habis" adalah keterangan yang dicari siswa, sedangkan tombol
+ * "jatah hari ini habis" adalah keterangan yang dicari santri, sedangkan tombol
  * yang lenyap tanpa jejak hanya membuatnya menekan-nekan layar.
  */
 function keadaanTransfer() {
@@ -947,8 +947,8 @@ async function kirimPin() {
 }
 
 /**
- * Gagal karena sesi habis → kembali ke layar awal (siswa harus tap lagi).
- * Gagal karena PIN/saldo/batas → tetap di layar, siswa boleh mencoba lagi.
+ * Gagal karena sesi habis → kembali ke layar awal (santri harus tap lagi).
+ * Gagal karena PIN/saldo/batas → tetap di layar, santri boleh mencoba lagi.
  */
 function tanganiGagal(e, kembaliKe) {
   toast(e.message, 'err');

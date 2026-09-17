@@ -43,7 +43,7 @@ class TopupOrtuController extends Controller
         'topup_ortu_aktif' => ['label' => 'Orang tua boleh mengajukan top up', 'unit' => 'onoff'],
         'topup_ortu_min' => ['label' => 'Nominal terkecil satu pengajuan', 'unit' => 'rp'],
         'topup_ortu_maks' => ['label' => 'Nominal terbesar satu pengajuan', 'unit' => 'rp'],
-        'topup_ortu_antre' => ['label' => 'Maks pengajuan menunggu / siswa', 'unit' => 'kali'],
+        'topup_ortu_antre' => ['label' => 'Maks pengajuan menunggu / santri', 'unit' => 'kali'],
     ];
 
     private const INFO_KEYS = ['qris_gambar', 'qris_nama', 'qris_instruksi',
@@ -329,11 +329,11 @@ class TopupOrtuController extends Controller
         }
         // Pengajuan yang dari awal mustahil disetujui hanya akan menumpuk di antrean.
         if ($nilai['topup_ortu_maks'] > $nilai['max_saldo']) {
-            throw new ApiError(400, 'Nominal terbesar tidak boleh melampaui batas saldo siswa (' .
+            throw new ApiError(400, 'Nominal terbesar tidak boleh melampaui batas saldo santri (' .
                 Rupiah::f($nilai['max_saldo']) . ')');
         }
         if ($nilai['topup_ortu_antre'] > self::ANTRE_BATAS_ATAS) {
-            throw new ApiError(400, 'Maksimal ' . self::ANTRE_BATAS_ATAS . ' pengajuan menunggu per siswa');
+            throw new ApiError(400, 'Maksimal ' . self::ANTRE_BATAS_ATAS . ' pengajuan menunggu per santri');
         }
 
         $info = self::info_();

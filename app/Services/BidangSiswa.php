@@ -16,6 +16,17 @@ use App\Models\Siswa;
 class BidangSiswa
 {
     /**
+     * Pilihan Unit untuk SDM & personil.
+     *
+     * Hanya MENGIKAT pada impor kolektif dan sebagai isi daftar pilihan di
+     * layar. Endpoint satuan sengaja dibiarkan menerima nilai lain: data lama
+     * (dan kartu tamu instansi) sudah terlanjur memakai unit di luar daftar
+     * ini, dan menolaknya saat penyuntingan akan membuat baris lama mustahil
+     * disimpan ulang.
+     */
+    public const UNIT_SDM = ['Pengasuhan', 'SMP', 'SMA', 'Ekskul', 'RT', 'LE', 'Lainnya'];
+
+    /**
      * Bidang portal wali. NISN wajib khas karena dipakai sebagai kunci
      * pencarian saat wali murid masuk.
      */

@@ -21,7 +21,7 @@ use App\Support\WaktuIso;
 class BukuBesar
 {
     /**
-     * Catat mutasi saldo kartu. Nilai saldo_sesudah diambil dari baris siswa
+     * Catat mutasi saldo kartu. Nilai saldo_sesudah diambil dari baris santri
      * yang SUDAH diperbarui, jadi pemanggil wajib memperbarui saldo lebih dulu
      * di dalam transaksi basis data yang sama.
      */

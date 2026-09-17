@@ -21,17 +21,17 @@ class PengaturanController extends Controller
 
     /** Batas pokok yang berlaku untuk seluruh sekolah. */
     public const LABEL_POKOK = [
-        'max_saldo' => ['label' => 'Max saldo siswa', 'unit' => 'rp'],
-        'max_topup_harian' => ['label' => 'Max top up siswa / hari', 'unit' => 'rp'],
-        'max_beli_harian' => ['label' => 'Max jumlah transaksi siswa / hari', 'unit' => 'kali'],
-        'max_belanja_harian' => ['label' => 'Max akumulasi transaksi siswa/hari', 'unit' => 'rp'],
+        'max_saldo' => ['label' => 'Max saldo santri', 'unit' => 'rp'],
+        'max_topup_harian' => ['label' => 'Max top up santri / hari', 'unit' => 'rp'],
+        'max_beli_harian' => ['label' => 'Max jumlah transaksi santri / hari', 'unit' => 'kali'],
+        'max_belanja_harian' => ['label' => 'Max akumulasi transaksi santri/hari', 'unit' => 'rp'],
         'max_per_transaksi' => ['label' => 'Max per transaksi', 'unit' => 'rp'],
     ];
 
     /** Saldo titipan & isi ulang otomatis. */
     public const LABEL_TITIPAN = [
         'titipan_aktif' => ['label' => 'Kelebihan top up disimpan jadi titipan', 'unit' => 'onoff'],
-        'max_titipan' => ['label' => 'Max saldo titipan / siswa', 'unit' => 'rp'],
+        'max_titipan' => ['label' => 'Max saldo titipan / santri', 'unit' => 'rp'],
         'smart_aktif' => ['label' => 'Smart top up otomatis', 'unit' => 'onoff'],
         'smart_ambang' => ['label' => 'Isi ulang saat saldo turun sampai', 'unit' => 'rp'],
         'smart_isi' => ['label' => 'Isi ulang sampai saldo menjadi', 'unit' => 'rp'],
@@ -245,6 +245,10 @@ class PengaturanController extends Controller
 
         return response()->json([
             'kelas' => Siswa::where('kelas', '!=', '')->distinct()->orderBy('kelas')->pluck('kelas'),
+            // Daftar Unit untuk SDM & personil datang dari kode, bukan dari data:
+            // pilihannya harus tetap lengkap walau belum ada satu pun personil
+            // yang terdaftar di unit tersebut.
+            'unit_sdm' => \App\Services\BidangSiswa::UNIT_SDM,
         ]);
     }
 }

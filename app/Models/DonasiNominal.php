@@ -5,7 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 
 /**
- * Pilihan nominal donasi. Nominal TIDAK bebas diketik siswa — hanya baris
+ * Pilihan nominal donasi. Nominal TIDAK bebas diketik santri — hanya baris
  * di sini yang diterima server, supaya besarannya keputusan sekolah.
  */
 class DonasiNominal extends Model

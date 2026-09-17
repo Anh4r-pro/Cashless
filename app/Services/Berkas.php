@@ -6,7 +6,7 @@ use App\Exceptions\ApiError;
 use Illuminate\Support\Facades\Storage;
 
 /**
- * Penyimpanan berkas unggahan (foto siswa, bukti setoran, gambar QRIS).
+ * Penyimpanan berkas unggahan (foto santri, bukti setoran, gambar QRIS).
  *
  * Unggahan datang sebagai data URL di dalam body JSON, bukan multipart —
  * bentuk itu dipertahankan karena frontend dan suite uji sudah memakainya.

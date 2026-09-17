@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Exceptions\ApiError;
 use App\Models\User;
+use App\Services\Izin;
 use Illuminate\Http\Request;
 
 /**
@@ -33,5 +34,34 @@ abstract class Controller
         }
 
         return $u;
+    }
+
+    /**
+     * Pagar per aksi untuk endpoint yang melayani lebih dari satu layar,
+     * sehingga fitur yang dibutuhkan baru ketahuan setelah isi permintaan
+     * dibaca — misalnya endpoint pemegang kartu yang dipakai layar Santri
+     * maupun layar SDM.
+     */
+    protected function wajibIzin(Request $r, string $kode): User
+    {
+        $u = $this->wajibPeran($r, 'superadmin');
+        Izin::wajib($u, $kode);
+
+        return $u;
+    }
+
+    /**
+     * Pagar untuk endpoint yang dipakai BERSAMA oleh kasir dan admin.
+     *
+     * Akun kasir tidak punya kategori akses sama sekali, sehingga memasang
+     * `izin:` di rutenya akan menolak kasir dari layarnya sendiri. Di sini
+     * izin hanya dituntut bila yang memanggil memang akun sisi admin —
+     * jangkauan data kasir tetap dipagari tenant_id di kueri masing-masing.
+     */
+    protected function izinJikaAdmin(Request $r, User $u, string $kode): void
+    {
+        if ($u->role === 'superadmin') {
+            Izin::wajib($u, $kode);
+        }
     }
 }

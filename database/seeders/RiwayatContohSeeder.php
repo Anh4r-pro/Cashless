@@ -19,7 +19,7 @@ use Illuminate\Support\Facades\DB;
  *
  *     php artisan db:seed --class=RiwayatContohSeeder
  *
- * Saldo siswa DISESUAIKAN mengikuti transaksi yang dibuat, jadi neraca kas
+ * Saldo santri DISESUAIKAN mengikuti transaksi yang dibuat, jadi neraca kas
  * tetap seimbang dan panel pemeriksaan keutuhan tidak melaporkan selisih palsu.
  */
 class RiwayatContohSeeder extends Seeder
@@ -38,7 +38,7 @@ class RiwayatContohSeeder extends Seeder
         $siswa = Siswa::where('golongan', 'siswa')->where('status', 'aktif')->get();
         $tenants = Tenant::where('status', 'aktif')->get();
         if ($siswa->isEmpty() || $tenants->isEmpty()) {
-            $this->command?->warn('Belum ada siswa/tenant — jalankan ContohSeeder dulu.');
+            $this->command?->warn('Belum ada santri/tenant — jalankan ContohSeeder dulu.');
 
             return;
         }
@@ -92,7 +92,7 @@ class RiwayatContohSeeder extends Seeder
             }
         });
 
-        $this->command?->info('Riwayat contoh dibuat untuk ' . $siswa->count() . ' siswa.');
+        $this->command?->info('Riwayat contoh dibuat untuk ' . $siswa->count() . ' santri.');
     }
 
     private function topup(Siswa $s, int $jumlah, int $saldo, string $waktu): void

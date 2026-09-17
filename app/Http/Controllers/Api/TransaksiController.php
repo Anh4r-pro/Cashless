@@ -12,6 +12,7 @@ class TransaksiController extends Controller
     public function index(Request $r)
     {
         $u = $this->wajibPeran($r, 'tenant', 'superadmin');
+        $this->izinJikaAdmin($r, $u, 'riwayat.lihat');
 
         return response()->json(SaringTransaksi::ambil($u, $r->query()));
     }
@@ -19,6 +20,7 @@ class TransaksiController extends Controller
     public function ekspor(Request $r)
     {
         $u = $this->wajibPeran($r, 'tenant', 'superadmin');
+        $this->izinJikaAdmin($r, $u, 'riwayat.ekspor');
         $data = SaringTransaksi::ambil($u, $r->query(), 20000);
         $meta = $this->meta($u, $r, $data);
         $stamp = date('Y-m-d');
@@ -50,6 +52,7 @@ class TransaksiController extends Controller
     public function cetak(Request $r)
     {
         $u = $this->wajibPeran($r, 'tenant', 'superadmin');
+        $this->izinJikaAdmin($r, $u, 'riwayat.ekspor');
         $data = SaringTransaksi::ambil($u, $r->query(), 20000);
         $tabel = Ekspor::tabelHtml($data['rows'], $this->meta($u, $r, $data));
 
