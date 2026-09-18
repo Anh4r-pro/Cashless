@@ -138,7 +138,27 @@ main { max-width: 1200px; margin: 20px auto; padding: 0 16px; }
 @media (prefers-reduced-motion: reduce) { #boot img { animation: none; opacity: .8; } }
 
 #login, #ortu-login { max-width: 400px; margin: 7vh auto; padding: 0 16px; }
-.login-panel { padding: 28px; text-align: center; border-top: 4px solid var(--gold); }
+/* --- kotak masuk --------------------------------------------------------
+   Latar kotaknya dibedakan dari putih (#bbe3f2, diminta pemilik sistem) supaya
+   kotak isian terbaca sebagai kotak — sebelumnya panel dan isian sama-sama
+   putih, sehingga bidang yang harus diisi tidak terlihat sebagai bidang.
+
+   Tiga warna di bawahnya ikut digelapkan, dan itu BUKAN soal selera. Di atas
+   putih, --muted mencapai 5,0:1 dan tautan portal wali 3,9:1. Di atas #bbe3f2
+   keduanya jatuh ke 3,6:1 dan 2,8:1 — di bawah ambang keterbacaan 4,5:1, dan
+   yang paling dirugikan justru yang membacanya di layar ponsel di bawah matahari.
+   Garis tepi isian juga digelapkan: --line di atas latar ini hanya 1,07:1,
+   praktis tak terlihat, sehingga kotak putihnya akan mengapung tanpa batas.
+
+   Semua penimpa ini DIKURUNG di dalam .login-panel — palet seluruh aplikasi
+   tidak tersentuh. */
+.login-panel { padding: 28px; text-align: center; border-top: 4px solid var(--gold);
+  background: #bbe3f2; }
+.login-panel .muted { color: #4e5972; }                 /* 5,1:1 */
+.login-panel .field label { color: #45506b; }           /* 5,9:1 */
+.login-panel .ortu-link { color: #12587f; }             /* 5,6:1 */
+.login-panel input { border-color: #527c96; }           /* 3,3:1 — tepinya terlihat */
+.login-panel input:focus { outline-color: var(--navy); }
 .login-logo { width: 110px; height: 110px; object-fit: contain; margin-bottom: 8px; }
 .login-panel h1 { font-size: 24px; color: var(--navy); }
 .login-panel .field { text-align: left; margin-top: 10px; }
