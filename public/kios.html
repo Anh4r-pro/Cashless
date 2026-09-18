@@ -5,8 +5,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kios Santri — Kantin Imbos</title>
 <link rel="icon" type="image/png" href="/img/logo-imbos.png">
+<!-- Fonta Google TIDAK BOLEH memblokir render.
+     Sebagai <link rel=stylesheet> biasa, halaman menunggu satu host ASING
+     selesai dijawab sebelum menggambar apa pun — dan di sambungan buruk itu
+     berarti DNS + TCP + TLS ke dua host tambahan sebelum satu huruf muncul.
+     Pola media="print" lalu ditukar saat selesai membuat unduhannya berjalan
+     di latar: teks langsung tampil dengan fonta sistem, lalu berganti sendiri.
+     Tumpukan fallback di style.css (system-ui, sans-serif / serif) memang sudah
+     disiapkan untuk ini, jadi halaman tetap rapi walau Google tak terjangkau. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Slab:wght@600;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Slab:wght@600;800&display=swap"
+      rel="stylesheet" media="print" onload="this.media='all'">
+<noscript><link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Slab:wght@600;800&display=swap" rel="stylesheet"></noscript>
 <link rel="stylesheet" href="/style.css">
 </head>
 <!-- Layar kios di depan reader: dipakai bergantian oleh banyak santri, tanpa

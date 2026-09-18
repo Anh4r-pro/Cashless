@@ -766,7 +766,12 @@ async function muatKategoriProduk() {
 }
 
 async function loadAjuanSA() {
-  const d = await api('/api/produk/ajuan?status=' + ajuanStatus);
+  // Daftar tenant hanya dipakai untuk mengenali mana yang koperasi, dan tidak
+  // bergantung pada daftar ajuan — jadi keduanya diminta bersamaan.
+  const [d, tenantResp] = await Promise.all([
+    api('/api/produk/ajuan?status=' + ajuanStatus),
+    api('/api/tenants').catch(() => ({ tenants: [] })),
+  ]);
   setLencanaAjuan(d.menunggu);
   $('#aju-sa-body').innerHTML = d.ajuan.map((a) => `
     <tr class="${a.status === 'menunggu' ? 'tp-menunggu' : ''}">
@@ -785,7 +790,7 @@ async function loadAjuanSA() {
 
   // Tenant koperasi: menu baru yang disetujui perlu ditetapkan kategorinya
   // sekalian, supaya tidak ada barang yang menunggu tanpa jatah yang benar.
-  const { tenants } = await api('/api/tenants').catch(() => ({ tenants: [] }));
+  const { tenants } = tenantResp;
   const koperasiId = new Set(tenants.filter((t) => t.jenis === 'koperasi').map((t) => t.id));
 
   document.querySelectorAll('#aju-sa-body [data-setuju]').forEach((b) => {
@@ -1002,11 +1007,25 @@ function setLencanaAjuan(n) {
 }
 
 async function dashSAView(el) {
-  const d = await api('/api/dashboard');
+  /*
+   * Keempat permintaan ini DIJALANKAN BERSAMAAN, bukan berurutan.
+   *
+   * Sebelumnya masing-masing ditunggu satu per satu. Servernya cepat (35–75 ms),
+   * jadi di kantor perbedaannya tak terasa — tapi yang menentukan di sambungan
+   * buruk bukan lamanya server berpikir, melainkan berapa kali harus bolak-balik.
+   * Pada latensi 400 ms, empat permintaan berurutan berarti menunggu ~1,8 detik
+   * sebelum layar mulai tergambar; bersamaan, cukup ~0,5 detik.
+   *
+   * Tidak satu pun dari keempatnya memerlukan hasil yang lain, jadi tidak ada
+   * yang dikorbankan. Neraca dibiarkan boleh gagal sendiri — panelnya opsional.
+   */
+  const [d, st, cfg, nr] = await Promise.all([
+    api('/api/dashboard'),
+    api('/api/settlements'),
+    api('/api/settings'),
+    api('/api/neraca').catch(() => null),
+  ]);
   setLencanaAjuan(d.menu_menunggu);
-  const st = await api('/api/settlements');
-  const cfg = await api('/api/settings');
-  const nr = await api('/api/neraca').catch(() => null);
   el.innerHTML = `
     ${nr ? neracaPanel(nr) : ''}
     <div class="cards">
