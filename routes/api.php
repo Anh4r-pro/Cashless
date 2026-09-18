@@ -2,8 +2,10 @@
 
 use App\Http\Controllers\Api\AksesController;
 use App\Http\Controllers\Api\AkunController;
+use App\Http\Controllers\Api\ArsipController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ImporKartuController;
+use App\Http\Controllers\Api\KenaikanKelasController;
 use App\Http\Controllers\Api\KasirController;
 use App\Http\Controllers\Api\AnalitikController;
 use App\Http\Controllers\Api\DashboardController;
@@ -210,3 +212,22 @@ Route::middleware('peran:superadmin')->group(function () {
 // Ganti sandi sendiri: terbuka untuk SETIAP staf yang sudah masuk, termasuk
 // akun kasir. Tanpa ini, seorang kasir yang sandinya bocor harus menunggu admin.
 Route::put('akun/saya/sandi', [AkunController::class, 'gantiSandi'])->middleware('masuk');
+
+// --- daur hidup pemegang kartu: Alumni / Lanjut Study / Pindah -------------
+// Izinnya (santri.arsip / sdm.arsip) diperiksa di controller, karena lingkupnya
+// baru diketahui setelah golongan kartu yang bersangkutan dibaca.
+Route::middleware('peran:superadmin')->group(function () {
+    Route::get('arsip/pratinjau', [ArsipController::class, 'pratinjau']);
+    Route::get('arsip/unduh', [ArsipController::class, 'unduh']);
+    Route::post('arsip/massal', [ArsipController::class, 'massal']);
+    Route::post('siswa/{id}/arsip', [ArsipController::class, 'satu']);
+    Route::post('siswa/{id}/aktifkan', [ArsipController::class, 'aktifkan']);
+});
+
+// --- kenaikan kelas massal (sekali per tahun ajaran) -----------------------
+Route::middleware('peran:superadmin')->group(function () {
+    Route::get('kenaikan-kelas/pratinjau', [KenaikanKelasController::class, 'pratinjau']);
+    Route::get('kenaikan-kelas', [KenaikanKelasController::class, 'riwayat']);
+    Route::post('kenaikan-kelas/terapkan', [KenaikanKelasController::class, 'terapkan']);
+    Route::post('kenaikan-kelas/{id}/batalkan', [KenaikanKelasController::class, 'batalkan']);
+});

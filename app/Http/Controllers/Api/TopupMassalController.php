@@ -43,7 +43,10 @@ class TopupMassalController extends Controller
         $siswa = $isi
             ? Siswa::where('status', 'aktif')
                 ->when($kelas !== '', fn ($q) => $q->where('kelas', $kelas))
-                ->orderBy($kelas !== '' ? 'nama' : 'kelas')->orderBy('nama')
+                // Tanpa saringan kelas, berkasnya dikelompokkan per kelas —
+                // sadar-angka, supaya 10A tidak mendahului 7A.
+                ->when($kelas === '', fn ($q) => $q->orderByRaw(\App\Services\Kelas::urutSql()))
+                ->orderBy('nama')
                 ->get(['nis', 'nama', 'kelas'])
             : collect();
 

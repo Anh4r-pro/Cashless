@@ -26,6 +26,11 @@ class Siswa extends Model
         'nisn', 'tgl_lahir', 'hp_ortu',
         'saldo_titipan', 'smart_mode', 'smart_ambang', 'smart_isi',
         'golongan', 'jabatan', 'catatan', 'berlaku_sampai',
+        // Daur hidup arsip (alumni / lanjut_study / pindah). Wajib ada di sini:
+        // update() mengabaikan atribut yang tidak fillable TANPA BERSUARA, jadi
+        // kolom yang lupa didaftarkan hanya terlihat sebagai nilai yang diam-diam
+        // tidak pernah tersimpan.
+        'arsip_pada', 'arsip_catatan',
         'created_at',
     ];
 

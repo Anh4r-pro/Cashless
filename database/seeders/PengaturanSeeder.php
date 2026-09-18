@@ -71,6 +71,13 @@ class PengaturanSeeder extends Seeder
 
             // portal wali: 4 digit HP sebagai kunci ketiga
             'ortu_minta_hp' => 0,
+
+            // Jenjang kelas santri. DISIMPAN SEBAGAI PENGATURAN, bukan ditulis
+            // di kode: pesantren ini menjalankan SMP+SMA (kelas 7-12), tapi
+            // membuka jenjang baru kelak hanya boleh berarti mengubah angka di
+            // sini — bukan menyunting aturan kenaikan kelas.
+            'kelas_tingkat_awal' => 7,
+            'kelas_tingkat_lulus' => 12,     // tingkat ini berujung ke Alumni
         ];
         foreach ($angka as $k => $v) {
             Setting::firstOrCreate(['key' => $k], ['value' => $v]);
@@ -209,6 +216,11 @@ class PengaturanSeeder extends Seeder
         // 'Santri' diubah menjadi 'Santri'. Hanya menyentuh baris yang masih
         // memakai nama bawaan — nama yang sudah disunting admin dibiarkan.
         Golongan::where('kode', 'siswa')->where('nama', 'Siswa')->update(['nama' => 'Santri']);
+
+        // Sisa istilah lama pada baris yang sudah tercipta sebelum penyesuaian
+        // istilah pesantren. Hanya menyentuh teks bawaan yang belum disunting admin.
+        AlasanPotong::where('teks', 'Pengembalian saldo (siswa keluar/lulus)')
+            ->update(['teks' => 'Pengembalian saldo (santri keluar/lulus)']);
 
         // Jaring pengaman: golongan 'santri' harus selalu ada, berapa pun yang
         // dihapus admin — tanpa barisnya, setiap kartu lama kehilangan aturannya.

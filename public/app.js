@@ -1089,6 +1089,16 @@ async function dashSAView(el) {
         (5 kali salah → terkunci 15 menit), bukan kerahasiaan nomornya.</p>
       ${gridPengaturan(cfg.labels_ortu || {}, cfg.settings)}
       <button class="savebtn" data-simpan="ortu">Simpan Kunci Portal Wali</button>
+    </div>
+    <div class="panel">
+      <h2>🎓 Jenjang Kelas</h2>
+      <p class="muted">Menentukan aturan kenaikan kelas: kelas tertinggi berujung pada
+        <b>Alumni</b>, dan kelas di luar rentang ini <b>ditandai</b> sebagai bentuk menyimpang —
+        tidak dinaikkan, supaya salah ketik satu angka tidak berarti seseorang dikeluarkan.</p>
+      <p class="muted">Paralelnya (A, B, … J, dan seterusnya) <b>tidak perlu didaftarkan</b> —
+        huruf apa pun ikut terbawa aturannya dengan sendirinya.</p>
+      ${gridPengaturan(cfg.labels_kelas || {}, cfg.settings)}
+      <button class="savebtn" data-simpan="kelas">Simpan Jenjang Kelas</button>
     </div>`;
 
   // Semua panel memakai satu mekanisme yang sama; kelompoknya hanya menentukan
@@ -1096,8 +1106,9 @@ async function dashSAView(el) {
   const GRUP = {
     limit: cfg.labels, titipan: cfg.labels_titipan, nonmakanan: cfg.labels_nonmakanan,
     transfer: cfg.labels_transfer || {}, ortu: cfg.labels_ortu || {},
+    kelas: cfg.labels_kelas || {},
   };
-  const semua = { ...cfg.labels, ...cfg.labels_titipan, ...cfg.labels_nonmakanan,
+  const semua = { ...(cfg.labels_kelas || {}), ...cfg.labels, ...cfg.labels_titipan, ...cfg.labels_nonmakanan,
     ...GRUP.transfer, ...GRUP.ortu };
   bindPengaturan(semua);
   el.querySelectorAll('[data-simpan]').forEach((btn) => {
@@ -1295,7 +1306,8 @@ function bindPengaturan(labels) {
       if (!inp || !hint) continue;
       const v = m.unit === 'rp' ? (nilaiUang(inp) ?? 0) : Number(inp.value);
       hint.textContent = m.unit === 'onoff' ? (v === 1 ? 'berlaku' : 'tidak berlaku')
-        : v > 0 ? (m.unit === 'kali' ? `${v.toLocaleString('id-ID')} kali / hari` : rp(v))
+        : v > 0 ? (m.unit === 'tingkat' ? `kelas ${v}`
+          : m.unit === 'kali' ? `${v.toLocaleString('id-ID')} kali / hari` : rp(v))
         : '—';
     }
   };
@@ -2705,12 +2717,15 @@ function siswaView(el, sdm) {
   const judul = sdm ? 'SDM &amp; Personil Khusus' : 'Data Santri';
   const bolehImpor = boleh(`${sdm ? 'sdm' : 'santri'}.impor`);
   const bolehTambah = boleh(`${sdm ? 'sdm' : 'santri'}.tambah`);
+  const bolehArsip = boleh(`${sdm ? 'sdm' : 'santri'}.arsip`);
   el.innerHTML = `<div class="panel">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px">
       <h2 style="margin:0">${judul} <span class="muted" id="sw-count"></span></h2>
       <div style="display:flex; gap:10px; flex-wrap:wrap">
         ${sdm && boleh('golongan.kelola') ? '<button class="linkbtn" id="btn-golongan">⚙ kelola golongan</button>' : ''}
         ${bolehImpor ? `<button class="linkbtn" id="btn-impor">⬆ Impor ${esc(t.orang)} dari Excel</button>` : ''}
+        ${!sdm && boleh('santri.kenaikan') ? '<button class="linkbtn" id="btn-kenaikan">🎓 Kenaikan Kelas</button>' : ''}
+        ${bolehArsip ? '<button class="linkbtn" id="btn-arsip">📦 Arsipkan</button>' : ''}
         ${bolehTambah ? `<button class="linkbtn" id="btn-add-siswa">+ Tambah ${esc(t.orang)}</button>` : ''}
       </div>
     </div>
@@ -2719,13 +2734,20 @@ function siswaView(el, sdm) {
       punya batas belanja serta hak aksesnya sendiri. Semua saldo mereka tetap masuk ke satu
       neraca kas yang sama.</p>` : ''}
     <div id="sw-impor"></div>
+    <div id="sw-tahun"></div>
     <div class="filterbar">
       <div class="field"><label>Cari</label>
         <input id="sw-cari" placeholder="nama / ${esc(t.nomorSingkat)}${sdm ? '' : ' / NISN'} / UID"></div>
       ${sdm ? `<div class="field"><label>Golongan</label><select id="sw-gol"></select></div>` : ''}
       <div class="field"><label>${sdm ? 'Unit' : 'Kelas'}</label><select id="sw-kelas"><option value="">semua</option></select></div>
       <div class="field"><label>Status</label><select id="sw-status">
-        <option value="">semua</option><option>aktif</option><option>blokir</option></select></div>
+        <option value="">aktif &amp; blokir</option>
+        <option value="aktif">aktif</option>
+        <option value="blokir">blokir</option>
+        <option value="arsip">— semua yang terarsip —</option>
+        <option value="alumni">alumni</option>
+        <option value="lanjut_study">lanjut study</option>
+        <option value="pindah">pindah</option></select></div>
       ${sdm ? '' : `<div class="field"><label>Portal ortu</label><select id="sw-ortu">
         <option value="">semua</option><option value="belum">data belum lengkap</option></select></div>`}
     </div>
@@ -2749,7 +2771,7 @@ function siswaView(el, sdm) {
     UNIT_SDM = d.unit_sdm || UNIT_SDM;
     const pilihan = sdm ? UNIT_SDM : d.kelas;
     $('#sw-kelas').innerHTML = '<option value="">semua</option>' +
-      pilihan.map((k) => `<option>${esc(k)}</option>`).join('');
+      pilihan.map((k) => `<option value="${esc(k)}">${esc(k)}</option>`).join('');
   }).catch(() => {});
 
   const reload = () => { siswaState.page = 1; loadSiswa(); };
@@ -2763,6 +2785,8 @@ function siswaView(el, sdm) {
   if ($('#btn-add-siswa')) $('#btn-add-siswa').onclick = () => siswaModal(null);
   if ($('#btn-golongan')) $('#btn-golongan').onclick = kelolaGolonganModal;
   if ($('#btn-impor')) $('#btn-impor').onclick = () => imporKartuPanel(!!sdm);
+  if ($('#btn-arsip')) $('#btn-arsip').onclick = () => arsipPanel(!!sdm);
+  if ($('#btn-kenaikan')) $('#btn-kenaikan').onclick = kenaikanPanel;
   loadSiswa();
 }
 
@@ -2778,6 +2802,37 @@ const ISTILAH = (sdm) => sdm
   : { orang: 'santri', nomor: 'NIS', nomorSingkat: 'NIS', unit: 'Kelas' };
 
 let UNIT_SDM = ['Pengasuhan', 'SMP', 'SMA', 'Ekskul', 'RT', 'LE', 'Lainnya'];
+
+/** Status yang berarti "sudah keluar". Harus sama dengan App\Services\Kelas::ARSIP. */
+const TERARSIP = ['alumni', 'lanjut_study', 'pindah'];
+
+const LABEL_STATUS = {
+  aktif: 'aktif', blokir: 'blokir',
+  alumni: 'alumni', lanjut_study: 'lanjut study', pindah: 'pindah',
+};
+
+const LABEL_ARSIP = {
+  alumni: 'Alumni (tamat SMA)',
+  lanjut_study: 'Lanjut Study (tamat SMP, melanjutkan di luar)',
+  pindah: 'Pindah',
+};
+
+/**
+ * Kelas yang bentuknya menyimpang DITANDAI, bukan ditolak.
+ *
+ * Dengan enam tingkat dikali sepuluh paralel ada sampai 60 nama kelas yang
+ * diketik tangan, dan "7 A" atau "70A" akan diterima apa adanya lalu memecah
+ * laporan menjadi kelas hantu. Menolaknya terlalu berisiko — data lama dan
+ * kartu tamu instansi memakai bentuk lain — tapi membiarkannya tak terlihat
+ * berarti tidak ada yang pernah membetulkannya.
+ */
+const KELAS_SAH = /^(7|8|9|10|11|12)[A-Z]{1,2}$/;
+const lencanaKelas = (k) => {
+  const v = String(k || '');
+  if (!v) return '<span class="muted">—</span>';
+  return KELAS_SAH.test(v) ? esc(v)
+    : `${esc(v)} <span class="badge blokir" title="Bentuk kelas tidak lazim — harus angka 7–12 diikuti huruf, mis. 7A">?</span>`;
+};
 
 /** Golongan yang tampil di menu SDM: semuanya kecuali santri. */
 const golonganSdm = () => GOLONGAN.filter((g) => g.kode !== 'siswa');
@@ -2820,13 +2875,13 @@ async function loadSiswa() {
       <td>${avatarHtml(s, true)}</td>
       <td><b>${esc(s.nama)}</b>${sdm && s.nis
         ? `<br><span class="muted">NIY ${esc(s.nis)}</span>` : ''}</td>
-      <td>${sdm ? esc(golDari(s.golongan).nama) : esc(s.kelas)}</td>
+      <td>${sdm ? esc(golDari(s.golongan).nama) : lencanaKelas(s.kelas)}</td>
       <td>${sdm
         ? `${esc(s.kelas || '—')}${s.jabatan ? `<br><span class="muted">${esc(s.jabatan)}</span>` : ''}`
         : esc(s.nis)}</td>
       <td>${s.card_uid ? `<code>${esc(s.card_uid)}</code>` : '<span class="muted">belum ada</span>'}</td>
       <td class="num rp">${rp(s.saldo)}</td>
-      <td><span class="badge ${s.status}">${s.status}</span></td>
+      <td><span class="badge ${TERARSIP.includes(s.status) ? 'nonaktif' : s.status}">${esc(LABEL_STATUS[s.status] || s.status)}</span></td>
       <td>${sdm ? lencanaBerlaku(s) : (s.nis && s.tgl_lahir
         ? '<span class="badge aktif">siap</span>'
         : '<span class="badge blokir">belum</span>')}</td>
@@ -2840,7 +2895,14 @@ async function loadSiswa() {
         boleh(`${sdm ? 'sdm' : 'santri'}.ubah`) ? `<button class="linkbtn" data-act="edit" data-id="${s.id}">ubah</button>` : '',
         boleh(`${sdm ? 'sdm' : 'santri'}.kartu`) ? `<button class="linkbtn" data-act="kartu" data-id="${s.id}">kartu</button>` : '',
         boleh(`${sdm ? 'sdm' : 'santri'}.reset_pin`) ? `<button class="linkbtn" data-act="pin" data-id="${s.id}">reset PIN</button>` : '',
-        boleh(`${sdm ? 'sdm' : 'santri'}.ubah`) ? `<button class="linkbtn" data-act="blokir" data-id="${s.id}">${s.status === 'aktif' ? 'blokir' : 'aktifkan'}</button>` : '',
+        // Kartu terarsip tidak menawarkan blokir/aktifkan biasa: yang berlaku
+        // untuknya adalah pemulihan dari arsip, dan itu tombol yang berbeda.
+        !TERARSIP.includes(s.status) && boleh(`${sdm ? 'sdm' : 'santri'}.ubah`)
+          ? `<button class="linkbtn" data-act="blokir" data-id="${s.id}">${s.status === 'aktif' ? 'blokir' : 'aktifkan'}</button>` : '',
+        boleh(`${sdm ? 'sdm' : 'santri'}.arsip`)
+          ? (TERARSIP.includes(s.status)
+            ? `<button class="linkbtn" data-act="pulihkan" data-id="${s.id}">pulihkan</button>`
+            : `<button class="linkbtn danger" data-act="arsipkan" data-id="${s.id}">arsipkan</button>`) : '',
       ].filter(Boolean).join(' · ') || '<span class="muted">—</span>'}</td>
     </tr>`).join('') ||
     `<tr><td colspan="10" class="muted">Tidak ada ${sdm ? 'personil' : 'santri'} cocok filter</td></tr>`;
@@ -2863,6 +2925,8 @@ async function loadSiswa() {
     // Reset PIN kios: satu-satunya jalan keluar untuk santri yang lupa PIN —
     // sengaja hanya lewat admin, bukan lewat kios.
     if (b.dataset.act === 'pin') b.onclick = () => resetPinModal(s);
+    if (b.dataset.act === 'arsipkan') b.onclick = () => arsipSatuModal(s);
+    if (b.dataset.act === 'pulihkan') b.onclick = () => pulihkanModal(s);
     if (b.dataset.act === 'blokir') b.onclick = async () => {
       await api('/api/siswa/' + s.id, { method: 'PUT', body: { status: s.status === 'aktif' ? 'blokir' : 'aktif' } })
         .catch((e) => toast(e.message, 'err'));
@@ -4288,4 +4352,381 @@ async function imporKartuTerapkan() {
     btn.disabled = false;
     btn.textContent = 'Coba terapkan lagi';
   }
+}
+
+// ╔════════════════════════════════════════════════════════════════════════╗
+// ║ AKHIR TAHUN AJARAN — arsip pemegang kartu & kenaikan kelas massal      ║
+// ╚════════════════════════════════════════════════════════════════════════╝
+// Dua operasi setahun sekali, dikerjakan berurutan: arsipkan dulu yang keluar,
+// baru naikkan kelas sisanya. Urutan itu penting — kalau dibalik, santri yang
+// sudah pamit ikut terbawa naik.
+//
+// Keduanya tinggal di panel pada layar Santri, bukan menu tersendiri: operasi
+// setahun sekali tidak perlu memakan tempat permanen di bar menu.
+
+let arsipState = null;
+
+function arsipPanel(sdm) {
+  const t = ISTILAH(sdm);
+  const gol = sdm ? kodeSdm() : 'siswa';
+  arsipState = { sdm, gol, unduhSudah: false, pra: null };
+
+  $('#sw-tahun').innerHTML = '';
+  $('#sw-impor').innerHTML = `
+  <div class="panel" style="border-left:4px solid var(--gold)">
+    <div class="kat-head">
+      <h2 style="margin:0">Arsipkan ${esc(t.orang)} — Alumni / Lanjut Study / Pindah</h2>
+      <button class="linkbtn" id="ar-tutup">tutup ✕</button>
+    </div>
+
+    <p class="muted">Yang diarsipkan <b>tidak dihapus</b>. Riwayat transaksinya tetap utuh — itulah
+      yang dipakai menjawab pertanyaan wali berbulan-bulan kemudian. Yang berubah: kartunya berhenti
+      dilayani kasir &amp; kios, UID kartunya <b>dilepas</b> agar kartu fisiknya bisa dipakai
+      ${esc(t.orang)} baru, dan barisnya hilang dari daftar aktif.</p>
+    <p class="muted"><b>Saldo harus nol lebih dulu.</b> Neraca kas menghitung kewajiban sekolah dari
+      saldo seluruh kartu; mengarsipkan kartu bersaldo akan menyembunyikan kewajiban yang uangnya
+      masih ada di kas. Kembalikan dulu lewat menu <b>Saldo Santri</b> (alasan
+      “Pengembalian saldo (santri keluar/lulus)” sudah tersedia).</p>
+
+    <div class="filterbar">
+      <div class="field"><label>${sdm ? 'Unit' : 'Kelas'}</label>
+        <select id="ar-kelas"><option value="">— pilih —</option></select></div>
+      <button class="go" id="ar-periksa" disabled>Periksa</button>
+    </div>
+    <div id="ar-hasil"></div>
+  </div>`;
+
+  api('/api/kelas').then((d) => {
+    const pilihan = sdm ? (d.unit_sdm || UNIT_SDM) : d.kelas;
+    $('#ar-kelas').innerHTML = '<option value="">— pilih —</option>' +
+      pilihan.map((k) => `<option value="${esc(k)}">${esc(k)}</option>`).join('');
+  }).catch(() => {});
+
+  $('#ar-tutup').onclick = () => { $('#sw-impor').innerHTML = ''; arsipState = null; };
+  $('#ar-kelas').onchange = () => {
+    $('#ar-periksa').disabled = !$('#ar-kelas').value;
+    $('#ar-hasil').innerHTML = '';
+    arsipState.unduhSudah = false;
+  };
+  $('#ar-periksa').onclick = arsipPeriksa;
+  $('#sw-impor').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+async function arsipPeriksa() {
+  const kelas = $('#ar-kelas').value;
+  if (!kelas) return;
+  $('#ar-hasil').innerHTML = '<p class="muted">memeriksa…</p>';
+  try {
+    const p = new URLSearchParams({ kelas, golongan: arsipState.sdm ? 'sdm' : 'siswa' });
+    arsipState.pra = await api('/api/arsip/pratinjau?' + p);
+    arsipState.unduhSudah = false;
+    arsipRender();
+  } catch (e) {
+    $('#ar-hasil').innerHTML = `<p class="minus">${esc(e.message)}</p>`;
+  }
+}
+
+function arsipRender() {
+  const { pra, sdm } = arsipState;
+  const t = ISTILAH(sdm);
+  const r = pra.ringkas;
+
+  $('#ar-hasil').innerHTML = `
+    <div class="cards">
+      <div class="statcard"><span class="muted">Di ${esc(t.unit.toLowerCase())} ini</span><br><b>${r.n}</b></div>
+      <div class="statcard"><span class="muted">Siap diarsipkan</span><br><b class="plus">${r.n_siap}</b></div>
+      <div class="statcard"><span class="muted">Tertahan</span><br><b class="${r.n_tertahan ? 'minus' : ''}">${r.n_tertahan}</b></div>
+      <div class="statcard"><span class="muted">Saldo belum diselesaikan</span><br><b class="rp">${rp(r.sisa_saldo + r.sisa_titipan)}</b></div>
+    </div>
+
+    <div class="tblwrap"><table>
+      <thead><tr><th>${esc(t.nomorSingkat)}</th><th>Nama</th><th>Status</th>
+        <th class="num">Saldo</th><th class="num">Titipan</th><th>Kartu</th><th>Keterangan</th></tr></thead>
+      <tbody>${pra.daftar.map((x) => `<tr>
+        <td><code>${esc(x.nis || '—')}</code></td>
+        <td>${esc(x.nama)}</td>
+        <td><span class="badge ${x.status}">${esc(x.status)}</span></td>
+        <td class="num rp">${rp(x.saldo)}</td>
+        <td class="num rp">${rp(x.saldo_titipan)}</td>
+        <td>${x.card_uid ? `<code>${esc(x.card_uid)}</code>` : '<span class="muted">—</span>'}</td>
+        <td class="${x.penahan.length ? 'minus' : 'muted'}">${x.penahan.length
+          ? esc(x.penahan.join('; ')) : 'siap'}</td>
+      </tr>`).join('') || `<tr><td colspan="7" class="muted">Tidak ada ${esc(t.orang)} aktif di sini</td></tr>`}</tbody>
+    </table></div>
+
+    ${r.n_siap ? `
+    <div class="panel" style="margin-top:12px; background:var(--bg)">
+      <h2>Langkah 1 · Unduh salinan untuk arsip pesantren</h2>
+      <p class="muted">Berkas .xlsx berisi identitas, kelas terakhir, saldo akhir, dan jumlah
+        transaksi seumur kartu. Simpan di luar sistem — kalau sistem ini suatu saat diganti,
+        data ini tetap terbaca. <b>Tombol arsip baru menyala setelah berkasnya diunduh.</b></p>
+      <button class="go" id="ar-unduh">⬇ Unduh salinan (.xlsx)</button>
+      <span class="hint-lembut" id="ar-unduh-status"></span>
+
+      <h2 style="margin-top:16px">Langkah 2 · Arsipkan</h2>
+      <div class="field"><label>Status keluar</label>
+        <select id="ar-status">${Object.entries(LABEL_ARSIP)
+          .map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('')}</select>
+        <span class="muted set-hint">Alumni untuk tamatan SMA. Lanjut Study untuk tamatan SMP yang
+          melanjutkan <b>di luar</b> pesantren ini — yang lanjut ke SMA di sini tidak diarsipkan,
+          cukup dinaikkan kelasnya.</span></div>
+      <div class="field"><label>Catatan <span class="muted">(opsional)</span></label>
+        <input id="ar-catatan" maxlength="200" placeholder="mis. angkatan 2026"></div>
+      <button class="go" id="ar-terapkan" disabled>Arsipkan ${r.n_siap} ${esc(t.orang)}</button>
+      <span class="hint-lembut">Yang tertahan dilewati; sisanya tetap diarsipkan.</span>
+    </div>` : `<p class="muted" style="margin-top:12px">Belum ada yang siap diarsipkan —
+      selesaikan dulu saldo yang tersisa.</p>`}`;
+
+  if (!r.n_siap) return;
+  $('#ar-unduh').onclick = () => {
+    const p = new URLSearchParams({ kelas: pra.kelas, golongan: sdm ? 'sdm' : 'siswa' });
+    const a = document.createElement('a');
+    a.href = '/api/arsip/unduh?' + p;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    arsipState.unduhSudah = true;
+    $('#ar-terapkan').disabled = false;
+    $('#ar-unduh-status').textContent = '✔ sudah diunduh — tombol arsip aktif';
+  };
+  $('#ar-terapkan').onclick = arsipTerapkan;
+}
+
+async function arsipTerapkan() {
+  const { pra, sdm } = arsipState;
+  if (!arsipState.unduhSudah) { toast('Unduh salinannya dulu', 'err'); return; }
+  const t = ISTILAH(sdm);
+  const status = $('#ar-status').value;
+
+  openModal(`
+    <h2>Arsipkan ${pra.ringkas.n_siap} ${esc(t.orang)} ${esc(pra.kelas)}?</h2>
+    <p>Status mereka menjadi <b>${esc(LABEL_ARSIP[status])}</b>. UID kartunya dilepas sehingga
+      kartu fisiknya bisa dipakai ${esc(t.orang)} baru, dan barisnya hilang dari daftar aktif.</p>
+    <p class="muted">Riwayat transaksinya tetap utuh dan tetap bisa dilihat lewat saringan status.
+      Kalau ternyata keliru, tiap baris bisa dipulihkan lewat tombol <b>pulihkan</b>.</p>`,
+    async () => {
+      const d = await api('/api/arsip/massal', { method: 'POST', body: {
+        kelas: pra.kelas, golongan: sdm ? 'sdm' : 'siswa',
+        status, catatan: $('#ar-catatan').value,
+      }});
+      toast(`✔ ${d.n_berhasil} ${t.orang} diarsipkan`, 'ok');
+      $('#ar-hasil').innerHTML = `
+        <div class="cards">
+          <div class="statcard"><span class="muted">Diarsipkan</span><br><b class="plus">${d.n_berhasil}</b></div>
+          <div class="statcard"><span class="muted">Dilewati</span><br><b class="${d.n_gagal ? 'minus' : ''}">${d.n_gagal}</b></div>
+        </div>
+        ${d.gagal.length ? `<div class="tblwrap"><table>
+          <thead><tr><th>${esc(t.nomorSingkat)}</th><th>Nama</th><th>Sebab dilewati</th></tr></thead>
+          <tbody>${d.gagal.map((x) => `<tr><td><code>${esc(x.nis || '—')}</code></td>
+            <td>${esc(x.nama)}</td><td class="minus">${esc(x.pesan)}</td></tr>`).join('')}</tbody>
+        </table></div>` : ''}`;
+      loadSiswa();
+    }, `Arsipkan ${pra.ringkas.n_siap} ${t.orang}`);
+}
+
+function arsipSatuModal(s) {
+  const sdm = siswaState.sdm;
+  const t = ISTILAH(sdm);
+  openModal(`
+    <h2>Arsipkan ${esc(s.nama)}?</h2>
+    <p>${esc(t.nomorSingkat)} <code>${esc(s.nis || '—')}</code> · ${esc(t.unit.toLowerCase())}
+      <b>${esc(s.kelas || '—')}</b> · saldo <b class="rp">${rp(s.saldo)}</b></p>
+    ${(s.saldo || s.saldo_titipan) ? `<p class="preview">Saldo belum nol. Sistem akan menolak —
+      kembalikan uangnya dulu lewat menu <b>Saldo Santri</b>, baru arsipkan.</p>` : ''}
+    <div class="field"><label>Status keluar</label>
+      <select id="as-status">${Object.entries(LABEL_ARSIP)
+        .map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join('')}</select></div>
+    <div class="field"><label>Catatan <span class="muted">(opsional)</span></label>
+      <input id="as-catatan" maxlength="200" placeholder="mis. pindah ke Pondok X"></div>
+    <p class="muted">UID kartunya dilepas agar bisa dipakai orang lain. Riwayatnya tetap utuh.</p>`,
+    async () => {
+      await api(`/api/siswa/${s.id}/arsip`, { method: 'POST', body: {
+        status: $('#as-status').value, catatan: $('#as-catatan').value,
+      }});
+      toast('✔ Diarsipkan', 'ok');
+      loadSiswa();
+    }, 'Arsipkan');
+}
+
+function pulihkanModal(s) {
+  openModal(`
+    <h2>Pulihkan ${esc(s.nama)} dari arsip?</h2>
+    <p>Statusnya kembali menjadi <b>aktif</b> dan barisnya muncul lagi di daftar.</p>
+    <p class="preview">Kartu fisiknya <b>tidak</b> ikut pulih — UID-nya sudah dilepas saat
+      diarsipkan dan bisa saja kini dipakai orang lain. Daftarkan kartu baru lewat tombol
+      <b>kartu</b> setelah ini.</p>
+    ${s.arsip_catatan ? `<p class="muted">Catatan arsip: ${esc(s.arsip_catatan)}</p>` : ''}`,
+    async () => {
+      await api(`/api/siswa/${s.id}/aktifkan`, { method: 'POST' });
+      toast('✔ Dipulihkan — daftarkan kartu barunya', 'ok');
+      loadSiswa();
+    }, 'Pulihkan');
+}
+
+// ------------------------------------------------------- kenaikan kelas
+
+let kenaikanState = null;
+
+async function kenaikanPanel() {
+  $('#sw-impor').innerHTML = '';
+  $('#sw-tahun').innerHTML = '<div class="panel"><p class="muted">memuat…</p></div>';
+  let d;
+  try { d = await api('/api/kenaikan-kelas/pratinjau'); }
+  catch (e) { $('#sw-tahun').innerHTML = `<div class="panel"><p class="minus">${esc(e.message)}</p></div>`; return; }
+  kenaikanState = d;
+
+  const opsiTujuan = (saran) => {
+    // Pilihan tujuan disusun dari kelas yang benar-benar mungkin ditempuh,
+    // ditambah status keluar. Tidak ada daftar kelas yang ditulis di kode —
+    // semuanya diturunkan dari tingkat yang dibuka sekolah.
+    const kelas = [];
+    for (let tk = d.tingkat_awal; tk <= d.tingkat_lulus; tk++) {
+      for (const hr of 'ABCDEFGHIJ') kelas.push(tk + hr);
+    }
+    const semua = [...new Set([...(saran && !TERARSIP.includes(saran) ? [saran] : []), ...kelas])];
+    return `<option value="">— jangan diubah —</option>` +
+      Object.entries(LABEL_ARSIP).map(([k, v]) =>
+        `<option value="${k}" ${saran === k ? 'selected' : ''}>${esc(v)}</option>`).join('') +
+      semua.map((k) => `<option value="${k}" ${saran === k ? 'selected' : ''}>→ ${esc(k)}</option>`).join('');
+  };
+
+  $('#sw-tahun').innerHTML = `
+  <div class="panel" style="border-left:4px solid var(--brand)">
+    <div class="kat-head">
+      <h2 style="margin:0">Kenaikan Kelas Massal</h2>
+      <button class="linkbtn" id="kk-tutup">tutup ✕</button>
+    </div>
+    <p class="muted">Jenjang yang dibuka sekolah: kelas <b>${d.tingkat_awal}</b> sampai
+      <b>${d.tingkat_lulus}</b> (diatur di Pengaturan). Tujuan di bawah ini <b>saran</b> —
+      periksa dan ubah sesuai kenyataan sebelum diterapkan.</p>
+    <p class="muted">Santri kelas ${d.tingkat_lulus - 3} yang <b>lanjut ke SMA di sini</b> cukup
+      dinaikkan biasa; yang melanjutkan di luar arsipkan dulu lewat tombol
+      <b>📦 Arsipkan</b> sebelum menjalankan ini.</p>
+
+    <div class="tblwrap"><table>
+      <thead><tr><th>Kelas</th><th class="num">Santri</th><th>Tujuan</th><th>Keterangan</th></tr></thead>
+      <tbody>${d.baris.map((b) => `<tr>
+        <td><b>${esc(b.kelas)}</b>${b.bentuk_sah ? '' : ' <span class="badge blokir">bentuk tidak lazim</span>'}</td>
+        <td class="num">${b.n}</td>
+        <td><select data-dari="${esc(b.kelas)}" style="min-width:200px">${opsiTujuan(b.saran)}</select></td>
+        <td class="${b.jenis === 'menyimpang' ? 'minus' : 'muted'}">${
+          b.jenis === 'menyimpang' ? esc(b.pesan)
+          : b.jenis === 'arsip'
+            ? `seluruhnya keluar${b.n_tertahan ? ` — <b class="minus">${b.n_tertahan} tertahan</b>, saldo ${rp(b.sisa_saldo + b.sisa_titipan)} belum diselesaikan` : ' — semua siap'}`
+            : 'kenaikan biasa'}</td>
+      </tr>`).join('') || '<tr><td colspan="4" class="muted">Belum ada santri berkelas</td></tr>'}</tbody>
+    </table></div>
+
+    <div class="filterbar" style="margin-top:12px">
+      <div class="field"><label>Tahun ajaran</label>
+        <input id="kk-tahun" value="${esc(d.tahun_ajaran_saran)}" placeholder="2026/2027"></div>
+      <div class="field" style="flex:1"><label>Catatan <span class="muted">(opsional)</span></label>
+        <input id="kk-catatan" maxlength="200"></div>
+      <button class="go" id="kk-terapkan">Terapkan kenaikan</button>
+    </div>
+    <span class="hint-lembut">Satu tahun ajaran hanya bisa dinaikkan sekali. Kalau pemetaannya
+      keliru, batch-nya bisa dibatalkan di bawah dan dijalankan ulang.</span>
+
+    <div id="kk-hasil"></div>
+
+    <div class="kat-head" style="margin-top:18px">
+      <h2 style="margin:0">Riwayat kenaikan</h2>
+    </div>
+    <div class="tblwrap"><table>
+      <thead><tr><th>Tahun ajaran</th><th class="num">Naik</th><th class="num">Diarsipkan</th>
+        <th>Oleh</th><th>Waktu</th><th>Status</th><th></th></tr></thead>
+      <tbody id="kk-riwayat"></tbody>
+    </table></div>
+  </div>`;
+
+  $('#kk-tutup').onclick = () => { $('#sw-tahun').innerHTML = ''; kenaikanState = null; };
+  $('#kk-terapkan').onclick = kenaikanTerapkan;
+  kenaikanRiwayat(d.riwayat);
+  $('#sw-tahun').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function kenaikanRiwayat(riwayat) {
+  $('#kk-riwayat').innerHTML = (riwayat || []).map((r) => `<tr>
+    <td><b>${esc(r.tahun_ajaran)}</b>${r.percobaan > 1 ? ` <span class="muted">percobaan ${r.percobaan}</span>` : ''}</td>
+    <td class="num">${r.n_naik}</td>
+    <td class="num">${r.n_arsip}</td>
+    <td>${esc(r.operator)}</td>
+    <td>${esc(String(r.created_at || '').slice(0, 10))}</td>
+    <td>${r.dibatalkan_pada
+      ? `<span class="badge blokir">dibatalkan</span>`
+      : '<span class="badge aktif">berlaku</span>'}</td>
+    <td>${r.dibatalkan_pada ? '' : `<button class="linkbtn danger" data-kk-batal="${r.id}">batalkan</button>`}</td>
+  </tr>`).join('') || '<tr><td colspan="7" class="muted">Belum pernah dijalankan</td></tr>';
+
+  document.querySelectorAll('[data-kk-batal]').forEach((b) => {
+    b.onclick = () => kenaikanBatalModal((riwayat || []).find((x) => x.id === Number(b.dataset.kkBatal)));
+  });
+}
+
+async function kenaikanTerapkan() {
+  const peta = {};
+  document.querySelectorAll('#sw-tahun select[data-dari]').forEach((sel) => {
+    if (sel.value) peta[sel.dataset.dari] = sel.value;
+  });
+  const n = Object.keys(peta).length;
+  if (!n) { toast('Belum ada kelas yang dipetakan', 'err'); return; }
+
+  const arsip = Object.entries(peta).filter(([, v]) => TERARSIP.includes(v));
+  openModal(`
+    <h2>Terapkan kenaikan ${esc($('#kk-tahun').value)}?</h2>
+    <p>${n} kelas akan dipetakan${arsip.length
+      ? `, dan <b>${arsip.length} kelas dikeluarkan</b> (${esc(arsip.map(([k, v]) => k + ' → ' + LABEL_ARSIP[v].split(' (')[0]).join(', '))})` : ''}.</p>
+    <div class="tblwrap" style="max-height:220px; overflow:auto"><table>
+      <thead><tr><th>Dari</th><th>Ke</th></tr></thead>
+      <tbody>${Object.entries(peta).map(([k, v]) =>
+        `<tr><td>${esc(k)}</td><td>${TERARSIP.includes(v)
+          ? `<b>${esc(LABEL_ARSIP[v])}</b>` : esc(v)}</td></tr>`).join('')}</tbody>
+    </table></div>
+    <p class="muted">Kelas pada transaksi yang sudah tercatat <b>tidak berubah</b> — laporan tahun
+      lalu tetap menunjukkan kelas yang berlaku saat itu. Kalau keliru, batch ini bisa dibatalkan
+      dan keadaan dipulihkan persis.</p>`,
+    async () => {
+      const d = await api('/api/kenaikan-kelas/terapkan', { method: 'POST', body: {
+        tahun_ajaran: $('#kk-tahun').value,
+        catatan: $('#kk-catatan').value,
+        peta,
+      }});
+      toast(`✔ ${d.batch.n_naik} naik, ${d.batch.n_arsip} diarsipkan`, 'ok');
+      $('#kk-hasil').innerHTML = `
+        <div class="cards" style="margin-top:12px">
+          <div class="statcard"><span class="muted">Naik kelas</span><br><b class="plus">${d.batch.n_naik}</b></div>
+          <div class="statcard"><span class="muted">Diarsipkan</span><br><b>${d.batch.n_arsip}</b></div>
+          <div class="statcard"><span class="muted">Tertahan</span><br><b class="${d.n_tertahan ? 'minus' : ''}">${d.n_tertahan}</b></div>
+        </div>
+        ${d.tertahan.length ? `<p class="muted">Tertahan karena saldonya belum diselesaikan —
+          kembalikan dulu lewat menu Saldo Santri, lalu arsipkan lewat tombol 📦 Arsipkan:</p>
+        <div class="tblwrap"><table>
+          <thead><tr><th>NIS</th><th>Nama</th><th>Kelas</th><th>Sebab</th></tr></thead>
+          <tbody>${d.tertahan.map((x) => `<tr><td><code>${esc(x.nis || '—')}</code></td>
+            <td>${esc(x.nama)}</td><td>${esc(x.kelas)}</td>
+            <td class="minus">${esc(x.penahan.join('; '))}</td></tr>`).join('')}</tbody>
+        </table></div>` : ''}`;
+      loadSiswa();
+      api('/api/kenaikan-kelas').then((h) => kenaikanRiwayat(h.riwayat)).catch(() => {});
+    }, 'Terapkan kenaikan');
+}
+
+function kenaikanBatalModal(b) {
+  if (!b) return;
+  openModal(`
+    <h2>Batalkan kenaikan ${esc(b.tahun_ajaran)}?</h2>
+    <p>Seluruh ${b.n_naik} santri dikembalikan ke kelas sebelumnya${b.n_arsip
+      ? `, dan ${b.n_arsip} yang diarsipkan dipulihkan statusnya` : ''}.</p>
+    ${b.n_arsip ? `<p class="preview">UID kartu yang sudah dilepas <b>tidak</b> ikut pulih —
+      kartu barunya harus didaftarkan satu per satu lewat tombol <b>kartu</b>.</p>` : ''}
+    <p class="muted">Setelah dibatalkan, tahun ajaran yang sama boleh dijalankan ulang dengan
+      pemetaan yang sudah dibetulkan.</p>`,
+    async () => {
+      const d = await api(`/api/kenaikan-kelas/${b.id}/batalkan`, { method: 'POST' });
+      toast('✔ ' + d.pesan, 'ok');
+      loadSiswa();
+      const h = await api('/api/kenaikan-kelas').catch(() => null);
+      if (h) kenaikanRiwayat(h.riwayat);
+      $('#kk-hasil').innerHTML = '';
+    }, 'Batalkan kenaikan');
 }

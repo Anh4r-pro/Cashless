@@ -66,6 +66,8 @@ class Izin
             'santri.kartu' => 'Mendaftarkan / mengganti kartu santri',
             'santri.reset_pin' => 'Mereset PIN kios santri',
             'santri.impor' => 'Menambah santri kolektif via Excel',
+            'santri.arsip' => 'Mengarsipkan santri (Alumni / Lanjut Study / Pindah)',
+            'santri.kenaikan' => 'Menjalankan kenaikan kelas massal',
         ],
         'Pemegang Kartu — SDM & Personil' => [
             'sdm.lihat' => 'Melihat data SDM & personil',
@@ -75,6 +77,7 @@ class Izin
             'sdm.kartu' => 'Mendaftarkan / mengganti kartu personil',
             'sdm.reset_pin' => 'Mereset PIN kios personil',
             'sdm.impor' => 'Menambah personil kolektif via Excel',
+            'sdm.arsip' => 'Mengarsipkan personil (keluar / pindah)',
             'golongan.kelola' => 'Mengelola golongan & batasnya',
         ],
         'Kantin & Koperasi' => [
@@ -216,8 +219,9 @@ class Izin
                     'dashboard.lihat',
                     'santri.lihat', 'santri.tambah', 'santri.ubah', 'santri.hapus',
                     'santri.kartu', 'santri.reset_pin', 'santri.impor',
+                    'santri.arsip', 'santri.kenaikan',
                     'sdm.lihat', 'sdm.tambah', 'sdm.ubah', 'sdm.hapus',
-                    'sdm.kartu', 'sdm.reset_pin', 'sdm.impor',
+                    'sdm.kartu', 'sdm.reset_pin', 'sdm.impor', 'sdm.arsip',
                     'riwayat.lihat',
                 ],
             ],

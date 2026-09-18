@@ -28,6 +28,20 @@ class PengaturanController extends Controller
         'max_per_transaksi' => ['label' => 'Max per transaksi', 'unit' => 'rp'],
     ];
 
+    /**
+     * Jenjang kelas santri.
+     *
+     * Dipakai aturan kenaikan kelas: tingkat tertinggi berujung pada Alumni,
+     * dan tingkat di luar rentang ini ditandai sebagai kelas menyimpang, bukan
+     * dinaikkan. Disimpan sebagai pengaturan supaya membuka jenjang baru —
+     * MI/Ibtidaiyah dari kelas 1, atau tingkat 13 — cukup mengubah angka di
+     * sini, bukan menyunting kode.
+     */
+    public const LABEL_KELAS = [
+        'kelas_tingkat_awal' => ['label' => 'Kelas terendah', 'unit' => 'tingkat'],
+        'kelas_tingkat_lulus' => ['label' => 'Kelas tertinggi (berujung Alumni)', 'unit' => 'tingkat'],
+    ];
+
     /** Saldo titipan & isi ulang otomatis. */
     public const LABEL_TITIPAN = [
         'titipan_aktif' => ['label' => 'Kelebihan top up disimpan jadi titipan', 'unit' => 'onoff'],
@@ -77,7 +91,7 @@ class PengaturanController extends Controller
     public static function labelSemua(): array
     {
         return array_merge(self::LABEL_POKOK, self::LABEL_TITIPAN, self::LABEL_NONMAKANAN,
-            self::LABEL_TRANSFER, self::LABEL_ORTU);
+            self::LABEL_TRANSFER, self::LABEL_ORTU, self::LABEL_KELAS);
     }
 
     public function index(Request $r)
@@ -91,6 +105,7 @@ class PengaturanController extends Controller
             'labels_nonmakanan' => self::LABEL_NONMAKANAN,
             'labels_transfer' => self::LABEL_TRANSFER,
             'labels_ortu' => self::LABEL_ORTU,
+            'labels_kelas' => self::LABEL_KELAS,
         ]);
     }
 
@@ -130,6 +145,16 @@ class PengaturanController extends Controller
             if ($c['smart_isi'] <= $c['smart_ambang']) {
                 throw new ApiError(400, '"' . self::LABEL_TITIPAN['smart_isi']['label'] . '" (' . Rupiah::f($c['smart_isi']) .
                     ') harus lebih besar dari "' . self::LABEL_TITIPAN['smart_ambang']['label'] . '" (' . Rupiah::f($c['smart_ambang']) . ')');
+            }
+            if ($c['kelas_tingkat_lulus'] <= $c['kelas_tingkat_awal']) {
+                throw new ApiError(400, '"' . self::LABEL_KELAS['kelas_tingkat_lulus']['label'] . '" (' .
+                    $c['kelas_tingkat_lulus'] . ') harus lebih besar dari "' .
+                    self::LABEL_KELAS['kelas_tingkat_awal']['label'] . '" (' . $c['kelas_tingkat_awal'] . ')');
+            }
+            // Rentang yang mustahil hampir selalu salah ketik, dan akibatnya
+            // fatal: kelas di luar rentang tidak akan dinaikkan sama sekali.
+            if ($c['kelas_tingkat_lulus'] > 15 || $c['kelas_tingkat_awal'] > 15) {
+                throw new ApiError(400, 'Tingkat kelas maksimal 15 — angka di atas itu hampir pasti salah ketik');
             }
             if ($c['transfer_min'] > $c['transfer_maks']) {
                 throw new ApiError(400, '"' . self::LABEL_TRANSFER['transfer_min']['label'] . '" (' . Rupiah::f($c['transfer_min']) .
@@ -244,7 +269,10 @@ class PengaturanController extends Controller
         $this->wajibPeran($r, 'tenant', 'superadmin');
 
         return response()->json([
-            'kelas' => Siswa::where('kelas', '!=', '')->distinct()->orderBy('kelas')->pluck('kelas'),
+            // Diurutkan sadar-angka: `orderBy('kelas')` mengurutkan sebagai teks,
+            // sehingga 10A melompat ke depan 7A begitu jenjang SMA masuk.
+            'kelas' => Siswa::where('kelas', '!=', '')->distinct()
+                ->orderByRaw(\App\Services\Kelas::urutSql())->pluck('kelas'),
             // Daftar Unit untuk SDM & personil datang dari kode, bukan dari data:
             // pilihannya harus tetap lengkap walau belum ada satu pun personil
             // yang terdaftar di unit tersebut.

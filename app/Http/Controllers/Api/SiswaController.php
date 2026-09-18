@@ -10,6 +10,7 @@ use App\Models\SiswaPin;
 use App\Models\Transaksi;
 use App\Services\BidangSiswa;
 use App\Services\Izin;
+use App\Services\Kelas;
 use App\Services\Berkas;
 use App\Services\Pengaturan;
 use App\Services\Pin;
@@ -101,8 +102,22 @@ class SiswaController extends Controller
         if ($kelas = $r->query('kelas')) {
             $q->where('kelas', strtoupper((string) $kelas));
         }
-        if ($status = $r->query('status')) {
+        /*
+         * Yang TERARSIP tidak ikut tampil kalau tidak diminta.
+         *
+         * Ini bukan sekadar kerapian: "jumlah santri" di dashboard dan di kepala
+         * tabel dihitung dari kueri yang sama, dan angkatan yang sudah lulus
+         * tidak boleh ikut terhitung sebagai santri sekolah. Untuk melihatnya,
+         * status arsip harus disebut dengan sadar — atau 'arsip' untuk semuanya
+         * sekaligus.
+         */
+        $status = (string) $r->query('status', '');
+        if ($status === 'arsip') {
+            $q->whereIn('status', Kelas::ARSIP);
+        } elseif ($status !== '') {
             $q->where('status', $status);
+        } else {
+            $q->whereNotIn('status', Kelas::ARSIP);
         }
 
         $gol = $r->query('golongan');
@@ -193,6 +208,10 @@ class SiswaController extends Controller
             'nama' => trim((string) ($b['nama'] ?? $s->nama)),
             'kelas' => strtoupper(trim((string) ($b['kelas'] ?? $s->kelas))),
             'card_uid' => $uid,
+            // Hanya aktif/blokir yang boleh disetel dari sini. Status arsip
+            // (alumni / lanjut_study / pindah) sengaja TIDAK diterima: jalurnya
+            // ada di ArsipController, yang menolak selama saldo belum nol —
+            // kalau lewat sini, kewajiban bersaldo bisa lenyap dari neraca.
             'status' => in_array($b['status'] ?? null, ['aktif', 'blokir'], true) ? $b['status'] : $s->status,
         ], $o, $g));
 
@@ -221,12 +240,32 @@ class SiswaController extends Controller
         if (Transaksi::where('siswa_id', $id)->exists()) {
             throw new ApiError(409, 'Pemegang kartu ini punya riwayat transaksi — blokir saja, jangan dihapus');
         }
-        DB::transaction(function () use ($id) {
-            SesiOrtu::where('siswa_id', $id)->delete();   // lepas kunci asing
-            SiswaPin::where('siswa_id', $id)->delete();
-            SesiKios::tutupSemua($id);
-            Siswa::where('id', $id)->delete();
-        });
+        try {
+            DB::transaction(function () use ($id) {
+                SesiOrtu::where('siswa_id', $id)->delete();   // lepas kunci asing
+                SiswaPin::where('siswa_id', $id)->delete();
+                SesiKios::tutupSemua($id);
+
+                /*
+                 * Baris impor top up DILEPAS, bukan dihapus: kolomnya memang
+                 * nullable untuk baris yang tidak menemukan pemiliknya, jadi
+                 * riwayat impornya tetap utuh sebagai catatan bendahara
+                 * sementara santrinya boleh pergi. Baris yang berhasil selalu
+                 * punya transaksi, dan itu sudah ditolak di atas.
+                 */
+                \App\Models\TopupImporBaris::where('siswa_id', $id)->update(['siswa_id' => null]);
+
+                Siswa::where('id', $id)->delete();
+            });
+        } catch (\Illuminate\Database\QueryException $e) {
+            /*
+             * Kunci asing yang belum terpikirkan tidak boleh sampai ke admin
+             * sebagai halaman galat 500. Rincian teknisnya tetap masuk log
+             * Laravel — yang diganti hanya apa yang terbaca di layar.
+             */
+            throw new ApiError(409, 'Pemegang kartu ini masih dirujuk data lain dan belum bisa '
+                . 'dihapus — blokir atau arsipkan saja');
+        }
 
         return response()->json(['ok' => true]);
     }
