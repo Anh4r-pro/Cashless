@@ -27,6 +27,7 @@ class GolonganController extends Controller
         'portal_ortu' => ['label' => 'Bisa dibuka lewat portal wali', 'unit' => 'onoff'],
         'kios' => ['label' => 'Boleh memakai layar kios', 'unit' => 'onoff'],
         'transfer' => ['label' => 'Boleh mengirim saldo ke teman', 'unit' => 'onoff'],
+        'biaya_admin_kena' => ['label' => 'Dipungut biaya admin top up wali', 'unit' => 'onoff'],
     ];
 
     public function index(Request $r)
@@ -78,6 +79,12 @@ class GolonganController extends Controller
             'portal_ortu' => (bool) ($b['portal_ortu'] ?? false),
             'kios' => ! in_array($b['kios'] ?? true, [0, false], true),
             'transfer' => ! in_array($b['transfer'] ?? true, [0, false], true),
+            /*
+             * Bawaannya MATI, berbeda dari kios & transfer yang bawaannya
+             * menyala. Golongan baru tidak boleh langsung memungut uang dari
+             * walinya hanya karena dibuat — memungut harus keputusan sadar.
+             */
+            'biaya_admin_kena' => (bool) ($b['biaya_admin_kena'] ?? false),
         ];
         foreach (Pengaturan::BATAS_GOLONGAN as $k) {
             $isi[$k] = $this->penimpa($b[$k] ?? null);
@@ -111,6 +118,8 @@ class GolonganController extends Controller
             'portal_ortu' => array_key_exists('portal_ortu', $b) ? (bool) $b['portal_ortu'] : $g->portal_ortu,
             'kios' => array_key_exists('kios', $b) ? (bool) $b['kios'] : $g->kios,
             'transfer' => array_key_exists('transfer', $b) ? (bool) $b['transfer'] : $g->transfer,
+            'biaya_admin_kena' => array_key_exists('biaya_admin_kena', $b)
+                ? (bool) $b['biaya_admin_kena'] : $g->biaya_admin_kena,
         ];
         foreach (Pengaturan::BATAS_GOLONGAN as $k) {
             $isi[$k] = array_key_exists($k, $b) ? $this->penimpa($b[$k]) : $g->{$k};

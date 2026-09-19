@@ -1208,11 +1208,9 @@ function neracaPanel(n) {
               ? `<br>isi ulang otomatis dari titipan ${rp(m.internal_isi_ulang)} tidak dihitung sebagai uang masuk`
               : '') })}
         ${nrBaris('Sudah disetor ke tenant', n.keluar.tenant, { tanda: '−', warna: 'minus' })}
-        ${n.keluar.biaya_admin > 0
-          ? nrBaris('Biaya admin (jadi pendapatan sekolah)', n.keluar.biaya_admin,
-              { tanda: '−', warna: 'minus',
-                catatan: 'uangnya diterima sekolah lalu diakui sebagai pendapatan, jadi ia ' +
-                  'keluar dari kewajiban — bukan uang yang hilang' })
+        ${n.keluar.dana_admin > 0
+          ? nrBaris('Ditarik dari Dana Admin', n.keluar.dana_admin, { tanda: '−', warna: 'minus',
+              catatan: 'uang milik sekolah yang sudah benar-benar diambil' })
           : ''}
         ${nrBaris('Penarikan titipan (dikembalikan ke wali)', n.keluar.titipan, { tanda: '−', warna: 'minus' })}
         ${nrBaris('Potongan saldo oleh admin', n.keluar.koreksi, { tanda: '−', warna: 'minus',
@@ -1232,6 +1230,12 @@ function neracaPanel(n) {
           { catatan: `penjualan tenant ${rp(n.penjualan_tenant)} − sudah disetor ${rp(n.keluar.tenant)}` })}
         ${nrBaris('Donasi terkumpul', k.donasi, { catatan: 'belum ada fitur penyaluran' })}
         ${nrBaris('Total kewajiban', k.total, { tebal: true })}
+        ${n.dana_admin.saldo !== 0 || n.dana_admin.masuk !== 0
+          ? nrBaris('Dana Admin (milik sekolah)', n.dana_admin.saldo, { tebal: true,
+              catatan: `terkumpul ${rp(n.dana_admin.masuk)} − ditarik ${rp(n.dana_admin.tarik)}` +
+                '<br>bukan kewajiban, tapi tetap klaim atas kas yang dipegang — ' +
+                'kas harus sama dengan kewajiban ditambah dana ini' })
+          : ''}
       </div>
     </div>
 
@@ -2776,6 +2780,11 @@ function siswaView(el, sdm) {
         <option value="pindah">pindah</option></select></div>
       ${sdm ? '' : `<div class="field"><label>Portal ortu</label><select id="sw-ortu">
         <option value="">semua</option><option value="belum">data belum lengkap</option></select></div>`}
+      ${sdm ? '' : `<div class="field"><label>Biaya admin</label><select id="sw-biaya">
+        <option value="">semua</option>
+        <option value="ikut">ikut golongan</option>
+        <option value="bebas">dibebaskan</option>
+        <option value="khusus">tarif khusus</option></select></div>`}
     </div>
     <p class="muted">💡 Tap kartu di halaman ini untuk langsung menemukan pemiliknya / mendaftarkan kartu baru.</p>
     <div class="tblwrap"><table>
@@ -2805,6 +2814,7 @@ function siswaView(el, sdm) {
   $('#sw-kelas').onchange = reload;
   $('#sw-status').onchange = reload;
   if ($('#sw-ortu')) $('#sw-ortu').onchange = reload;
+  if ($('#sw-biaya')) $('#sw-biaya').onchange = reload;
   if ($('#sw-gol')) $('#sw-gol').onchange = reload;
   $('#sw-prev').onclick = () => { if (siswaState.page > 1) { siswaState.page--; loadSiswa(); } };
   $('#sw-next').onclick = () => { siswaState.page++; loadSiswa(); };
@@ -2879,6 +2889,7 @@ async function loadSiswa() {
   if ($('#sw-kelas').value) p.set('kelas', $('#sw-kelas').value);
   if ($('#sw-status').value) p.set('status', $('#sw-status').value);
   if ($('#sw-ortu')?.value) p.set('ortu', $('#sw-ortu').value);
+  if ($('#sw-biaya')?.value) p.set('biaya', $('#sw-biaya').value);
   // Tanpa parameter golongan server hanya mengirim santri; menu SDM menyebut
   // sisanya secara eksplisit supaya golongan yang ditambahkan admin ikut tampil.
   if (sdm) p.set('golongan', $('#sw-gol')?.value || kodeSdm());
@@ -3039,6 +3050,12 @@ function siswaModal(s) {
     </div>
     <fieldset class="ortu-set" id="m-ortu-set">
       <legend>Akses portal orang tua</legend>
+      <div class="field"><label>Biaya admin top up
+          <span class="muted">(kosongkan = ikut golongan)</span></label>
+        ${inputUang({ id: 'm-biaya', nilai: s?.biaya_admin ?? '' })}
+        <span class="muted set-hint">Diisi <b>0</b> berarti santri ini <b>dibebaskan</b>; diisi
+          angka berarti tarif khusus untuknya. Dikosongkan berarti mengikuti golongannya —
+          dan tiga keadaan itu berbeda.</span></div>
       <p class="muted" style="margin:0 0 8px">Wali masuk ke <code>/ortu</code> memakai
         <b>NIS + tanggal lahir (ddmmyy)</b>, plus 4 digit terakhir HP wali bila sekolah masih
         memintanya (diatur di Dashboard → Kunci Masuk Portal Wali).</p>
@@ -3056,6 +3073,9 @@ function siswaModal(s) {
         nisn: $('#m-nisn').value, tgl_lahir: $('#m-lahir').value, hp_ortu: $('#m-hp').value,
         golongan: $('#m-golongan').value, jabatan: $('#m-jabatan').value,
         berlaku_sampai: $('#m-berlaku').value, catatan: $('#m-catatan').value,
+        // Kosong dikirim sebagai string kosong — dibaca server sebagai "ikut
+        // golongan", BUKAN sebagai nol yang berarti dibebaskan.
+        biaya_admin: $('#m-biaya').value.trim() === '' ? '' : nilaiUang('#m-biaya'),
       };
       let id = s?.id;
       if (s) await api('/api/siswa/' + s.id, { method: 'PUT', body });
@@ -3223,6 +3243,12 @@ function golonganFormModal(g, cfg, sesudah) {
       <label class="cek"><input type="checkbox" id="gf-ortu" ${g?.portal_ortu ? 'checked' : ''}> bisa dibuka lewat portal wali</label>
       <label class="cek"><input type="checkbox" id="gf-kios" ${g === null || g?.kios ? 'checked' : ''}> boleh memakai layar kios</label>
       <label class="cek"><input type="checkbox" id="gf-transfer" ${g === null || g?.transfer ? 'checked' : ''}> boleh mengirim saldo ke teman</label>
+      <label class="cek"><input type="checkbox" id="gf-biaya" ${g?.biaya_admin_kena ? 'checked' : ''}>
+        dipungut biaya admin saat wali top up</label>
+      <span class="muted set-hint">Sengaja MATI untuk golongan baru — berbeda dari batas belanja di
+        bawah yang “kosong berarti ikut sekolah”. Menyalakan portal wali bagi sebuah golongan tidak
+        boleh langsung memungut uang dari mereka tanpa keputusan tersendiri. Nominalnya satu untuk
+        semua, diatur di menu <b>Topup Ortu</b>.</span>
     </div>
     <fieldset class="ortu-set">
       <legend>Batas khusus golongan ini</legend>
@@ -3664,6 +3690,8 @@ function topupOrtuView(el) {
   el.innerHTML = `
   <div class="cards" id="tp-kartu"></div>
 
+  <div id="tp-dana"></div>
+
   <div class="panel">
     <div class="kat-head">
       <h2>Antrean Pengajuan Isi Saldo</h2>
@@ -3750,6 +3778,7 @@ function topupOrtuView(el) {
 
   muatAntreanTopup();
   muatPengaturanTopup();
+  if (boleh('dana.lihat')) muatDanaAdmin();
 }
 
 /** `sumber` boleh nama berkas di uploads/ atau data URL yang belum tersimpan. */
@@ -4755,4 +4784,111 @@ function kenaikanBatalModal(b) {
       if (h) kenaikanRiwayat(h.riwayat);
       $('#kk-hasil').innerHTML = '';
     }, 'Batalkan kenaikan');
+}
+
+// ╔════════════════════════════════════════════════════════════════════════╗
+// ║ DANA ADMIN — pos dana milik sekolah dari biaya admin top up wali       ║
+// ╚════════════════════════════════════════════════════════════════════════╝
+// BUKAN rekening bank. Uangnya berada di rekening sekolah yang sama,
+// bercampur dengan titipan wali; yang dilacak di sini adalah berapa bagian
+// dari saldo rekening itu yang sudah menjadi hak sekolah.
+//
+// "Menarik" karenanya tidak memindahkan apa pun secara otomatis — ia MENCATAT
+// bahwa sekolah sudah mengambil bagiannya. Pemindahan fisiknya dikerjakan
+// bendahara di bank, dan catatan inilah yang membuatnya dipertanggungjawabkan.
+
+let danaState = null;
+
+async function muatDanaAdmin() {
+  let d;
+  try { d = await api('/api/dana-admin'); }
+  catch (e) { $('#tp-dana').innerHTML = `<div class="panel"><p class="minus">${esc(e.message)}</p></div>`; return; }
+  danaState = d;
+  const r = d.ringkas;
+
+  $('#tp-dana').innerHTML = `
+  <div class="panel" style="border-left:4px solid var(--ok)">
+    <div class="kat-head">
+      <h2 style="margin:0">Dana Admin</h2>
+      ${d.boleh_tarik && r.saldo > 0
+        ? '<button class="linkbtn" id="dn-tarik">− Catat penarikan</button>' : ''}
+    </div>
+
+    <div class="cards">
+      <div class="statcard" style="border-top-color:var(--ok)">
+        <span class="muted">Tersedia sekarang</span><br><b class="rp">${rp(r.saldo)}</b></div>
+      <div class="statcard"><span class="muted">Terkumpul seluruhnya</span><br>
+        <b class="rp">${rp(r.masuk)}</b><br><span class="muted">${r.n_masuk} pungutan</span></div>
+      <div class="statcard"><span class="muted">Sudah ditarik</span><br>
+        <b class="rp">${rp(r.tarik)}</b><br><span class="muted">${r.n_tarik} penarikan</span></div>
+    </div>
+
+    <p class="muted"><b>Ini pos dana, bukan rekening bank.</b> Uangnya ada di rekening sekolah yang
+      sama dengan titipan wali — yang dihitung di sini adalah berapa bagiannya yang sudah menjadi
+      hak sekolah dan boleh dipakai. Menekan “catat penarikan” tidak memindahkan uang; ia mencatat
+      bahwa sekolah sudah mengambilnya, supaya bisa dipertanggungjawabkan.</p>
+
+    ${d.per_bulan.length ? `
+    <h2 style="margin-top:14px">Rekap bulanan</h2>
+    <div class="tblwrap"><table>
+      <thead><tr><th>Periode</th><th class="num">Dipungut</th><th class="num">Jumlah pungutan</th>
+        <th class="num">Ditarik</th></tr></thead>
+      <tbody>${d.per_bulan.map((b) => `<tr>
+        <td><b>${esc(b.periode)}</b></td>
+        <td class="num rp">${rp(b.masuk)}</td>
+        <td class="num">${b.n_pungut}</td>
+        <td class="num rp">${b.tarik ? rp(b.tarik) : '<span class="muted">—</span>'}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>` : ''}
+
+    <h2 style="margin-top:14px">Mutasi terakhir</h2>
+    <div class="tblwrap"><table>
+      <thead><tr><th>Waktu</th><th>Jenis</th><th class="num">Jumlah</th>
+        <th class="num">Sisa dana</th><th>Keterangan</th><th>Oleh</th></tr></thead>
+      <tbody>${d.mutasi.map((m) => `<tr>
+        <td>${esc(String(m.created_at || '').slice(0, 10))}</td>
+        <td><span class="badge ${m.jenis === 'masuk' ? 'aktif' : 'blokir'}">${m.jenis}</span></td>
+        <td class="num ${m.jenis === 'masuk' ? 'plus' : 'minus'}">${m.jenis === 'masuk' ? '+' : '−'}${rp(m.jumlah)}</td>
+        <td class="num rp">${rp(m.saldo_sesudah)}</td>
+        <td>${esc(m.keterangan || '—')}</td>
+        <td>${esc(m.operator)}</td>
+      </tr>`).join('') || '<tr><td colspan="6" class="muted">Belum ada mutasi — biaya admin belum pernah dipungut</td></tr>'}</tbody>
+    </table></div>
+  </div>`;
+
+  if ($('#dn-tarik')) $('#dn-tarik').onclick = tarikDanaModal;
+}
+
+function tarikDanaModal() {
+  const r = danaState.ringkas;
+  openModal(`
+    <h2>Catat penarikan Dana Admin</h2>
+    <p>Tersedia sekarang: <b class="rp">${rp(r.saldo)}</b></p>
+    <p class="preview">Tindakan ini <b>tidak memindahkan uang</b>. Ia mencatat bahwa sekolah sudah
+      mengambil bagiannya dari rekening. Pemindahan uangnya dikerjakan bendahara di bank — catatan
+      ini yang membuatnya bisa dipertanggungjawabkan.</p>
+    <div class="field"><label>Nominal yang diambil</label>
+      ${inputUang({ id: 'dn-jumlah', placeholder: 'contoh: 500.000' })}
+      <span class="muted set-hint">Tidak boleh melebihi ${rp(r.saldo)} — dana ini bukan rekening
+        yang bisa minus, dan menariknya berlebih berarti mengambil uang titipan wali.</span></div>
+    <div class="field"><label>Untuk apa</label>
+      <input id="dn-ket" maxlength="200" placeholder="mis. beli kertas struk & servis printer kasir">
+      <span class="muted set-hint">Wajib diisi. Dana ini uang sekolah, dan setiap pengambilannya
+        harus bisa dijelaskan kembali berbulan-bulan kemudian.</span></div>
+    <div class="field"><label>Bukti <span class="muted">(opsional, JPG/PNG maks 3MB)</span></label>
+      <input type="file" id="dn-bukti" accept="image/*"></div>`,
+    async () => {
+      const jumlah = nilaiUang('#dn-jumlah') ?? 0;
+      if (!jumlah) throw new Error('Nominal belum diisi');
+      const f = $('#dn-bukti')?.files[0];
+      const body = {
+        jumlah, keterangan: $('#dn-ket').value, konfirmasi: true,
+        // Penanda unik per penarikan: klik ganda tidak menghasilkan dua catatan.
+        ref: 'tarik-' + Date.now(),
+      };
+      if (f) body.bukti = await fileToDataUrl(f);
+      const d = await api('/api/dana-admin/tarik', { method: 'POST', body });
+      toast(`✔ Penarikan tercatat — sisa dana ${rp(d.ringkas.saldo)}`, 'ok');
+      muatDanaAdmin();
+    }, 'Catat penarikan');
 }

@@ -120,6 +120,20 @@ class SiswaController extends Controller
             $q->whereNotIn('status', Kelas::ARSIP);
         }
 
+        /*
+         * Saringan pembebasan biaya: supaya bendahara bisa melihat sekaligus
+         * siapa saja yang dibebaskan, tanpa membuka data satu per satu.
+         */
+        if ($bi = $r->query('biaya')) {
+            if ($bi === 'bebas') {
+                $q->where('biaya_admin', 0);
+            } elseif ($bi === 'khusus') {
+                $q->whereNotNull('biaya_admin')->where('biaya_admin', '>', 0);
+            } elseif ($bi === 'ikut') {
+                $q->whereNull('biaya_admin');
+            }
+        }
+
         $gol = $r->query('golongan');
         if ($gol === 'semua') {
             // tanpa saringan golongan

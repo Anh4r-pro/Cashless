@@ -41,6 +41,16 @@ class PengaturanSeeder extends Seeder
             'topup_ortu_min' => 10000,
             'topup_ortu_maks' => 300000,
             'topup_ortu_antre' => 3,         // maks pengajuan menunggu per santri
+            /*
+             * Biaya admin top up mandiri wali. 0 = tidak memungut.
+             *
+             * Sengaja mati sejak awal: memungut uang dari wali harus keputusan
+             * sadar sekolah. Kuncinya WAJIB ada di sini walau bernilai nol —
+             * pernah terlewat, dan akibatnya menyimpan pengaturan Topup Ortu
+             * gagal dengan "Undefined array key", bukan dengan pesan yang bisa
+             * dimengerti siapa pun.
+             */
+            'biaya_admin_topup_ortu' => 0,
 
             // saldo titipan & smart top up
             'titipan_aktif' => 1,

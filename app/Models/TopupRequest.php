@@ -23,6 +23,9 @@ class TopupRequest extends Model
         'siswa_nama',
         'kelas',
         'jumlah',
+        // Tarif biaya admin yang DIKUNCI saat wali mengajukan — lihat
+        // App\Services\BiayaAdmin::untukPengajuan().
+        'biaya_admin',
         'metode',
         'tgl_bayar',
         'pengirim',

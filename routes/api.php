@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\ImporKartuController;
 use App\Http\Controllers\Api\KenaikanKelasController;
 use App\Http\Controllers\Api\KasirController;
 use App\Http\Controllers\Api\AnalitikController;
+use App\Http\Controllers\Api\DanaAdminController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\GolonganController;
 use App\Http\Controllers\Api\SettlementController;
@@ -230,4 +231,10 @@ Route::middleware('peran:superadmin')->group(function () {
     Route::get('kenaikan-kelas', [KenaikanKelasController::class, 'riwayat']);
     Route::post('kenaikan-kelas/terapkan', [KenaikanKelasController::class, 'terapkan']);
     Route::post('kenaikan-kelas/{id}/batalkan', [KenaikanKelasController::class, 'batalkan']);
+});
+
+// --- Dana Admin: pos dana milik sekolah dari biaya admin ------------------
+Route::middleware('peran:superadmin')->group(function () {
+    Route::get('dana-admin', [DanaAdminController::class, 'index'])->middleware('izin:dana.lihat');
+    Route::post('dana-admin/tarik', [DanaAdminController::class, 'tarik'])->middleware('izin:dana.tarik');
 });

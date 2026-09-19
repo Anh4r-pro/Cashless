@@ -31,6 +31,8 @@ class Siswa extends Model
         // kolom yang lupa didaftarkan hanya terlihat sebagai nilai yang diam-diam
         // tidak pernah tersimpan.
         'arsip_pada', 'arsip_catatan',
+        // NULL = ikut golongan · 0 = dibebaskan · angka = tarif sendiri
+        'biaya_admin',
         'created_at',
     ];
 

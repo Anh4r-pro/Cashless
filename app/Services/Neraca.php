@@ -56,22 +56,44 @@ class Neraca
          * seperti setoran ke tenant). Tanpa sisi pertama, persamaan melaporkan
          * kas kurang; tanpa sisi kedua, melaporkan kewajiban yang tidak ada.
          */
+        /*
+         * Biaya admin masuk sebagai kas, lalu MENGENDAP di Dana Admin.
+         *
+         * Wali membayar Rp50.000; kas sekolah bertambah seluruhnya, tetapi yang
+         * menjadi kewajiban hanya Rp47.500. Sisanya sudah menjadi hak sekolah —
+         * dan sejak ada Dana Admin, uang itu MASIH ADA di kas sampai benar-benar
+         * ditarik. Karena itu ia tidak lagi dicatat sebagai uang keluar; yang
+         * keluar adalah penarikannya.
+         *
+         * Konsekuensinya kas terbagi dua sisi klaim:
+         *
+         *     kas = kewajiban (milik orang lain) + dana admin (milik sekolah)
+         *
+         * Tanpa memasukkan dana admin ke sisi klaim, kas akan melebihi
+         * kewajiban sebesar akumulasi biaya, dan neraca melaporkan selisih yang
+         * tidak bisa dijelaskan siapa pun.
+         */
         $biayaAdmin = $t['biaya_admin'];
+        $dana = self::ringkasDana();
         $masuk = $topupAsli + $tp['setor'] + $t['koreksi_masuk'] + $biayaAdmin;
 
         $keluar = ['tenant' => $disetor, 'titipan' => $tp['tarik'],
-            'koreksi' => $t['koreksi_keluar'], 'biaya_admin' => $biayaAdmin];
-        $kas = $masuk - $keluar['tenant'] - $keluar['titipan'] - $keluar['koreksi'] - $keluar['biaya_admin'];
+            'koreksi' => $t['koreksi_keluar'], 'dana_admin' => $dana['tarik']];
+        $kas = $masuk - $keluar['tenant'] - $keluar['titipan'] - $keluar['koreksi'] - $keluar['dana_admin'];
 
         $hutangTenant = $t['belanja'] - $disetor;
         $kewajiban = $posSaldo + $posTitipan + $hutangTenant + $t['donasi'];
+        // Dana Admin bukan kewajiban — ia milik sekolah — tetapi tetap sebuah
+        // KLAIM atas kas yang dipegang, jadi ia berdiri sendiri di sebelah
+        // kewajiban, bukan dilebur ke dalamnya.
+        $danaSaldo = $dana['saldo'];
 
         // Saldo yang sudah ada sebelum sistem mencatat apa pun (data lama/dummy).
         // Yang DIAKUI admin dipakai menutup persamaan; yang TERUKUR dihitung
         // ulang dari buku besar, jadi keduanya bisa dibandingkan.
         $awalDiakui = ($cfg['neraca_saldo_awal'] ?? 0) + ($cfg['neraca_titipan_awal'] ?? 0);
         $awalTerukur = ($posSaldo - $t['mutasi_bersih']) + ($posTitipan - $tp['mutasi_bersih']);
-        $selisih = $kas - $kewajiban + $awalDiakui;
+        $selisih = $kas - $kewajiban - $danaSaldo + $awalDiakui;
 
         $drift = self::driftSaldo();
         $driftT = self::driftTitipan();
@@ -93,6 +115,10 @@ class Neraca
             // Pendapatan sekolah dari biaya admin — bukan kewajiban, jadi
             // ditampilkan tersendiri, bukan disembunyikan di dalam "keluar".
             'pendapatan_biaya_admin' => $biayaAdmin,
+            'dana_admin' => [
+                'saldo' => $danaSaldo, 'masuk' => $dana['masuk'], 'tarik' => $dana['tarik'],
+                'n_masuk' => $dana['n_masuk'], 'n_tarik' => $dana['n_tarik'],
+            ],
             'awal' => [
                 'diakui' => $awalDiakui, 'terukur' => $awalTerukur,
                 'saldo' => $cfg['neraca_saldo_awal'] ?? 0,
@@ -157,6 +183,11 @@ class Neraca
             ->first();
 
         return array_map('intval', (array) $r->getAttributes());
+    }
+
+    private static function ringkasDana(): array
+    {
+        return \App\Services\DanaAdmin::ringkas();
     }
 
     private static function ringkasTitipan(): array
@@ -269,6 +300,18 @@ class Neraca
 
         $biayaPositif = Transaksi::where('tipe', 'biaya_admin')->where('jumlah', '>=', 0)->count();
 
+        /*
+         * Setiap rupiah biaya yang dipungut harus mengalir ke Dana Admin, tanpa
+         * kecuali. Kalau jumlah yang dipungut dan yang masuk dana pernah
+         * berbeda, ada uang yang diambil dari wali tetapi tidak tercatat
+         * menjadi hak sekolah — dan tidak ada satu pun laporan yang akan
+         * menunjukkan ke mana perginya.
+         */
+        $danaR = \App\Services\DanaAdmin::ringkas();
+        $biayaDipungut = (int) Transaksi::where('tipe', 'biaya_admin')->sum(DB::raw('-jumlah'));
+        $danaTakCocok = $biayaDipungut !== $danaR['masuk'];
+        $danaMinus = $danaR['saldo'] < 0;
+
         $daftar = [[
             'kode' => 'selisih', 'label' => 'Neraca seimbang (kas = kewajiban)',
             'ok' => $selisih === 0, 'nilai' => $selisih,
@@ -319,6 +362,16 @@ class Neraca
                     'Berarti uang berpindah dari kewajiban menjadi milik sekolah tanpa persetujuan.'],
             ['kode' => 'biaya_arah', 'label' => 'Biaya admin selalu tercatat sebagai pengurang',
                 'ok' => $biayaPositif === 0, 'nilai' => $biayaPositif, 'catatan' => ''],
+            ['kode' => 'dana_cocok', 'label' => 'Seluruh biaya yang dipungut mengalir ke Dana Admin',
+                'ok' => ! $danaTakCocok, 'nilai' => $biayaDipungut - $danaR['masuk'],
+                'catatan' => $danaTakCocok
+                    ? 'Ada biaya yang dipungut dari wali tetapi tidak tercatat masuk ke Dana Admin.'
+                    : ''],
+            ['kode' => 'dana_minus', 'label' => 'Dana Admin tidak pernah bernilai minus',
+                'ok' => ! $danaMinus, 'nilai' => $danaR['saldo'],
+                'catatan' => $danaMinus
+                    ? 'Penarikan melebihi yang terkumpul — berarti uang titipan wali ikut terambil.'
+                    : ''],
         ]);
     }
 }

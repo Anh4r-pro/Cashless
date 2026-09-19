@@ -92,7 +92,40 @@ class BidangSiswa
             'jabatan' => mb_substr(trim((string) ($b['jabatan'] ?? $lama->jabatan ?? '')), 0, 120),
             'catatan' => mb_substr(trim((string) ($b['catatan'] ?? $lama->catatan ?? '')), 0, 300),
             'berlaku_sampai' => $sampai,
+            'biaya_admin' => self::biayaAdmin($b, $lama),
         ];
+    }
+
+    /**
+     * Penimpa biaya admin per orang.
+     *
+     * Tiga keadaan yang BERBEDA dan mudah tertukar:
+     *   tidak dikirim / ''  → NULL, artinya "ikut golongannya"
+     *   0                   → dibebaskan dari biaya
+     *   angka               → tarif khusus orang ini
+     *
+     * Karena itu string kosong TIDAK boleh dibaca sebagai nol: yang pertama
+     * berarti mengikuti aturan umum, yang kedua berarti pengecualian yang
+     * ditetapkan dengan sadar.
+     */
+    public static function biayaAdmin(array $b, ?Siswa $lama): ?int
+    {
+        if (! array_key_exists('biaya_admin', $b)) {
+            return $lama->biaya_admin ?? null;
+        }
+        $v = $b['biaya_admin'];
+        if ($v === null || $v === '' || $v === false) {
+            return null;
+        }
+        if (! is_numeric($v)) {
+            throw new ApiError(400, 'Biaya admin harus berupa angka, atau dikosongkan untuk mengikuti golongan');
+        }
+        $n = (int) floor((float) $v);
+        if ($n < 0) {
+            throw new ApiError(400, 'Biaya admin tidak boleh negatif');
+        }
+
+        return $n;
     }
 
     /**

@@ -28,6 +28,7 @@ class Golongan extends Model
         'portal_ortu',
         'kios',
         'transfer',
+        'biaya_admin_kena',
         'max_saldo',
         'max_topup_harian',
         'max_beli_harian',
@@ -50,5 +51,6 @@ class Golongan extends Model
             'portal_ortu' => 'integer',
             'kios' => 'integer',
             'transfer' => 'integer',
+            'biaya_admin_kena' => 'integer',
     ];
 }

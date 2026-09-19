@@ -10,6 +10,7 @@ use App\Models\TopupRequest;
 use App\Services\Berkas;
 use App\Services\Kartu;
 use App\Services\BiayaAdmin;
+use App\Services\DanaAdmin;
 use App\Services\Pengaturan;
 use App\Services\Rupiah;
 use App\Services\Setoran;
@@ -87,7 +88,7 @@ class TopupOrtuController extends Controller
             // Wali harus tahu biayanya SEBELUM membayar. Menemukannya setelah
             // saldo anaknya tidak sesuai adalah cara tercepat membuat orang
             // tidak percaya pada sistem pembayaran sekolahnya sendiri.
-            'biaya_admin' => BiayaAdmin::tarif(),
+            'biaya_admin' => BiayaAdmin::tarifUntuk($s),
             'max_saldo' => $cfg['max_saldo'], 'saldo' => $s->saldo,
             'antre_n' => $antre['n'], 'antre_total' => $antre['total'],
             'antre_maks' => $cfg['topup_ortu_antre'],
@@ -169,6 +170,10 @@ class TopupOrtuController extends Controller
         $row = TopupRequest::create([
             'siswa_id' => $s->id, 'siswa_nama' => $s->nama, 'kelas' => $s->kelas,
             'jumlah' => $jumlah, 'metode' => $metode, 'tgl_bayar' => $tgl,
+            // Tarif dikunci di sini, bukan dibaca ulang saat disetujui: wali
+            // sudah benar-benar mentransfer uang berdasarkan angka yang tampil
+            // di layarnya, dan pengajuan bisa menunggu berhari-hari di antrean.
+            'biaya_admin' => BiayaAdmin::untuk($s, $jumlah, $metode),
             'pengirim' => $pengirim, 'bukti' => $bukti, 'created_at' => WaktuIso::sekarang(),
         ])->fresh();
 
@@ -237,7 +242,9 @@ class TopupOrtuController extends Controller
              * di antrean, dan yang berlaku adalah aturan pada saat uangnya
              * benar-benar diakui masuk.
              */
-            $biaya = BiayaAdmin::untuk((int) $req->jumlah);
+            $santri = \App\Models\Siswa::find($req->siswa_id);
+            $biaya = BiayaAdmin::untukPengajuan(
+                $santri, (int) $req->jumlah, $req->metode, $req->biaya_admin);
             $bersih = (int) $req->jumlah - $biaya;
 
             $ket = mb_substr('Top up ' . ($req->metode === 'qris' ? 'QRIS' : 'transfer bank') .
@@ -256,8 +263,14 @@ class TopupOrtuController extends Controller
 
             // Dicatat SESUDAH top up, dan memakai saldo sesudahnya, supaya
             // rantai saldo di buku besar tetap runut.
-            BiayaAdmin::catat($setor['siswa'], $biaya, $user->nama,
+            $txBiaya = BiayaAdmin::catat($setor['siswa'], $biaya, $user->nama,
                 "Biaya admin top up portal orang tua (pengajuan #{$req->id})",
+                "ortu-biaya-{$req->id}");
+
+            // Uangnya bermuara ke Dana Admin — pos milik sekolah. `ref` yang
+            // sama dengan tx_id membuat persetujuan yang terulang tidak
+            // menambah dana dua kali sementara wali hanya dipungut sekali.
+            DanaAdmin::terima($biaya, $setor['siswa'], $txBiaya, $user->nama,
                 "ortu-biaya-{$req->id}");
 
             $tandai = TopupRequest::where('id', $req->id)->where('status', 'pending')->update([
@@ -370,8 +383,13 @@ class TopupOrtuController extends Controller
          * wali membayar, saldo anaknya tidak bertambah sepeser pun, dan tidak
          * ada satu pun pesan yang menjelaskan mengapa.
          */
-        if ($nilai[BiayaAdmin::KUNCI] > 0 && $nilai[BiayaAdmin::KUNCI] >= $nilai['topup_ortu_min']) {
-            throw new ApiError(400, 'Biaya admin (' . Rupiah::f($nilai[BiayaAdmin::KUNCI]) .
+        // `?? 0` bukan kehati-hatian berlebihan: basis data yang dipasang
+        // sebelum kunci ini ada akan kehilangannya, dan tanpa ini seluruh layar
+        // pengaturan Topup Ortu gagal dengan galat 500 yang tidak menyebut
+        // sebabnya. Terjadi di produksi.
+        $tarifBiaya = (int) ($nilai[BiayaAdmin::KUNCI] ?? 0);
+        if ($tarifBiaya > 0 && $tarifBiaya >= $nilai['topup_ortu_min']) {
+            throw new ApiError(400, 'Biaya admin (' . Rupiah::f($tarifBiaya) .
                 ') harus lebih kecil dari nominal terkecil pengajuan (' .
                 Rupiah::f($nilai['topup_ortu_min']) . ') — kalau tidak, ada pengajuan yang ' .
                 'seluruh nominalnya habis oleh biaya');
@@ -408,7 +426,7 @@ class TopupOrtuController extends Controller
 
         DB::transaction(function () use ($nilai, $info) {
             foreach (array_keys(self::LABELS) as $key) {
-                Setting::simpan($key, $nilai[$key]);
+                Setting::simpan($key, $nilai[$key] ?? 0);
             }
             foreach (self::INFO_KEYS as $k) {
                 TopupInfo::simpan($k, $info[$k]);

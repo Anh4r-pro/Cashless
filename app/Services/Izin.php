@@ -100,6 +100,10 @@ class Izin
             'riwayat.ekspor' => 'Mengekspor & mencetak riwayat',
             'analitik.lihat' => 'Membuka Analitik penjualan',
         ],
+        'Dana Admin' => [
+            'dana.lihat' => 'Melihat Dana Admin & rekapnya',
+            'dana.tarik' => 'Menarik uang dari Dana Admin',
+        ],
         'Sistem' => [
             'akun.lihat' => 'Melihat daftar akun pengguna',
             'akun.kelola' => 'Menambah / mengubah / menghapus akun',
@@ -208,6 +212,7 @@ class Izin
                     'topup_ortu.lihat', 'topup_ortu.putuskan',
                     'santri.lihat', 'sdm.lihat',
                     'riwayat.lihat', 'riwayat.ekspor', 'analitik.lihat',
+                    'dana.lihat', 'dana.tarik',
                 ],
             ],
             [
@@ -234,7 +239,7 @@ class Izin
                     'dashboard.lihat', 'neraca.lihat', 'settings.lihat',
                     'saldo.lihat', 'santri.lihat', 'sdm.lihat',
                     'tenant.lihat', 'ajuan.lihat', 'donasi.lihat',
-                    'massal.lihat', 'topup_ortu.lihat',
+                    'massal.lihat', 'topup_ortu.lihat', 'dana.lihat',
                     'riwayat.lihat', 'analitik.lihat',
                 ],
             ],
