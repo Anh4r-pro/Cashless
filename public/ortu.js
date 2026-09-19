@@ -413,6 +413,32 @@ function langkahKonfirmasi() {
     catch { e.target.value = ''; toast('Bukti gagal dibaca', 'err'); }
   };
   $('#om-kirim').onclick = kirimTopup;
+
+  /*
+   * Rincian biaya dihitung ulang setiap kali nominalnya diketik, bukan ditulis
+   * sekali sebagai catatan kaki. Wali perlu melihat angka untuk nominal YANG
+   * IA PILIH — "biaya Rp2.500" mudah terlewat, "masuk ke kartu Rp47.500"
+   * tidak. Menemukan potongan itu baru setelah saldo anaknya ternyata kurang
+   * adalah cara tercepat membuat orang berhenti percaya pada sistem pembayaran
+   * sekolahnya.
+   */
+  if (topupInfo.biaya_admin > 0) {
+    const gambarRincian = () => {
+      const el = $('#o-tp-rincian');
+      if (!el) return;
+      const bayar = nilaiUang('#o-tp-jumlah') ?? 0;
+      if (!bayar) {
+        el.textContent = `Biaya admin ${rp(topupInfo.biaya_admin)} per pengajuan.`;
+        return;
+      }
+      const masuk = Math.max(0, bayar - topupInfo.biaya_admin);
+      el.innerHTML = `Bayar <b>${rp(bayar)}</b> − biaya admin
+        <b>${rp(topupInfo.biaya_admin)}</b> → masuk ke kartu <b>${rp(masuk)}</b>`;
+    };
+    $('#o-tp-jumlah').addEventListener('input', gambarRincian);
+    gambarRincian();
+  }
+
   $('#o-tp-jumlah').focus();
 }
 

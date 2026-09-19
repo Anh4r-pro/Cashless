@@ -9,6 +9,7 @@ use App\Models\TopupInfo;
 use App\Models\TopupRequest;
 use App\Services\Berkas;
 use App\Services\Kartu;
+use App\Services\BiayaAdmin;
 use App\Services\Pengaturan;
 use App\Services\Rupiah;
 use App\Services\Setoran;
@@ -44,6 +45,9 @@ class TopupOrtuController extends Controller
         'topup_ortu_min' => ['label' => 'Nominal terkecil satu pengajuan', 'unit' => 'rp'],
         'topup_ortu_maks' => ['label' => 'Nominal terbesar satu pengajuan', 'unit' => 'rp'],
         'topup_ortu_antre' => ['label' => 'Maks pengajuan menunggu / santri', 'unit' => 'kali'],
+        // 0 = tidak memungut. Satu-satunya kunci di sini yang boleh bernilai
+        // nol selain sakelar hidup/mati.
+        'biaya_admin_topup_ortu' => ['label' => 'Biaya admin / pengajuan', 'unit' => 'rp'],
     ];
 
     private const INFO_KEYS = ['qris_gambar', 'qris_nama', 'qris_instruksi',
@@ -80,6 +84,10 @@ class TopupOrtuController extends Controller
             'belum_disiapkan' => $cfg['topup_ortu_aktif'] === 1 && $metode === [],
             'metode' => $metode,
             'min' => $cfg['topup_ortu_min'], 'maks' => $cfg['topup_ortu_maks'],
+            // Wali harus tahu biayanya SEBELUM membayar. Menemukannya setelah
+            // saldo anaknya tidak sesuai adalah cara tercepat membuat orang
+            // tidak percaya pada sistem pembayaran sekolahnya sendiri.
+            'biaya_admin' => BiayaAdmin::tarif(),
             'max_saldo' => $cfg['max_saldo'], 'saldo' => $s->saldo,
             'antre_n' => $antre['n'], 'antre_total' => $antre['total'],
             'antre_maks' => $cfg['topup_ortu_antre'],
@@ -222,17 +230,35 @@ class TopupOrtuController extends Controller
                     : 'Pengajuan ini sudah ditolak');
             }
 
+            /*
+             * Biaya admin dipungut dari nominal yang DIBAYAR wali, sebelum
+             * sisanya dibagi ke saldo/titipan. Tarifnya dibaca saat persetujuan,
+             * bukan saat pengajuan dibuat — pengajuan bisa menunggu berhari-hari
+             * di antrean, dan yang berlaku adalah aturan pada saat uangnya
+             * benar-benar diakui masuk.
+             */
+            $biaya = BiayaAdmin::untuk((int) $req->jumlah);
+            $bersih = (int) $req->jumlah - $biaya;
+
             $ket = mb_substr('Top up ' . ($req->metode === 'qris' ? 'QRIS' : 'transfer bank') .
                 ' via portal orang tua' . ($req->pengirim ? " — {$req->pengirim}" : '') .
-                " (bayar {$req->tgl_bayar})", 0, 300);
+                " (bayar {$req->tgl_bayar})" .
+                ($biaya > 0 ? ' — dari ' . Rupiah::f((int) $req->jumlah)
+                    . ', biaya admin ' . Rupiah::f($biaya) : ''), 0, 300);
 
-            $setor = Setoran::terima($req->siswa_id, $req->jumlah, [
+            $setor = Setoran::terima($req->siswa_id, $bersih, [
                 'keTitipan' => $keTitipan,
                 'operator' => $user->nama,
                 'keterangan' => $ket,
                 'txId' => "ortu-topup-{$req->id}",
                 'refTitipan' => "ortu-topup-{$req->id}",
             ]);
+
+            // Dicatat SESUDAH top up, dan memakai saldo sesudahnya, supaya
+            // rantai saldo di buku besar tetap runut.
+            BiayaAdmin::catat($setor['siswa'], $biaya, $user->nama,
+                "Biaya admin top up portal orang tua (pengajuan #{$req->id})",
+                "ortu-biaya-{$req->id}");
 
             $tandai = TopupRequest::where('id', $req->id)->where('status', 'pending')->update([
                 'status' => 'disetujui', 'transaksi_id' => $setor['transaksi']?->id,
@@ -318,6 +344,12 @@ class TopupOrtuController extends Controller
                 if ($v !== 0 && $v !== 1) {
                     throw new ApiError(400, 'Pengajuan top up hanya bisa dibuka (1) atau ditutup (0)');
                 }
+            } elseif ($key === BiayaAdmin::KUNCI) {
+                // Nol berarti tidak memungut — itu keadaan yang sah, dan harus
+                // bisa dipilih tanpa harus mematikan fitur lain.
+                if ($v < 0) {
+                    throw new ApiError(400, 'Biaya admin tidak boleh negatif');
+                }
             } elseif ($v <= 0) {
                 throw new ApiError(400, "Nilai \"{$def['label']}\" harus lebih dari nol");
             }
@@ -331,6 +363,18 @@ class TopupOrtuController extends Controller
         if ($nilai['topup_ortu_maks'] > $nilai['max_saldo']) {
             throw new ApiError(400, 'Nominal terbesar tidak boleh melampaui batas saldo santri (' .
                 Rupiah::f($nilai['max_saldo']) . ')');
+        }
+        /*
+         * Biaya harus lebih kecil dari nominal terkecil yang boleh diajukan.
+         * Kalau tidak, ada pengajuan sah yang habis dimakan biayanya sendiri —
+         * wali membayar, saldo anaknya tidak bertambah sepeser pun, dan tidak
+         * ada satu pun pesan yang menjelaskan mengapa.
+         */
+        if ($nilai[BiayaAdmin::KUNCI] > 0 && $nilai[BiayaAdmin::KUNCI] >= $nilai['topup_ortu_min']) {
+            throw new ApiError(400, 'Biaya admin (' . Rupiah::f($nilai[BiayaAdmin::KUNCI]) .
+                ') harus lebih kecil dari nominal terkecil pengajuan (' .
+                Rupiah::f($nilai['topup_ortu_min']) . ') — kalau tidak, ada pengajuan yang ' .
+                'seluruh nominalnya habis oleh biaya');
         }
         if ($nilai['topup_ortu_antre'] > self::ANTRE_BATAS_ATAS) {
             throw new ApiError(400, 'Maksimal ' . self::ANTRE_BATAS_ATAS . ' pengajuan menunggu per santri');

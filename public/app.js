@@ -1203,10 +1203,17 @@ function neracaPanel(n) {
         <h3>Uang yang diterima &amp; dikeluarkan sekolah</h3>
         ${nrBaris('Uang masuk terverifikasi', m.total, { tanda: '+', warna: 'plus',
           catatan: `top up ${rp(m.topup)} + setoran titipan ${rp(m.titipan)}` +
+            (m.biaya_admin > 0 ? ` + biaya admin ${rp(m.biaya_admin)}` : '') +
             (m.internal_isi_ulang > 0
               ? `<br>isi ulang otomatis dari titipan ${rp(m.internal_isi_ulang)} tidak dihitung sebagai uang masuk`
               : '') })}
         ${nrBaris('Sudah disetor ke tenant', n.keluar.tenant, { tanda: '−', warna: 'minus' })}
+        ${n.keluar.biaya_admin > 0
+          ? nrBaris('Biaya admin (jadi pendapatan sekolah)', n.keluar.biaya_admin,
+              { tanda: '−', warna: 'minus',
+                catatan: 'uangnya diterima sekolah lalu diakui sebagai pendapatan, jadi ia ' +
+                  'keluar dari kewajiban — bukan uang yang hilang' })
+          : ''}
         ${nrBaris('Penarikan titipan (dikembalikan ke wali)', n.keluar.titipan, { tanda: '−', warna: 'minus' })}
         ${nrBaris('Potongan saldo oleh admin', n.keluar.koreksi, { tanda: '−', warna: 'minus',
           catatan: 'penarikan tunai, koreksi salah input, pembayaran di luar kantin' })}

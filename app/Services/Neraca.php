@@ -43,10 +43,25 @@ class Neraca
         // Isi ulang otomatis dari titipan bukan uang masuk — uangnya sudah
         // dihitung saat disetorkan, jadi harus dikurangkan supaya tidak dobel.
         $topupAsli = $t['topup'] - $tp['isi_saldo'];
-        $masuk = $topupAsli + $tp['setor'] + $t['koreksi_masuk'];
 
-        $keluar = ['tenant' => $disetor, 'titipan' => $tp['tarik'], 'koreksi' => $t['koreksi_keluar']];
-        $kas = $masuk - $keluar['tenant'] - $keluar['titipan'] - $keluar['koreksi'];
+        /*
+         * Biaya admin muncul di DUA sisi, dan itu bukan pembukuan ganda.
+         *
+         * Wali membayar Rp100.000; yang masuk kartu Rp97.500. Kas sekolah
+         * bertambah Rp100.000 — seluruhnya — tetapi yang menjadi KEWAJIBAN
+         * hanya Rp97.500. Sisanya sudah menjadi milik sekolah.
+         *
+         * Maka biaya itu dicatat sebagai uang MASUK (kas memang bertambah
+         * sebanyak itu) sekaligus uang KELUAR (ia lepas dari kewajiban, persis
+         * seperti setoran ke tenant). Tanpa sisi pertama, persamaan melaporkan
+         * kas kurang; tanpa sisi kedua, melaporkan kewajiban yang tidak ada.
+         */
+        $biayaAdmin = $t['biaya_admin'];
+        $masuk = $topupAsli + $tp['setor'] + $t['koreksi_masuk'] + $biayaAdmin;
+
+        $keluar = ['tenant' => $disetor, 'titipan' => $tp['tarik'],
+            'koreksi' => $t['koreksi_keluar'], 'biaya_admin' => $biayaAdmin];
+        $kas = $masuk - $keluar['tenant'] - $keluar['titipan'] - $keluar['koreksi'] - $keluar['biaya_admin'];
 
         $hutangTenant = $t['belanja'] - $disetor;
         $kewajiban = $posSaldo + $posTitipan + $hutangTenant + $t['donasi'];
@@ -64,7 +79,8 @@ class Neraca
         return [
             'masuk' => [
                 'total' => $masuk, 'topup' => $topupAsli, 'titipan' => $tp['setor'],
-                'koreksi' => $t['koreksi_masuk'], 'internal_isi_ulang' => $tp['isi_saldo'],
+                'koreksi' => $t['koreksi_masuk'], 'biaya_admin' => $biayaAdmin,
+                'internal_isi_ulang' => $tp['isi_saldo'],
                 'per_metode' => self::metodeUangMasuk(),
             ],
             'keluar' => $keluar,
@@ -74,6 +90,9 @@ class Neraca
                 'hutang_tenant' => $hutangTenant, 'donasi' => $t['donasi'],
             ],
             'penjualan_tenant' => $t['belanja'],
+            // Pendapatan sekolah dari biaya admin — bukan kewajiban, jadi
+            // ditampilkan tersendiri, bukan disembunyikan di dalam "keluar".
+            'pendapatan_biaya_admin' => $biayaAdmin,
             'awal' => [
                 'diakui' => $awalDiakui, 'terukur' => $awalTerukur,
                 'saldo' => $cfg['neraca_saldo_awal'] ?? 0,
@@ -119,7 +138,22 @@ class Neraca
             ->selectRaw("COALESCE(SUM(CASE WHEN tipe='donasi' THEN -jumlah END),0) AS donasi")
             ->selectRaw("COALESCE(SUM(CASE WHEN tipe='koreksi' AND jumlah < 0 THEN -jumlah END),0) AS koreksi_keluar")
             ->selectRaw("COALESCE(SUM(CASE WHEN tipe='koreksi' AND jumlah > 0 THEN jumlah END),0) AS koreksi_masuk")
-            ->selectRaw('COALESCE(SUM(jumlah),0) AS mutasi_bersih')
+            ->selectRaw("COALESCE(SUM(CASE WHEN tipe='biaya_admin' THEN -jumlah END),0) AS biaya_admin")
+            /*
+             * mutasi_bersih berarti "seberapa jauh SALDO KARTU bergerak", dan
+             * dipakai untuk menurunkan saldo awal: posisi sekarang dikurangi
+             * seluruh pergerakan yang tercatat. Baris biaya admin karena itu
+             * DIKECUALIKAN — ia bernilai negatif tetapi tidak pernah
+             * menggerakkan saldo siapa pun; uangnya dipotong sebelum masuk
+             * kartu.
+             *
+             * Tanpa pengecualian ini, tiap biaya yang dipungut memunculkan
+             * "saldo awal terukur" sebesar biaya itu — saldo yang tidak pernah
+             * ada. Dan bila admin lalu menekan "tetapkan saldo awal", angka
+             * hantu itu ikut diakui dan neraca selisih selamanya. Ditemukan
+             * oleh suite uji neraca, bukan oleh perhitungan tangan.
+             */
+            ->selectRaw("COALESCE(SUM(CASE WHEN tipe <> 'biaya_admin' THEN jumlah END),0) AS mutasi_bersih")
             ->first();
 
         return array_map('intval', (array) $r->getAttributes());
@@ -218,6 +252,23 @@ class Neraca
 
         $saldoMinus = Siswa::where('saldo', '<', 0)->orWhere('saldo_titipan', '<', 0)->count();
 
+        /*
+         * Setiap baris biaya admin harus menempel pada satu pengajuan wali yang
+         * BENAR-BENAR disetujui. Biaya yang berdiri sendiri berarti uang
+         * berpindah dari kewajiban menjadi milik sekolah tanpa ada persetujuan
+         * yang bisa ditunjuk — persis jenis kejadian yang tidak boleh lolos
+         * diam-diam dari sebuah neraca.
+         */
+        $biayaYatim = (int) DB::selectOne("
+            SELECT COUNT(*) AS n FROM transaksi t
+             WHERE t.tipe='biaya_admin'
+               AND (t.tx_id IS NULL
+                 OR NOT EXISTS (SELECT 1 FROM topup_request r
+                                 WHERE r.status='disetujui'
+                                   AND CONCAT('ortu-biaya-', r.id) = t.tx_id))")->n;
+
+        $biayaPositif = Transaksi::where('tipe', 'biaya_admin')->where('jumlah', '>=', 0)->count();
+
         $daftar = [[
             'kode' => 'selisih', 'label' => 'Neraca seimbang (kas = kewajiban)',
             'ok' => $selisih === 0, 'nilai' => $selisih,
@@ -261,6 +312,13 @@ class Neraca
                 'ok' => $imporTanpaTx === 0, 'nilai' => $imporTanpaTx, 'catatan' => ''],
             ['kode' => 'saldo_minus', 'label' => 'Tidak ada saldo atau titipan bernilai minus',
                 'ok' => $saldoMinus === 0, 'nilai' => $saldoMinus, 'catatan' => ''],
+            ['kode' => 'biaya_yatim', 'label' => 'Setiap biaya admin menempel pada pengajuan wali yang disetujui',
+                'ok' => $biayaYatim === 0, 'nilai' => $biayaYatim,
+                'catatan' => $biayaYatim === 0 ? '' :
+                    "{$biayaYatim} baris biaya admin tidak punya pengajuan yang bisa ditunjuk. " .
+                    'Berarti uang berpindah dari kewajiban menjadi milik sekolah tanpa persetujuan.'],
+            ['kode' => 'biaya_arah', 'label' => 'Biaya admin selalu tercatat sebagai pengurang',
+                'ok' => $biayaPositif === 0, 'nilai' => $biayaPositif, 'catatan' => ''],
         ]);
     }
 }
