@@ -106,6 +106,36 @@ class BiayaAdmin
     }
 
     /**
+     * Siapa yang sebenarnya dipungut dengan tarif yang berlaku sekarang.
+     *
+     * Ada karena tarif dan sasaran diatur di DUA layar berbeda: nominalnya di
+     * Topup Ortu, sakelar golongannya di menu Golongan. Admin yang hanya
+     * mengisi nominal lalu menutup layar akan mengira biaya sudah berjalan,
+     * padahal belum memungut siapa pun. Ringkasan ini dipakai layar Topup Ortu
+     * untuk mengatakannya terus terang alih-alih membiarkannya diam.
+     *
+     * Kartu yang sudah diarsipkan tidak dihitung — ia tidak bisa top up lagi.
+     */
+    public static function sasaran(): array
+    {
+        $golongan = \App\Models\Golongan::where('biaya_admin_kena', 1)
+            ->where('aktif', 1)->orderBy('urutan')->orderBy('nama')
+            ->pluck('nama')->all();
+
+        $penimpa = Siswa::whereNotNull('biaya_admin')->whereNull('arsip_pada')
+            ->selectRaw('SUM(CASE WHEN biaya_admin = 0 THEN 1 ELSE 0 END) AS bebas')
+            ->selectRaw('SUM(CASE WHEN biaya_admin > 0 THEN 1 ELSE 0 END) AS khusus')
+            ->first();
+
+        return [
+            'tarif' => self::tarifSekolah(),
+            'golongan' => $golongan,
+            'bebas' => (int) ($penimpa->bebas ?? 0),
+            'khusus' => (int) ($penimpa->khusus ?? 0),
+        ];
+    }
+
+    /**
      * Catat biayanya di buku besar.
      *
      * Barisnya TIDAK mengubah saldo kartu — nominalnya memang tidak pernah

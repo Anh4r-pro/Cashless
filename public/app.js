@@ -3752,6 +3752,10 @@ function topupOrtuView(el) {
         ${inputUang({ id: 'tp-maks' })}</div>
       <div class="field"><label>Maksimal pengajuan menunggu per santri</label>
         <input id="tp-antre" inputmode="numeric"></div>
+      <div class="field"><label>Biaya admin per pengajuan
+          <span class="muted">(isi 0 untuk tidak memungut)</span></label>
+        ${inputUang({ id: 'tp-biaya' })}
+        <span class="muted set-hint" id="tp-biaya-hint"></span></div>
       <button class="paybtn" id="tp-simpan-batas">Simpan batas pengajuan</button>
       <p class="muted" id="tp-catatan">Batas <b>max saldo</b> dan <b>max top up harian</b> di menu
         Dashboard tetap berlaku, dan diperiksa ulang saat Anda menekan Setujui.</p>
@@ -3842,6 +3846,34 @@ async function muatAntreanTopup() {
   } catch (e) { toast(e.message, 'err'); }
 }
 
+// Tarif dan sasarannya diatur di dua layar berbeda; petunjuk ini yang
+// menyambungkannya, supaya nominal yang terisi tapi belum memungut siapa pun
+// tidak terlihat seperti sudah berjalan.
+function gambarPetunjukBiaya(s) {
+  const el = $('#tp-biaya-hint');
+  if (!el || !s) return;
+  const ekor = [];
+  if (s.bebas) ekor.push(`${s.bebas} kartu dibebaskan`);
+  if (s.khusus) ekor.push(`${s.khusus} kartu bertarif khusus`);
+  const rinci = ekor.length ? ` Di luar itu: ${ekor.join(', ')}.` : '';
+
+  if (!s.golongan.length) {
+    el.innerHTML = s.tarif
+      ? `<b>Belum memungut siapa pun.</b> Nominal sudah terisi, tapi belum ada
+         golongan yang dicentang. Buka <b>SDM &amp; Personil → Kelola Golongan</b>,
+         ubah golongan yang dikehendaki, lalu centang
+         <b>“dipungut biaya admin saat wali top up”</b>.${rinci}`
+      : `Diisi 0 — tidak ada yang dipungut.${rinci}`;
+    return;
+  }
+  const daftar = s.golongan.map(esc).join(', ');
+  el.innerHTML = s.tarif
+    ? `Dipungut dari golongan <b>${daftar}</b> pada top up lewat QRIS dan transfer.
+       Top up massal, top up loket, dan transfer antar kartu tidak dipungut.${rinci}`
+    : `Golongan <b>${daftar}</b> sudah dicentang, tapi nominalnya 0 —
+       belum ada yang dipungut.${rinci}`;
+}
+
 async function muatPengaturanTopup() {
   try {
     const d = await api('/api/topup-ortu/pengaturan');
@@ -3849,6 +3881,8 @@ async function muatPengaturanTopup() {
     isiUang('#tp-min', d.pengaturan.topup_ortu_min);
     isiUang('#tp-maks', d.pengaturan.topup_ortu_maks);
     $('#tp-antre').value = d.pengaturan.topup_ortu_antre;
+    isiUang('#tp-biaya', d.pengaturan.biaya_admin_topup_ortu ?? 0);
+    gambarPetunjukBiaya(d.sasaran_biaya);
     $('#tp-qris-nama').value = d.info.qris_nama;
     $('#tp-qris-instruksi').value = d.info.qris_instruksi;
     $('#tp-bank-nama').value = d.info.bank_nama;
@@ -3893,6 +3927,7 @@ async function simpanBatasTopup() {
       topup_ortu_min: nilaiUang('#tp-min'),
       topup_ortu_maks: nilaiUang('#tp-maks'),
       topup_ortu_antre: angka('#tp-antre'),
+      biaya_admin_topup_ortu: nilaiUang('#tp-biaya') ?? 0,
     } });
     toast('✔ Batas pengajuan disimpan', 'ok');
     muatPengaturanTopup();

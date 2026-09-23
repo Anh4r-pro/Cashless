@@ -336,7 +336,8 @@ class TopupOrtuController extends Controller
         $info = self::info_();
 
         return response()->json(['pengaturan' => $p, 'labels' => self::LABELS,
-            'info' => $info, 'siap' => self::metodeSiap($info)]);
+            'info' => $info, 'siap' => self::metodeSiap($info),
+            'sasaran_biaya' => BiayaAdmin::sasaran()]);
     }
 
     public function simpanPengaturan(Request $r)
