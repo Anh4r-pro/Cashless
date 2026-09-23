@@ -41,6 +41,25 @@ class ResetSantri extends Command
         $gol = (string) $this->option('golongan');
         $q = fn () => $gol === 'semua' ? Siswa::query() : Siswa::where('golongan', $gol);
 
+        /*
+         * Nama basis data ditampilkan MENCOLOK, dan ini bukan hiasan.
+         *
+         * Dengan `config:cache` aktif, menaruh DB_DATABASE=... di depan
+         * perintah TIDAK berpengaruh apa-apa: Laravel membaca config yang
+         * sudah ter-cache, bukan env. Akibatnya perintah yang dikira sedang
+         * berlatih di salinan justru mengenai produksi, tanpa sepatah kata
+         * peringatan pun. Satu baris ini membuat kekeliruan itu terlihat
+         * SEBELUM --paksa ditekan, bukan sesudah datanya hilang.
+         */
+        $dbAktif = DB::connection()->getDatabaseName();
+        $dbEnv = env('DB_DATABASE');
+        $this->line('Basis data yang akan disentuh: <fg=red;options=bold>' . $dbAktif . '</>');
+        if ($dbEnv && $dbEnv !== $dbAktif) {
+            $this->warn("DB_DATABASE di lingkungan berbunyi \"{$dbEnv}\", tapi yang dipakai \"{$dbAktif}\".");
+            $this->warn('Config sedang ter-cache, jadi penggantian lewat env DIABAIKAN.');
+            $this->warn('Jalankan `php artisan config:clear` dulu kalau memang mau pindah basis data.');
+        }
+
         $jml = $q()->count();
         if ($jml === 0) {
             $this->info('Tidak ada kartu yang cocok — tidak ada yang perlu dikosongkan.');
@@ -65,7 +84,6 @@ class ResetSantri extends Command
             'sesi wali aktif' => DB::table('ortu_sessions')->whereIn('siswa_id', $ids)->count(),
         ];
 
-        $this->line('');
         $this->line("Kartu yang akan DIHAPUS : <fg=yellow>{$jml}</> (golongan: {$gol})");
         $this->line('Saldo yang ikut hilang  : <fg=yellow>Rp' . number_format($saldo, 0, ',', '.') . '</>');
         $this->line('Titipan yang ikut hilang: <fg=yellow>Rp' . number_format($titipan, 0, ',', '.') . '</>');
