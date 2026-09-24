@@ -150,7 +150,20 @@ class TopupOrtuController extends Controller
                 ' hari ke belakang. Untuk pembayaran yang lebih lama, hubungi admin kantin.');
         }
 
+        /*
+         * Nama pengirim WAJIB, dan bukan sekadar formalitas.
+         *
+         * Yang memeriksa pengajuan ini adalah manusia yang membuka mutasi
+         * rekening sekolah. Tanpa nama pengirim, satu-satunya cara mencocokkan
+         * adalah menebak dari nominal — dan nominal kembar adalah hal biasa
+         * pada hari yang sama. Dua huruf tidak cukup untuk dicari di mutasi,
+         * jadi ambangnya tiga.
+         */
         $pengirim = mb_substr(preg_replace('/\s+/', ' ', trim((string) $r->input('pengirim', ''))), 0, 80);
+        if (mb_strlen($pengirim) < 3) {
+            throw new ApiError(400, 'Nama pengirim wajib diisi, sesuai nama di rekening/aplikasi ' .
+                'yang Anda pakai membayar. Ini yang dipakai admin mencocokkan dengan mutasi rekening sekolah.');
+        }
 
         // Rem anti-banjir, sekaligus menjaga agar antrean yang menunggu tidak
         // sampai melampaui batas saldo begitu semuanya disetujui.
@@ -165,7 +178,47 @@ class TopupOrtuController extends Controller
                 ($antre['total'] ? ' dan ' . Rupiah::f($antre['total']) . ' masih menunggu disetujui' : '') . '.');
         }
 
-        $bukti = $r->input('bukti') ? Berkas::simpanGambarBase64((string) $r->input('bukti'), 'topup') : null;
+        /*
+         * Bukti bayar WAJIB. Sebelum ini pengajuan bisa dikirim tanpa bukti
+         * apa pun, dan admin diminta menyetujui penambahan saldo hanya
+         * berdasarkan pengakuan — pemeriksaannya jadi bergantung pada ingatan
+         * dan itikad baik, bukan pada dokumen.
+         */
+        if (! $r->input('bukti')) {
+            throw new ApiError(400, 'Bukti bayar wajib dilampirkan. Unggah foto atau tangkapan ' .
+                'layar bukti transfer/QRIS Anda sebelum mengirim pengajuan.');
+        }
+        /*
+         * Ambang 100 piksel menutup celah yang paling gampang: bukti WAJIB
+         * yang dipenuhi dengan gambar satu piksel bukanlah bukti, dan aturan
+         * wajib yang bisa dilewati begitu saja lebih buruk daripada tidak ada
+         * — ia membuat admin mengira setiap pengajuan sudah berdokumen.
+         * Angkanya sengaja jauh di bawah tangkapan layar ponsel mana pun,
+         * supaya yang tersaring hanya gambar yang memang tidak mungkin dibaca.
+         */
+        $berkas = Berkas::simpanGambarLengkap((string) $r->input('bukti'), 'topup', 100);
+        $bukti = $berkas['nama'];
+
+        /*
+         * Satu bukti, satu pengajuan.
+         *
+         * Wali yang mentransfer sekali lalu mengajukan dua kali lolos dari
+         * semua pemeriksaan lain — nominal, tanggal, dan antreannya sama-sama
+         * sah. Yang membongkarnya cuma kesamaan gambar buktinya. Pengajuan yang
+         * sudah DITOLAK sengaja tidak ikut menghalangi: bukti yang ditolak
+         * karena salah ketik nominal harus tetap bisa dipakai mengajukan ulang.
+         */
+        $kembar = TopupRequest::where('bukti_sidik', $berkas['sidik'])
+            ->whereIn('status', ['pending', 'disetujui'])->first();
+        if ($kembar) {
+            Berkas::hapus($bukti);
+            $kapan = substr((string) $kembar->created_at, 0, 10);
+            throw new ApiError(409, 'Bukti bayar ini sudah pernah dipakai untuk pengajuan ' .
+                Rupiah::f($kembar->jumlah) . ' tanggal ' . $kapan .
+                ($kembar->status === 'pending' ? ' yang masih menunggu diperiksa admin.' : ' yang sudah disetujui.') .
+                ' Satu bukti transfer hanya untuk satu pengajuan. Kalau Anda memang membayar ' .
+                'dua kali, lampirkan bukti pembayaran yang kedua.');
+        }
 
         $row = TopupRequest::create([
             'siswa_id' => $s->id, 'siswa_nama' => $s->nama, 'kelas' => $s->kelas,
@@ -174,7 +227,8 @@ class TopupOrtuController extends Controller
             // sudah benar-benar mentransfer uang berdasarkan angka yang tampil
             // di layarnya, dan pengajuan bisa menunggu berhari-hari di antrean.
             'biaya_admin' => BiayaAdmin::untuk($s, $jumlah, $metode),
-            'pengirim' => $pengirim, 'bukti' => $bukti, 'created_at' => WaktuIso::sekarang(),
+            'pengirim' => $pengirim, 'bukti' => $bukti, 'bukti_sidik' => $berkas['sidik'],
+            'created_at' => WaktuIso::sekarang(),
         ])->fresh();
 
         return response()->json(['ok' => true, 'pengajuan' => $this->untukOrtu($row)], 201);
@@ -197,6 +251,31 @@ class TopupOrtuController extends Controller
             ->orderByRaw("CASE status WHEN 'pending' THEN 0 ELSE 1 END")
             ->orderByDesc('created_at')->orderByDesc('id')
             ->limit($limit)->offset(($page - 1) * $limit)->get();
+
+        /*
+         * Tandai pengajuan yang BERPASANGAN MENCURIGAKAN.
+         *
+         * Penjagaan sidik jari bukti hanya menangkap gambar yang sama persis.
+         * Wali yang memotret layar dua kali menghasilkan dua berkas berbeda
+         * untuk satu transfer yang sama, dan itu lolos. Yang tersisa sebagai
+         * petunjuk adalah pola yang gampang dilihat manusia tapi mudah
+         * terlewat di tengah antrean panjang: santri yang sama, nominal yang
+         * sama, tanggal bayar yang sama, metode yang sama.
+         *
+         * Sengaja hanya DITANDAI, tidak ditolak. Wali yang memang mengirim dua
+         * kali dengan nominal sama pada hari yang sama itu wajar, dan menolak
+         * otomatis akan menahan uang yang sah. Yang dibutuhkan admin cuma
+         * diberi tahu ke mana harus melihat dua kali.
+         */
+        $kunci = fn ($x) => $x->siswa_id . '|' . $x->jumlah . '|' . $x->tgl_bayar . '|' . $x->metode;
+        $hitung = TopupRequest::whereIn('status', ['pending', 'disetujui'])
+            ->selectRaw('siswa_id, jumlah, tgl_bayar, metode, COUNT(*) AS n')
+            ->groupBy('siswa_id', 'jumlah', 'tgl_bayar', 'metode')
+            ->havingRaw('COUNT(*) > 1')->get()
+            ->keyBy($kunci);
+        foreach ($rows as $row) {
+            $row->kembar = (int) ($hitung[$kunci($row)]->n ?? 1);
+        }
 
         $pending = TopupRequest::where('status', 'pending')
             ->selectRaw('COUNT(*) AS n, COALESCE(SUM(jumlah),0) AS rp')->first();

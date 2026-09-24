@@ -348,8 +348,20 @@ function langkahInstruksi(kode) {
   if (!m) return langkahMetode();
   topupPilihan = m;
 
+  /*
+   * QRIS bisa diunduh, dan itu bukan kemudahan tambahan melainkan keharusan:
+   * wali membuka portal ini DI PONSEL yang sama dengan aplikasi banknya, dan
+   * satu ponsel tidak bisa memindai layarnya sendiri. Tanpa tombol ini,
+   * satu-satunya jalan adalah meminjam ponsel kedua.
+   */
   const rincian = kode === 'qris'
     ? `<img class="o-qris" src="/uploads/${encodeURIComponent(m.gambar)}" alt="Kode QRIS sekolah">
+       <p class="o-qris-unduh">
+         <a class="linkbtn" id="o-qris-unduh"
+            href="/uploads/${encodeURIComponent(m.gambar)}?unduh=1"
+            download>⬇ Simpan gambar QRIS ke ponsel</a>
+         <span class="muted hint">Simpan dulu, lalu buka aplikasi bank/e-wallet Anda dan
+           pilih <b>scan dari galeri</b>.</span></p>
        ${m.penerima ? `<p class="o-bayar-baris"><span class="muted">Penerima</span><b>${esc(m.penerima)}</b></p>` : ''}`
     : `<p class="o-bayar-baris"><span class="muted">Bank</span><b>${esc(m.bank)}</b></p>
        <p class="o-bayar-baris"><span class="muted">Nomor rekening</span>
@@ -393,25 +405,66 @@ function langkahKonfirmasi() {
     <div class="field"><label>Tanggal pembayaran</label>
       <input id="o-tp-tgl" type="date" value="${esc(topupInfo.hari_ini)}"
         min="${esc(tglMundur(topupInfo.mundur_maks_hari))}" max="${esc(topupInfo.hari_ini)}"></div>
-    <div class="field"><label>Nama pengirim <span class="muted">(opsional)</span></label>
-      <input id="o-tp-pengirim" maxlength="80" placeholder="nama pemilik rekening pengirim"></div>
-    <div class="field"><label>Bukti pembayaran <span class="muted">(opsional)</span></label>
+    <div class="field"><label>Nama pengirim <span class="o-wajib">wajib</span></label>
+      <input id="o-tp-pengirim" maxlength="80" placeholder="nama pemilik rekening pengirim">
+      <span class="muted hint">Sesuai nama di rekening/aplikasi yang Anda pakai membayar —
+        ini yang dicari admin di mutasi rekening sekolah.</span></div>
+    <div class="field"><label>Bukti pembayaran <span class="o-wajib">wajib</span></label>
       <input id="o-tp-bukti" type="file" accept="image/*">
-      <span class="muted hint">Foto atau tangkapan layar bukti bayar, maksimal 3MB</span></div>
+      <span class="muted hint" id="o-tp-bukti-hint">Foto atau tangkapan layar bukti bayar,
+        maksimal 3MB. Pastikan gambarnya sudah selesai terunduh di ponsel Anda.</span></div>
     <p id="o-tp-err" class="o-err hidden"></p>`,
     `<button id="om-batal">Batal</button>
      <button id="om-kembali">‹ Instruksi</button>
      <button id="om-kirim" class="primary">Kirim konfirmasi</button>`);
 
   $('#om-kembali').onclick = () => langkahInstruksi(m.kode);
+  const hintBukti = $('#o-tp-bukti-hint');
+  const bakuHint = hintBukti.textContent;
   $('#o-tp-bukti').onchange = async (e) => {
     const f = e.target.files[0];
     topupBukti = null;
-    if (!f) return;
-    if (f.size > 3 * 1024 * 1024) { e.target.value = ''; return toast('Bukti maksimal 3MB', 'err'); }
-    try { topupBukti = await fileKeDataUrl(f); }
-    catch { e.target.value = ''; toast('Bukti gagal dibaca', 'err'); }
+    segarkanTombolKirim();
+    if (!f) { hintBukti.textContent = bakuHint; return; }
+    if (f.size > 3 * 1024 * 1024) {
+      e.target.value = ''; hintBukti.textContent = bakuHint;
+      return toast('Bukti maksimal 3MB', 'err');
+    }
+    /*
+     * Berkas yang terlalu kecil hampir pasti belum selesai terunduh — kejadian
+     * biasa saat gambar dipilih dari galeri di sinyal yang seadanya. Ditahan di
+     * sini selagi walinya masih di depan layar, bukan dibiarkan lolos lalu
+     * ketahuan berhari-hari kemudian ketika admin tidak bisa membuka gambarnya.
+     */
+    if (f.size < 512) {
+      e.target.value = ''; hintBukti.textContent = bakuHint;
+      return toast('Gambar terbaca tidak lengkap. Tunggu unduhannya selesai, lalu pilih lagi.', 'err');
+    }
+    try {
+      topupBukti = await fileKeDataUrl(f);
+      hintBukti.textContent = `✔ ${f.name} (${Math.round(f.size / 1024)} KB) siap dikirim`;
+    } catch {
+      e.target.value = ''; hintBukti.textContent = bakuHint;
+      toast('Bukti gagal dibaca', 'err');
+    }
+    segarkanTombolKirim();
   };
+
+  /*
+   * Tombol kirim baru hidup kalau keduanya sudah lengkap. Menolak SESUDAH
+   * ditekan juga benar dan tetap dilakukan server, tapi tombol yang mati lebih
+   * jujur: wali tahu apa yang kurang sebelum mengira pengajuannya sudah masuk.
+   */
+  function segarkanTombolKirim() {
+    const btn = $('#om-kirim');
+    if (!btn) return;
+    const adaPengirim = ($('#o-tp-pengirim')?.value || '').trim().length >= 3;
+    btn.disabled = !(adaPengirim && topupBukti);
+    btn.title = btn.disabled ? 'Lengkapi nama pengirim dan bukti pembayaran dulu' : '';
+  }
+  $('#o-tp-pengirim').addEventListener('input', segarkanTombolKirim);
+  segarkanTombolKirim();
+
   $('#om-kirim').onclick = kirimTopup;
 
   /*

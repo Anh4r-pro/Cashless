@@ -7,6 +7,7 @@ use App\Models\Produk;
 use App\Models\ProdukAjuan;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Services\FormAjuan;
 use App\Services\Pengaturan;
 use App\Services\Rupiah;
 use App\Support\WaktuIso;
@@ -147,6 +148,116 @@ class ProdukController extends Controller
     }
 
     // ------------------------------------------------ daftar & putusan
+
+    /**
+     * Form pengajuan menu yang bisa dibawa keluar sistem.
+     *
+     * Keputusannya sering diambil di rapat, bukan di depan layar — berkasnya
+     * dicetak, ditandatangani, lalu disimpan sebagai lampiran. Karena itu
+     * ekspornya memakai penyaring yang SAMA PERSIS dengan layar antrean: yang
+     * dilihat admin dan yang dibaca pimpinan harus berisi baris yang sama,
+     * kalau tidak, rapatnya memutuskan daftar yang berbeda dari yang ada di
+     * sistem.
+     */
+    public function eksporAjuan(Request $r)
+    {
+        [$rows, $meta] = $this->bahanFormAjuan($r);
+        $stamp = date('Y-m-d');
+        $format = (string) $r->query('format', 'xls');
+
+        if ($format === 'csv') {
+            return response(FormAjuan::csv($rows), 200, [
+                'Content-Type' => 'text/csv; charset=utf-8',
+                'Content-Disposition' => "attachment; filename=\"form-usulan-menu-{$stamp}.csv\"",
+            ]);
+        }
+
+        // Blok tanda tangan sengaja tidak ikut ke lembar kerja: di Excel ia
+        // hanya menjadi sel kosong yang mengacau saat disaring atau diurutkan.
+        $html = '<style>' . FormAjuan::gaya() . '</style>' . FormAjuan::html($rows, $meta, false);
+
+        return response($html, 200, [
+            'Content-Type' => 'application/vnd.ms-excel',
+            'Content-Disposition' => "attachment; filename=\"form-usulan-menu-{$stamp}.xls\"",
+        ]);
+    }
+
+    /** Versi cetak: peramban yang mengubahnya jadi PDF, tanpa pustaka tambahan. */
+    public function cetakAjuan(Request $r)
+    {
+        [$rows, $meta] = $this->bahanFormAjuan($r);
+        $isi = FormAjuan::html($rows, $meta, true);
+        $gaya = FormAjuan::gaya();
+
+        $html = <<<HTML
+        <!DOCTYPE html><html lang="id"><head><meta charset="utf-8">
+        <title>Form Pengajuan Perubahan Menu</title>
+        <style>{$gaya}</style></head><body>
+        <button class="noprint" onclick="window.print()"
+          style="padding:8px 16px;margin-bottom:14px">🖨 Cetak / Simpan PDF</button>
+        {$isi}
+        <script>window.addEventListener('load',()=>setTimeout(()=>window.print(),400))</script>
+        </body></html>
+        HTML;
+
+        return response($html, 200, ['Content-Type' => 'text/html; charset=utf-8']);
+    }
+
+    /** Penyaring dan meta yang dipakai bersama oleh ekspor dan cetak. */
+    private function bahanFormAjuan(Request $r): array
+    {
+        $u = $this->wajibPeran($r, 'tenant', 'superadmin');
+        $this->izinJikaAdmin($r, $u, 'ajuan.lihat');
+
+        $q = ProdukAjuan::query()
+            ->join('tenant', 'tenant.id', '=', 'produk_ajuan.tenant_id')
+            ->select('produk_ajuan.*', 'tenant.nama as tenant_nama');
+
+        $namaTenant = null;
+        if ($u->role === 'tenant') {
+            $q->where('produk_ajuan.tenant_id', $u->tenant_id);
+            $namaTenant = $u->tenant?->nama;
+        } elseif ($tid = (int) $r->query('tenant_id')) {
+            $q->where('produk_ajuan.tenant_id', $tid);
+            $namaTenant = Tenant::find($tid)?->nama;
+        }
+
+        $status = $r->query('status');
+        if (in_array($status, ['menunggu', 'disetujui', 'ditolak', 'batal'], true)) {
+            $q->where('produk_ajuan.status', $status);
+        } else {
+            $status = null;
+        }
+
+        $rows = $q->orderByRaw("(produk_ajuan.status='menunggu') DESC")
+            ->orderBy('tenant.nama')
+            ->orderByDesc('produk_ajuan.created_at')->limit(500)->get();
+
+        $tgl = $rows->pluck('created_at')->filter()->sort()->values();
+        $wib = fn ($iso) => $iso
+            ? (new \DateTime($iso, new \DateTimeZone('UTC')))
+                ->setTimezone(new \DateTimeZone('Asia/Jakarta'))->format('d/m/Y')
+            : null;
+        $periode = $tgl->isEmpty() ? '—'
+            : ($wib($tgl->first()) === $wib($tgl->last())
+                ? $wib($tgl->first())
+                : $wib($tgl->first()) . ' s.d. ' . $wib($tgl->last()));
+
+        $saring = array_filter([
+            $namaTenant ? 'Tenant: ' . $namaTenant : 'Semua tenant',
+            $status ? 'Status: ' . $status : 'Semua status',
+        ]);
+
+        return [$rows, [
+            // Belum ada pengaturan nama sekolah; namanya tetap seperti di
+            // seluruh sistem. Dibaca dari satu tempat supaya kelak cukup
+            // diubah di sini kalau pengaturannya jadi dibuat.
+            'sekolah' => FormAjuan::SEKOLAH,
+            'judul' => 'Form Pengajuan Perubahan Menu Kantin',
+            'periode' => $periode,
+            'penyaring' => implode(' · ', $saring),
+        ]];
+    }
 
     public function daftarAjuan(Request $r)
     {

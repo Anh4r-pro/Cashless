@@ -38,11 +38,30 @@ class UnggahanController
             return response('tidak ada', 404);
         }
 
-        return response($disk->get($nama), 200, [
+        $kepala = [
             'Content-Type' => $disk->mimeType($nama) ?: 'application/octet-stream',
             'Cache-Control' => 'private, max-age=300',
             'X-Content-Type-Options' => 'nosniff',
-        ]);
+        ];
+
+        /*
+         * ?unduh=1 membuat berkasnya TERSIMPAN, bukan tampil di tab baru.
+         *
+         * Dipakai wali untuk menyimpan gambar QRIS sekolah ke galerinya, supaya
+         * bisa dibuka dari aplikasi bank tanpa harus membuka portal lagi —
+         * memindai QRIS dari layar ponsel yang sama tidak bisa dilakukan.
+         * Nama berkasnya dibuat berarti; nama acak di penyimpanan tidak
+         * memberi tahu apa pun saat sudah ada di galeri.
+         */
+        if ($r->boolean('unduh')) {
+            $ext = pathinfo($nama, PATHINFO_EXTENSION) ?: 'png';
+            $ramah = str_starts_with($nama, 'qris-')
+                ? 'QRIS-' . preg_replace('/[^A-Za-z0-9]+/', '-', config('app.name', 'Kantin')) . '.' . $ext
+                : $nama;
+            $kepala['Content-Disposition'] = 'attachment; filename="' . $ramah . '"';
+        }
+
+        return response($disk->get($nama), 200, $kepala);
     }
 
     private function bolehTanpaLogin(Request $r, string $berkas): bool

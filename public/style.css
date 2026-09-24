@@ -345,8 +345,15 @@ body.ortu header h1 { color: var(--gold); flex: 1; }
   border: 1px solid var(--line); border-radius: 10px; background: #fff; width: 100%; }
 .o-metode:hover { border-color: var(--navy); background: #fbfcff; }
 .o-metode b { font-family: 'Roboto Slab', serif; color: var(--navy); font-size: 16px; }
-.o-qris { display: block; width: 100%; max-width: 250px; margin: 6px auto 14px; border-radius: 10px;
+.o-qris { display: block; width: 100%; max-width: 250px; margin: 6px auto 8px; border-radius: 10px;
   border: 1px solid var(--line); }
+.o-qris-unduh { margin: 0 0 14px; text-align: center; }
+.o-qris-unduh .linkbtn { font-size: 14px; font-weight: 600; padding: 8px 14px;
+  display: inline-block; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.o-qris-unduh .hint { display: block; margin-top: 6px; line-height: 1.5; }
+/* Penanda bidang wajib: merah saja tidak cukup terbaca, jadi katanya ditulis. */
+.o-wajib { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+  color: #b3261e; background: #fdecea; border-radius: 4px; padding: 1px 6px; margin-left: 6px; }
 .o-bayar-baris { display: flex; justify-content: space-between; gap: 12px; align-items: baseline;
   margin: 0; padding: 8px 0; border-bottom: 1px dashed var(--line); }
 .o-bayar-baris b { color: var(--navy); font-variant-numeric: tabular-nums; }
@@ -376,6 +383,13 @@ tr.tp-menunggu > td:first-child { border-left: 3px solid var(--gold); }
 .tp-konfirm dd { margin: 0; font-weight: 700; color: var(--navy); }
 .tp-bukti-besar { display: block; max-width: 100%; margin-top: 12px; border-radius: 8px;
   border: 1px solid var(--line); }
+/* Bukti yang gagal dimuat dan pengajuan kembar sama-sama berarti "berhenti
+   dulu, periksa": keduanya diberi rupa peringatan yang sama supaya terbaca
+   sebagai satu jenis pesan, bukan hiasan yang berbeda-beda. */
+.tp-bukti-rusak, .tp-peringatan { margin: 12px 0 0; padding: 10px 12px; border-radius: 8px;
+  background: #fbe4e2; color: #8c1d18; font-size: 13px; line-height: 1.55;
+  border: 1px solid #f3c2bd; }
+.badge.tp-kembar { background: #fbe4e2; color: #8c1d18; font-weight: 800; cursor: help; }
 
 @media (max-width: 560px) {
   .o-hero-saldo { text-align: left; margin-left: 0; }
@@ -703,3 +717,13 @@ label.cek input { width: auto; margin: 0; }
   .izin-grid { grid-template-columns: 1fr; }
   .izin-baris code { display: none; }
 }
+
+/* Baris unduh form pengajuan menu. Tautannya bergaya tombol supaya terbaca
+   sebagai tindakan, bukan sebagai catatan kaki yang mudah terlewat. */
+.aju-unduh { display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  margin: 0 0 12px; padding: 10px 12px; background: #f6f8fb;
+  border: 1px solid var(--line); border-radius: 8px; }
+.aju-unduh .linkbtn { padding: 6px 12px; border: 1px solid var(--line);
+  border-radius: 7px; background: #fff; text-decoration: none; }
+.aju-unduh .linkbtn:hover { border-color: var(--navy); }
+.aju-unduh .set-hint { flex-basis: 100%; margin: 2px 0 0; }

@@ -30,6 +30,7 @@ class TopupRequest extends Model
         'tgl_bayar',
         'pengirim',
         'bukti',
+        'bukti_sidik',
         'status',
         'alasan',
         'transaksi_id',

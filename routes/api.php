@@ -85,6 +85,10 @@ Route::middleware('peran:superadmin')->group(function () {
 // --- menu: tenant mengusulkan, superadmin memutuskan ----------------------
 Route::get('produk', [ProdukController::class, 'index'])->middleware('peran:tenant,superadmin');
 Route::get('produk/ajuan', [ProdukController::class, 'daftarAjuan'])->middleware('peran:tenant,superadmin');
+// Form untuk dibawa ke luar sistem: .xls/.csv untuk diolah, /cetak untuk PDF
+// lewat dialog cetak peramban. Hak aksesnya sama dengan melihat daftarnya.
+Route::get('produk/ajuan/ekspor', [ProdukController::class, 'eksporAjuan'])->middleware('peran:tenant,superadmin');
+Route::get('produk/ajuan/cetak', [ProdukController::class, 'cetakAjuan'])->middleware('peran:tenant,superadmin');
 
 Route::middleware('peran:tenant')->group(function () {
     Route::post('produk', [ProdukController::class, 'store']);

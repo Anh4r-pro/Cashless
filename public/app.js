@@ -690,6 +690,14 @@ function menuAjuanView(el) {
       ${['menunggu', 'disetujui', 'ditolak', 'batal'].map((s) =>
         `<button data-status="${s}" class="${s === ajuanStatus ? 'sel' : ''}">${esc(AJU_STATUS[s])}</button>`).join('')}
     </div>
+    <div class="aju-unduh">
+      <span class="muted">Form untuk ditinjau pimpinan:</span>
+      <a class="linkbtn" id="aju-cetak" target="_blank" rel="noopener">🖨 Cetak / PDF</a>
+      <a class="linkbtn" id="aju-xls">⬇ Excel (.xls)</a>
+      <a class="linkbtn" id="aju-csv">⬇ CSV</a>
+      <span class="muted set-hint">Berisi baris yang sama dengan penyaring di atas, lengkap
+        dengan kolom keputusan dan tanda tangan. Versi PDF lewat tombol cetak peramban.</span>
+    </div>
     <div class="tblwrap"><table>
       <thead><tr><th>Waktu</th><th>Tenant</th><th>Jenis</th><th>Usulan</th><th>Pengaju</th><th>Status</th><th></th></tr></thead>
       <tbody id="aju-sa-body"></tbody>
@@ -707,11 +715,25 @@ function menuAjuanView(el) {
       mengubahnya sendiri, termasuk lewat pengajuan menu.</p>
     <div id="kat-tenant"><p class="muted">memuat…</p></div>
   </div>`;
+  /*
+   * Tautan unduh ikut berubah setiap kali penyaringnya diganti. Kalau tidak,
+   * admin menyaring "menunggu" lalu mengunduh dan mendapat seluruh riwayat —
+   * dan rapat memutuskan daftar yang berbeda dari yang ada di layar.
+   */
+  const segarkanUnduh = () => {
+    const q = 'status=' + encodeURIComponent(ajuanStatus);
+    $('#aju-cetak').href = '/api/produk/ajuan/cetak?' + q;
+    $('#aju-xls').href = '/api/produk/ajuan/ekspor?format=xls&' + q;
+    $('#aju-csv').href = '/api/produk/ajuan/ekspor?format=csv&' + q;
+  };
+  segarkanUnduh();
+
   $('#aju-filter').onclick = (e) => {
     const b = e.target.closest('button[data-status]');
     if (!b) return;
     ajuanStatus = b.dataset.status;
     document.querySelectorAll('#aju-filter button').forEach((x) => x.classList.toggle('sel', x === b));
+    segarkanUnduh();
     loadAjuanSA();
   };
   $('#kat-muat').onclick = muatKategoriProduk;
@@ -3706,7 +3728,8 @@ function topupOrtuView(el) {
       Persetujuan langsung menambah saldo kartu santri dan tercatat di <b>Riwayat</b> sebagai top up.</p>
     <div class="tblwrap"><table>
       <thead><tr><th>Diajukan</th><th>Santri</th><th>Kelas</th><th class="num">Nominal</th>
-        <th>Metode</th><th>Tgl bayar</th><th>Pengirim</th><th>Bukti</th><th>Status</th><th></th></tr></thead>
+        <th>Metode</th><th>Tgl bayar</th><th>Pengirim</th><th>Bukti</th><th>Kembar</th>
+        <th>Status</th><th></th></tr></thead>
       <tbody id="tp-baris"></tbody>
     </table></div>
   </div>
@@ -3827,6 +3850,9 @@ async function muatAntreanTopup() {
         <td style="white-space:nowrap">${esc(p.tgl_bayar)}</td>
         <td>${esc(p.pengirim || '—')}</td>
         <td>${p.bukti ? `<a href="/uploads/${encodeURIComponent(p.bukti)}" target="_blank" rel="noopener">lihat</a>` : '<span class="muted">—</span>'}</td>
+        <td>${p.kembar > 1
+          ? `<span class="badge tp-kembar" title="Ada ${p.kembar} pengajuan bernominal, tanggal, dan metode yang sama dari santri ini. Cocokkan dengan mutasi rekening sebelum menyetujui.">⚠ ${p.kembar}×</span>`
+          : '<span class="muted">—</span>'}</td>
         <td><span class="badge tp-${esc(p.status)}">${esc(TP_STATUS[p.status] || p.status)}</span>
           ${p.status === 'ditolak' && p.alasan ? `<br><span class="muted">${esc(p.alasan)}</span>` : ''}
           ${p.status === 'disetujui' ? `<br><span class="muted">oleh ${esc(p.operator)}</span>` : ''}</td>
@@ -3834,7 +3860,7 @@ async function muatAntreanTopup() {
           ? `<button class="linkbtn" data-setuju="${p.id}">Setujui</button>
              <button class="linkbtn danger" data-tolak="${p.id}">Tolak</button>`
           : ''}</td>
-      </tr>`).join('') || '<tr><td colspan="10" class="muted">Belum ada pengajuan pada filter ini</td></tr>';
+      </tr>`).join('') || '<tr><td colspan="11" class="muted">Belum ada pengajuan pada filter ini</td></tr>';
 
     const cari = (id) => d.pengajuan.find((x) => x.id === Number(id));
     $('#tp-baris').querySelectorAll('[data-setuju]').forEach((b) => {
@@ -3950,11 +3976,32 @@ function tpSetujuiModal(p) {
         <dt>Pengirim</dt><dd>${esc(p.pengirim || '—')}</dd>
         <dt>Diajukan</dt><dd>${esc(tpWaktu(p.created_at))}</dd>
       </dl>
+      ${p.kembar > 1 ? `<p class="tp-peringatan">⚠ Santri ini punya <b>${p.kembar} pengajuan</b>
+        dengan nominal, tanggal bayar, dan metode yang sama. Pastikan uangnya memang masuk
+        sebanyak itu di mutasi rekening — satu transfer hanya boleh disetujui sekali.</p>` : ''}
       ${p.bukti
-        ? `<img class="tp-bukti-besar" src="/uploads/${encodeURIComponent(p.bukti)}" alt="Bukti pembayaran">`
+        ? `<img class="tp-bukti-besar" src="/uploads/${encodeURIComponent(p.bukti)}"
+             alt="Bukti pembayaran" data-bukti-gambar>
+           <p class="tp-bukti-rusak hidden">⚠ Gambar buktinya tidak bisa dibuka — berkasnya rusak
+             atau terpotong saat diunggah. <b>Jangan setujui berdasarkan gambar ini.</b>
+             Minta wali mengunggah ulang, atau cocokkan langsung dengan mutasi rekening.</p>`
         : '<p class="muted" style="margin:10px 0 0">Tidak ada bukti dilampirkan.</p>'}
     </div>`,
     () => tpKonfirmasiKedua(p), 'Lanjut ›');
+
+  /*
+   * Gambar yang gagal dimuat harus BERSUARA. Tanpa ini yang tampil hanya ikon
+   * gambar rusak kecil milik peramban, dan admin yang sedang buru-buru mudah
+   * membacanya sebagai "bukti ada" lalu menyetujui penambahan saldo tanpa
+   * pernah benar-benar melihat buktinya.
+   */
+  const img = document.querySelector('[data-bukti-gambar]');
+  if (img) {
+    img.onerror = () => {
+      img.classList.add('hidden');
+      document.querySelector('.tp-bukti-rusak')?.classList.remove('hidden');
+    };
+  }
 }
 
 function tpKonfirmasiKedua(p) {
