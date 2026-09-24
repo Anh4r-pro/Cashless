@@ -211,6 +211,25 @@ function showApp() {
   gambarNav(tabTampil(USER.role), awal);
   location.hash = awal;
   renderView(awal);
+
+  // Pemberitahuan hanya untuk admin: kasir tenant tidak memutuskan apa pun
+  // di antrean ini, dan layar kios tidak pernah ditunggui orang.
+  if (USER.role === 'superadmin') {
+    const tombol = $('#hd-suara');
+    tombol.classList.remove('hidden');
+    tombol.onclick = () => {
+      const mati = suaraNyala();
+      localStorage.setItem(NOTIF_SUARA_KUNCI, mati ? 'mati' : 'nyala');
+      gambarTombolSuara();
+      // Dibunyikan saat DINYALAKAN supaya admin tahu seperti apa bunyinya dan
+      // bahwa perangkatnya memang bisa membunyikannya — sekaligus memenuhi
+      // syarat peramban yang baru mengizinkan audio sesudah ada klik.
+      if (mati === false) bunyiNotif();
+      toast(suaraNyala() ? '🔔 Bunyi pemberitahuan dinyalakan' : '🔕 Bunyi pemberitahuan dimatikan', 'ok');
+    };
+    gambarTombolSuara();
+    mulaiNotif();
+  }
 }
 
 /** Satu tombol tab. Label di-escape: nama grup & tab berasal dari kode, tapi
@@ -336,6 +355,13 @@ async function doLogin() {
 $('#btn-logout').onclick = async () => {
   await api('/api/logout', { method: 'POST' }).catch(() => {});
   history.replaceState(null, '', location.pathname);   // buang hash tab
+  // Pengecekan berkala dihentikan DI SINI, bukan dibiarkan mati sendiri:
+  // sesinya sudah tidak ada, jadi tiap 30 detik ia hanya akan menghasilkan
+  // 401 sampai tabnya ditutup.
+  clearInterval(notifTimer);
+  notifTimer = null;
+  notifTerakhir = null;
+  $('#hd-suara').classList.add('hidden');
   tutupMenuPonsel();
   showLogin();
 };
@@ -1014,18 +1040,140 @@ function bindBuktiButtons(el) {
 // ║ SUPERADMIN: DASHBOARD + SETORAN                           ║
 // ╚══════════════════════════════════════════════════════════╝
 /**
- * Lencana jumlah pengajuan menu yang menunggu, ditempel di tab "Menu Tenant".
- * Tanpa ini usulan tenant bisa menganggur berhari-hari tanpa ada yang melihat.
+ * Lencana "ada yang menunggu" pada satu tab.
+ *
+ * Tombolnya sering duduk di dalam submenu, jadi lencananya tidak terlihat
+ * sampai grupnya disorot — padahal seluruh gunanya justru supaya pekerjaan
+ * tidak menganggur tanpa ada yang melihat. Induk grupnya ikut diberi titik
+ * penanda.
  */
-function setLencanaAjuan(n) {
-  const b = document.querySelector('#nav button[data-v="menu-ajuan"]');
+function setLencana(view, label, n) {
+  const b = document.querySelector(`#nav button[data-v="${view}"]`);
   if (!b) return;
-  b.innerHTML = 'Menu Tenant' + (n > 0 ? ` <span class="navbadge">${n}</span>` : '');
-  // Tombolnya kini duduk di dalam submenu, jadi lencananya tak terlihat sampai
-  // grupnya disorot — padahal seluruh gunanya justru supaya usulan tenant tidak
-  // menganggur tanpa ada yang melihat. Induknya ikut diberi titik penanda.
+  b.innerHTML = esc(label) + (n > 0 ? ` <span class="navbadge">${n}</span>` : '');
   const grup = b.closest('.nav-grup');
-  if (grup) grup.classList.toggle('ada-lencana', n > 0);
+  if (grup) {
+    // Satu grup bisa memuat beberapa tab berlencana; titiknya menyala selama
+    // MASIH ADA yang menunggu di dalamnya, bukan mengikuti tab terakhir saja.
+    const adaLagi = [...grup.querySelectorAll('button[data-v] .navbadge')].length > 0;
+    grup.classList.toggle('ada-lencana', adaLagi);
+  }
+}
+const setLencanaAjuan = (n) => setLencana('menu-ajuan', 'Menu Tenant', n);
+const setLencanaTopup = (n) => setLencana('topup', 'Topup Ortu', n);
+
+/* ══════════════════════════════════════════════════════════════════
+   PEMBERITAHUAN: ada pengajuan menunggu
+   ══════════════════════════════════════════════════════════════════
+
+   Wali sudah benar-benar mentransfer uang lalu menunggu. Sebelum ini admin
+   baru tahu ada antrean SESUDAH membuka layar Topup Ortu — kalau ia sedang di
+   layar lain, tidak ada apa pun yang memberi tahu.
+
+   Pengecekannya sengaja murah: jawabannya dua angka, di bawah 40 byte, jauh
+   lebih ringan daripada sekali memuat halaman. Dan ia BERHENTI saat tabnya
+   tidak dilihat — admin yang meninggalkan layar ini semalaman tidak boleh
+   menghabiskan kuota untuk menanyakan sesuatu yang tidak sedang ia lihat.
+*/
+const NOTIF_JEDA_MS = 30000;
+let notifTimer = null;
+let notifTerakhir = null;      // null = belum pernah; jangan bunyikan bacaan pertama
+
+async function periksaNotif() {
+  if (USER?.role !== 'superadmin' || document.hidden) return;
+  try {
+    const d = await api('/api/notif');
+    setLencanaTopup(d.topup);
+    setLencanaAjuan(d.menu);
+
+    /*
+     * Bunyi hanya saat angkanya NAIK, bukan saat masih ada sisa antrean.
+     * Kalau tidak, admin yang menunda satu pengajuan akan dibunyikan terus
+     * setiap setengah menit sampai ia menyerah dan mematikan suaranya —
+     * dan ikut kehilangan pemberitahuan yang sebenarnya berguna.
+     */
+    if (notifTerakhir !== null) {
+      const naikTopup = d.topup > notifTerakhir.topup;
+      const naikMenu = d.menu > notifTerakhir.menu;
+      if (naikTopup || naikMenu) {
+        bunyiNotif();
+        const bagian = [];
+        if (naikTopup) bagian.push(`${d.topup - notifTerakhir.topup} pengajuan top up`);
+        if (naikMenu) bagian.push(`${d.menu - notifTerakhir.menu} usulan menu`);
+        toast('🔔 Baru masuk: ' + bagian.join(' & '), 'ok');
+      }
+    }
+    notifTerakhir = { topup: d.topup, menu: d.menu };
+  } catch {
+    // Sesi habis atau jaringan putus bukan hal yang perlu diteriakkan tiap
+    // 30 detik. Dibiarkan diam; percobaan berikutnya akan berhasil sendiri,
+    // dan kalau sesinya benar-benar habis, tindakan admin berikutnya yang
+    // akan mengatakannya.
+  }
+}
+
+/*
+ * Pendengar visibilitychange dipasang SEKALI seumur halaman, bukan di dalam
+ * mulaiNotif(). Keluar lalu masuk lagi tanpa memuat ulang halaman memanggil
+ * mulaiNotif() sekali lagi, dan pendengar yang dipasang di sana akan menumpuk
+ * — tiap kali masuk menambah satu, sampai satu kali berpindah tab memicu
+ * belasan permintaan sekaligus.
+ */
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && notifTimer) periksaNotif();
+});
+
+function mulaiNotif() {
+  if (USER?.role !== 'superadmin') return;
+  clearInterval(notifTimer);
+  notifTimer = setInterval(periksaNotif, NOTIF_JEDA_MS);
+  periksaNotif();
+}
+
+/* ---- bunyi ---------------------------------------------------------------
+   Dibangkitkan Web Audio, BUKAN berkas suara. Berkas berarti satu unduhan
+   lagi di sambungan yang sudah seadanya, untuk bunyi sepanjang sepertiga
+   detik. Dua nada naik supaya terdengar sebagai "ada yang datang", bukan
+   sebagai galat.                                                            */
+const NOTIF_SUARA_KUNCI = 'kantin-notif-suara';
+const suaraNyala = () => localStorage.getItem(NOTIF_SUARA_KUNCI) !== 'mati';
+
+function bunyiNotif() {
+  if (!suaraNyala()) return;
+  try {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    const ac = new AC();
+    [[880, 0], [1175, 0.12]].forEach(([hz, mulai]) => {
+      const osc = ac.createOscillator();
+      const vol = ac.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = hz;
+      // Peredupan halus: nada yang dipotong mendadak berbunyi seperti "klik".
+      vol.gain.setValueAtTime(0.0001, ac.currentTime + mulai);
+      vol.gain.exponentialRampToValueAtTime(0.18, ac.currentTime + mulai + 0.02);
+      vol.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + mulai + 0.11);
+      osc.connect(vol).connect(ac.destination);
+      osc.start(ac.currentTime + mulai);
+      osc.stop(ac.currentTime + mulai + 0.12);
+    });
+    setTimeout(() => ac.close().catch(() => {}), 600);
+  } catch {
+    // Peramban yang menolak memutar bunyi sebelum ada interaksi pengguna
+    // bukan alasan untuk menggagalkan apa pun — lencananya tetap muncul.
+  }
+}
+
+function gambarTombolSuara() {
+  const el = $('#hd-suara');
+  if (!el) return;
+  const on = suaraNyala();
+  el.textContent = on ? '🔔' : '🔕';
+  el.title = on ? 'Bunyi pemberitahuan menyala — klik untuk mematikan'
+                : 'Bunyi pemberitahuan mati — klik untuk menyalakan';
+  el.setAttribute('aria-label', el.title);
+  el.setAttribute('aria-pressed', String(on));
+  el.classList.toggle('mati', !on);
 }
 
 async function dashSAView(el) {
@@ -3830,9 +3978,19 @@ function tpGambarPratinjau(sumber, belumSimpan) {
   };
 }
 
+/*
+ * Lencananya ikut disegarkan dari sini.
+ *
+ * Sesudah admin menyetujui atau menolak, angkanya harus langsung turun. Kalau
+ * hanya menunggu giliran pengecekan berikutnya, selama setengah menit lencana
+ * masih menuntut tindakan yang BARU SAJA dikerjakan — dan itu cara tercepat
+ * membuat orang berhenti mempercayai lencananya.
+ */
 async function muatAntreanTopup() {
   try {
     const d = await api('/api/topup-ortu' + (tpStatus ? '?status=' + tpStatus : ''));
+    setLencanaTopup(d.n_pending);
+    if (notifTerakhir) notifTerakhir.topup = d.n_pending;
     $('#tp-kartu').innerHTML = [
       ['Menunggu diperiksa', `${d.n_pending} pengajuan`],
       ['Nilai yang menunggu', rp(d.rp_pending)],

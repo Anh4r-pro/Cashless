@@ -19,6 +19,7 @@ use App\Http\Controllers\Api\DonasiController;
 use App\Http\Controllers\Api\KiosController;
 use App\Http\Controllers\Api\OrtuController;
 use App\Http\Controllers\Api\PengaturanController;
+use App\Http\Controllers\Api\NotifController;
 use App\Http\Controllers\Api\ProdukController;
 use App\Http\Controllers\Api\SaldoController;
 use App\Http\Controllers\Api\SiswaController;
@@ -182,6 +183,11 @@ Route::middleware('ortu')->group(function () {
     Route::get('ortu/topup', [TopupOrtuController::class, 'daftarOrtu']);
     Route::post('ortu/topup', [TopupOrtuController::class, 'ajukan']);
 });
+
+// Lencana "ada yang menunggu" — dipanggil berkala oleh aplikasi admin, jadi
+// jawabannya sengaja cuma dua angka. Izinnya diperiksa di controller, karena
+// yang dihitung bergantung pada fitur mana yang boleh dibuka akun itu.
+Route::middleware('peran:superadmin')->get('notif', [NotifController::class, 'hitung']);
 
 Route::middleware('peran:superadmin')->group(function () {
     Route::get('topup-ortu', [TopupOrtuController::class, 'antrean'])->middleware('izin:topup_ortu.lihat');

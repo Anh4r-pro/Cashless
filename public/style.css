@@ -727,3 +727,10 @@ label.cek input { width: auto; margin: 0; }
   border-radius: 7px; background: #fff; text-decoration: none; }
 .aju-unduh .linkbtn:hover { border-color: var(--navy); }
 .aju-unduh .set-hint { flex-basis: 100%; margin: 2px 0 0; }
+
+/* Sakelar bunyi pemberitahuan di header. Ikonnya saja — labelnya ada di
+   title/aria supaya tidak memakan lebar di ponsel, tempat header paling sesak. */
+.hd-suara { border: 0; background: none; cursor: pointer; font-size: 17px;
+  line-height: 1; padding: 6px 8px; border-radius: 8px; }
+.hd-suara:hover { background: rgba(255, 255, 255, .14); }
+.hd-suara.mati { opacity: .55; }
