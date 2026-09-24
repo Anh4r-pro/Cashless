@@ -1178,20 +1178,19 @@ function gambarTombolSuara() {
 
 async function dashSAView(el) {
   /*
-   * Keempat permintaan ini DIJALANKAN BERSAMAAN, bukan berurutan.
+   * Ketiga permintaan ini DIJALANKAN BERSAMAAN, bukan berurutan.
    *
    * Sebelumnya masing-masing ditunggu satu per satu. Servernya cepat (35–75 ms),
    * jadi di kantor perbedaannya tak terasa — tapi yang menentukan di sambungan
    * buruk bukan lamanya server berpikir, melainkan berapa kali harus bolak-balik.
-   * Pada latensi 400 ms, empat permintaan berurutan berarti menunggu ~1,8 detik
-   * sebelum layar mulai tergambar; bersamaan, cukup ~0,5 detik.
+   * Pada latensi 400 ms, tiga permintaan berurutan berarti menunggu lebih dari
+   * sedetik sebelum layar mulai tergambar; bersamaan, cukup sepertiganya.
    *
-   * Tidak satu pun dari keempatnya memerlukan hasil yang lain, jadi tidak ada
+   * Tidak satu pun dari ketiganya memerlukan hasil yang lain, jadi tidak ada
    * yang dikorbankan. Neraca dibiarkan boleh gagal sendiri — panelnya opsional.
    */
-  const [d, st, cfg, nr] = await Promise.all([
+  const [d, cfg, nr] = await Promise.all([
     api('/api/dashboard'),
-    api('/api/settlements'),
     api('/api/settings'),
     api('/api/neraca').catch(() => null),
   ]);
@@ -1203,36 +1202,6 @@ async function dashSAView(el) {
       <div class="statcard"><span class="muted">Top up hari ini</span><br><b class="rp">${rp(d.topup_hari_ini)}</b></div>
       <div class="statcard"><span class="muted">Total saldo santri (kewajiban)</span><br><b class="rp">${rp(d.total_saldo_siswa)}</b></div>
       <div class="statcard"><span class="muted">Jumlah santri</span><br><b>${d.jumlah_siswa.toLocaleString('id-ID')}</b></div>
-    </div>
-    <div class="panel">
-      <h2>Penghasilan & Tagihan Tenant</h2>
-      <div class="tblwrap"><table>
-        <thead><tr><th>Tenant</th><th>Status</th><th class="num">Hari Ini</th><th class="num">Total Penjualan</th>
-        <th class="num">Sudah Disetor</th><th class="num">Tagihan Berjalan</th><th></th></tr></thead>
-        <tbody>${d.tenants.map((t) => `
-          <tr><td><b>${esc(t.nama)}</b><br><span class="muted">${esc(t.pemilik)}</span></td>
-          <td><span class="badge ${t.status}">${t.status}</span></td>
-          <td class="num rp">${rp(t.hari_ini)}</td>
-          <td class="num rp">${rp(t.total)}</td>
-          <td class="num rp">${rp(t.disetor)}</td>
-          <td class="num rp" style="font-weight:800; color:${t.outstanding > 0 ? 'var(--err)' : 'var(--ok)'}">${rp(t.outstanding)}</td>
-          <td>${t.outstanding > 0 ? `<button class="linkbtn" data-setor="${t.id}" data-nama="${esc(t.nama)}" data-out="${t.outstanding}">💰 setor</button>` : ''}</td>
-          </tr>`).join('')}</tbody>
-      </table></div>
-    </div>
-    <div class="panel">
-      <h2>Riwayat Setoran ke Tenant</h2>
-      <div class="tblwrap"><table>
-        <thead><tr><th>Tanggal</th><th>Tenant</th><th class="num">Jumlah</th><th>Metode</th><th>Bukti</th><th>Oleh</th><th>Keterangan</th></tr></thead>
-        <tbody>${st.settlements.map((s) => `
-          <tr><td>${new Date(s.created_at).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
-          <td>${esc(s.tenant_nama)}</td><td class="num rp">${rp(s.jumlah)}</td><td>${esc(s.metode)}</td>
-          <td>${s.bukti
-            ? `<button class="linkbtn" data-bukti="${esc(s.bukti)}">lihat</button>`
-            : `<button class="linkbtn" data-upbukti="${s.id}">upload bukti</button>`}</td>
-          <td>${esc(s.operator)}</td><td class="muted">${esc(s.keterangan)}</td></tr>`).join('') ||
-          '<tr><td colspan="7" class="muted">Belum ada setoran</td></tr>'}</tbody>
-      </table></div>
     </div>
     <div class="panel">
       <h2>⚙️ Pengaturan Limit</h2>
@@ -1316,24 +1285,6 @@ async function dashSAView(el) {
     };
   });
   if (nr) bindNeraca(nr);
-  bindBuktiButtons(el);
-  el.querySelectorAll('[data-setor]').forEach((b) => {
-    b.onclick = () => setorModal(Number(b.dataset.setor), b.dataset.nama, Number(b.dataset.out));
-  });
-  el.querySelectorAll('[data-upbukti]').forEach((b) => {
-    b.onclick = () => openModal(`
-      <h2>Upload Bukti Setoran</h2>
-      <div class="field"><label>Foto/scan bukti (JPG/PNG, maks 3MB)</label>
-      <input type="file" id="m-file" accept="image/*"></div>`,
-      async () => {
-        const f = $('#m-file').files[0];
-        if (!f) throw new Error('Pilih file dulu');
-        const data = await fileToDataUrl(f);
-        await api(`/api/settlements/${b.dataset.upbukti}/bukti`, { method: 'POST', body: { data } });
-        toast('✔ Bukti tersimpan', 'ok');
-        renderView('dashboard');
-      });
-  });
 }
 
 // ---------------------------------------------------- neraca kas (superadmin)
@@ -1541,7 +1492,9 @@ function setorModal(tenantId, nama, outstanding) {
       if (f) body.bukti_data = await fileToDataUrl(f);
       await api('/api/settlements', { method: 'POST', body });
       toast('✔ Setoran tercatat', 'ok');
-      renderView('dashboard');
+      // Panelnya kini tinggal di layar Tenant; hanya bagian uangnya yang
+      // digambar ulang supaya tabel pengelolaan tenant tidak berkedip.
+      muatUangTenant();
     }, 'Catat Setoran');
 }
 
@@ -3493,6 +3446,15 @@ function assignCardModal(s, presetUid) {
 // ╔══════════════════════════════════════════════════════════╗
 // ║ SUPERADMIN: TENANT                                        ║
 // ╚══════════════════════════════════════════════════════════╝
+/*
+ * Layar Tenant memuat SELURUH urusan tenant, termasuk uangnya.
+ *
+ * Tabel tagihan dan riwayat setorannya dulu tinggal di Dashboard, berjauhan
+ * dari tempat tenantnya dikelola. Akibatnya alur yang sebenarnya satu — lihat
+ * siapa yang punya tagihan, setor, lalu pastikan tercatat — terpotong dua
+ * menu. Sekarang ketiganya satu layar, dan Dashboard kembali menjadi
+ * ringkasan sekolah, bukan tempat menagih.
+ */
 function tenantView(el) {
   el.innerHTML = `<div class="panel">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px">
@@ -3503,9 +3465,80 @@ function tenantView(el) {
       <thead><tr><th>Tenant</th><th>Jenis</th><th>Pemilik</th><th>Akun Login</th><th>Status</th><th></th></tr></thead>
       <tbody id="tn-body"></tbody>
     </table></div>
-  </div>`;
+  </div>
+  <div id="tn-uang"><p class="muted">memuat penghasilan & setoran…</p></div>`;
   $('#btn-add-tenant').onclick = () => tenantModal(null);
   loadTenants();
+  muatUangTenant();
+}
+
+/** Panel tagihan + riwayat setoran. Dipisah supaya bisa disegarkan sendiri
+ *  sesudah menyetor, tanpa menggambar ulang tabel pengelolaan tenant. */
+async function muatUangTenant() {
+  const wadah = $('#tn-uang');
+  if (!wadah) return;
+  try {
+    const [d, st] = await Promise.all([
+      api('/api/tenants?stat=1'),
+      api('/api/settlements'),
+    ]);
+    wadah.innerHTML = `
+    <div class="panel">
+      <h2>Penghasilan & Tagihan Tenant</h2>
+      <div class="tblwrap"><table>
+        <thead><tr><th>Tenant</th><th>Status</th><th class="num">Hari Ini</th><th class="num">Total Penjualan</th>
+        <th class="num">Sudah Disetor</th><th class="num">Tagihan Berjalan</th><th></th></tr></thead>
+        <tbody>${d.tenants.map((t) => `
+          <tr><td><b>${esc(t.nama)}</b><br><span class="muted">${esc(t.pemilik)}</span></td>
+          <td><span class="badge ${t.status}">${t.status}</span></td>
+          <td class="num rp">${rp(t.hari_ini)}</td>
+          <td class="num rp">${rp(t.total)}</td>
+          <td class="num rp">${rp(t.disetor)}</td>
+          <td class="num rp" style="font-weight:800; color:${t.outstanding > 0 ? 'var(--err)' : 'var(--ok)'}">${rp(t.outstanding)}</td>
+          <td>${t.outstanding > 0 ? `<button class="linkbtn" data-setor="${t.id}" data-nama="${esc(t.nama)}" data-out="${t.outstanding}">💰 setor</button>` : ''}</td>
+          </tr>`).join('')}</tbody>
+      </table></div>
+    </div>
+    <div class="panel">
+      <h2>Riwayat Setoran ke Tenant</h2>
+      <div class="tblwrap"><table>
+        <thead><tr><th>Tanggal</th><th>Tenant</th><th class="num">Jumlah</th><th>Metode</th><th>Bukti</th><th>Oleh</th><th>Keterangan</th></tr></thead>
+        <tbody>${st.settlements.map((s) => `
+          <tr><td>${new Date(s.created_at).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
+          <td>${esc(s.tenant_nama)}</td><td class="num rp">${rp(s.jumlah)}</td><td>${esc(s.metode)}</td>
+          <td>${s.bukti
+            ? `<button class="linkbtn" data-bukti="${esc(s.bukti)}">lihat</button>`
+            : `<button class="linkbtn" data-upbukti="${s.id}">upload bukti</button>`}</td>
+          <td>${esc(s.operator)}</td><td class="muted">${esc(s.keterangan)}</td></tr>`).join('') ||
+          '<tr><td colspan="7" class="muted">Belum ada setoran</td></tr>'}</tbody>
+      </table></div>
+    </div>`;
+
+    bindBuktiButtons(wadah);
+    wadah.querySelectorAll('[data-setor]').forEach((b) => {
+      b.onclick = () => setorModal(Number(b.dataset.setor), b.dataset.nama, Number(b.dataset.out));
+    });
+    wadah.querySelectorAll('[data-upbukti]').forEach((b) => {
+      b.onclick = () => openModal(`
+        <h2>Upload Bukti Setoran</h2>
+        <div class="field"><label>Foto/scan bukti (JPG/PNG, maks 3MB)</label>
+        <input type="file" id="m-file" accept="image/*"></div>`,
+        async () => {
+          const f = $('#m-file').files[0];
+          if (!f) throw new Error('Pilih file dulu');
+          const data = await fileToDataUrl(f);
+          await api(`/api/settlements/${b.dataset.upbukti}/bukti`, { method: 'POST', body: { data } });
+          toast('✔ Bukti tersimpan', 'ok');
+          muatUangTenant();
+        });
+    });
+  } catch (e) {
+    // Gagalnya bagian ini tidak boleh ikut menjatuhkan tabel pengelolaan
+    // tenant di atasnya — menambah atau menonaktifkan tenant harus tetap bisa.
+    wadah.innerHTML = `<div class="panel"><p class="muted">Gagal memuat penghasilan &
+      setoran: ${esc(e.message)}. <button class="linkbtn" id="tn-uang-ulang">coba lagi</button></p></div>`;
+    $('#tn-uang-ulang').onclick = muatUangTenant;
+  }
 }
 
 async function loadTenants() {

@@ -4,7 +4,6 @@ namespace App\Http\Controllers\Api;
 
 use App\Models\ProdukAjuan;
 use App\Models\Siswa;
-use App\Models\Tenant;
 use App\Models\Transaksi;
 use App\Services\SqlWaktu;
 use App\Services\StatistikTenant;
@@ -17,9 +16,6 @@ class DashboardController extends Controller
     {
         $this->wajibPeran($r, 'superadmin');
 
-        $tenants = Tenant::orderBy('id')->get()
-            ->map(fn ($t) => array_merge($t->toArray(), StatistikTenant::untuk($t->id)));
-
         $awal = WaktuIso::awalHariIni();
         $global = Transaksi::query()
             ->selectRaw("COALESCE(SUM(CASE WHEN tipe='beli' AND created_at >= ? THEN -jumlah END),0) AS belanja_hari_ini", [$awal])
@@ -29,7 +25,6 @@ class DashboardController extends Controller
         $saldo = Siswa::selectRaw('COALESCE(SUM(saldo),0) AS s, COUNT(*) AS n')->first();
 
         return response()->json([
-            'tenants' => $tenants,
             'belanja_hari_ini' => (int) $global->belanja_hari_ini,
             'topup_hari_ini' => (int) $global->topup_hari_ini,
             'total_saldo_siswa' => (int) $saldo->s,

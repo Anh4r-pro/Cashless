@@ -7,6 +7,7 @@ use App\Models\Produk;
 use App\Models\ProdukAjuan;
 use App\Models\SesiStaf;
 use App\Models\Tenant;
+use App\Services\StatistikTenant;
 use App\Models\Transaksi;
 use App\Models\User;
 use Illuminate\Http\Request;
@@ -15,15 +16,29 @@ use Illuminate\Support\Facades\DB;
 /** Kantin & koperasi yang berjualan di sekolah, beserta akun stafnya. */
 class TenantController extends Controller
 {
+    /**
+     * Daftar tenant. Dengan ?stat=1 ikut membawa penjualan & tagihan berjalan.
+     *
+     * Statistiknya OPSIONAL, dan itu disengaja: ia dihitung dua kueri per
+     * tenant, sementara sebagian besar pemanggil — isian saringan di layar
+     * Riwayat dan Analitik — hanya butuh nama untuk mengisi dropdown.
+     * Memaksakan hitungan itu ke semua pemanggil berarti setiap kali layar
+     * Riwayat dibuka, dua puluh delapan kueri dijalankan untuk menghasilkan
+     * sebaris nama.
+     */
     public function index(Request $r)
     {
         $this->wajibPeran($r, 'superadmin');
 
-        return response()->json([
-            'tenants' => Tenant::orderBy('id')
-                ->selectRaw("tenant.*, (SELECT GROUP_CONCAT(username) FROM users u WHERE u.tenant_id = tenant.id) AS usernames")
-                ->get(),
-        ]);
+        $tenants = Tenant::orderBy('id')
+            ->selectRaw("tenant.*, (SELECT GROUP_CONCAT(username) FROM users u WHERE u.tenant_id = tenant.id) AS usernames")
+            ->get();
+
+        if ($r->boolean('stat')) {
+            $tenants = $tenants->map(fn ($t) => array_merge($t->toArray(), StatistikTenant::untuk($t->id)));
+        }
+
+        return response()->json(['tenants' => $tenants]);
     }
 
     public function store(Request $r)
