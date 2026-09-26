@@ -72,6 +72,14 @@ function openModal(html, onSave, saveLabel) {
 }
 function closeModal() { $('#modal-root').innerHTML = ''; cardHandler = null; }
 
+// Palet grafik disetel ke warna tampilan admin (navy, emas redam, hijau).
+// VIZ milik charts.js; diubah di sini karena berkas ini hanya dimuat halaman
+// admin — kios dan portal wali punya pengaturannya sendiri.
+Object.assign(VIZ, { s1: '#1A2856', s2: '#C9A227', s3: '#0F7A5F',
+  grid: '#EFEBE2', axis: '#D6D0C2', ink: '#141B2D', muted: '#676D82' });
+VIZ.kategori = [VIZ.s1, VIZ.s2, VIZ.s3];
+VIZ.deret = [VIZ.s1, VIZ.s2, VIZ.s3, '#5B45B8', '#B4532A', '#2A7F9E'];
+
 // ========================================================== state + boot
 let USER = null;
 let cardHandler = null;   // handler tap khusus (modal, dsb.)
@@ -235,8 +243,26 @@ function showApp() {
 /** Satu tombol tab. Label di-escape: nama grup & tab berasal dari kode, tapi
  *  aturannya sama di seluruh berkas ini supaya tidak jadi celah kalau kelak
  *  labelnya datang dari pengaturan. */
+/** Ikon garis per tab — murni tampilan; tab tanpa ikon tetap berfungsi. */
+const IKON_TAB = {
+  dashboard: '<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
+  saldo: '<path d="M3 7a2 2 0 0 1 2-2h13v4"/><path d="M3 7v11a2 2 0 0 0 2 2h15V9H5a2 2 0 0 1-2-2"/><circle cx="16" cy="14.5" r="1.2"/>',
+  massal: '<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>',
+  topup: '<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18h2"/>',
+  santri: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.5 3.3-5.5 6.5-5.5s5.7 2 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.8c1.9.7 3.1 2.4 3.5 5.2"/>',
+  sdm: '<rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="9" cy="11" r="2"/><path d="M6 16c.5-1.5 1.6-2.2 3-2.2s2.5.7 3 2.2M15 10h3M15 13.5h3"/>',
+  tenant: '<path d="M4 9.5 5.5 4h13L20 9.5"/><path d="M4 9.5a2.7 2.7 0 0 0 5.3 0 2.7 2.7 0 0 0 5.4 0 2.7 2.7 0 0 0 5.3 0"/><path d="M5 12v8h14v-8M10 20v-5h4v5"/>',
+  'menu-ajuan': '<path d="M3 12V4h8l9.5 9.5-8 8z"/><circle cx="7.5" cy="8.5" r="1.3"/>',
+  donasi: '<path d="M12 20s-7.5-4.5-7.5-10A4.3 4.3 0 0 1 12 7.3 4.3 4.3 0 0 1 19.5 10c0 5.5-7.5 10-7.5 10z"/>',
+  analitik: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  riwayat: '<path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/>',
+  akun: '<path d="M12 3 4.5 6v5.5c0 4.5 3.2 8 7.5 9.5 4.3-1.5 7.5-5 7.5-9.5V6z"/><path d="m9 12 2 2 4-4"/>',
+  kasir: '<rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M2.5 10h19M6.5 15h4"/>',
+  menu: '<path d="M4 6h16M4 12h16M4 18h10"/>',
+};
 const tombolNav = ([id, label], aktif) =>
-  `<button data-v="${id}" class="${id === aktif ? 'active' : ''}">${esc(label)}</button>`;
+  `<button data-v="${id}" class="${id === aktif ? 'active' : ''}">${IKON_TAB[id]
+    ? `<svg class="ik" viewBox="0 0 24 24" aria-hidden="true">${IKON_TAB[id]}</svg>` : ''}${esc(label)}</button>`;
 
 function gambarNav(tabs, aktif) {
   $('#nav').innerHTML = tabs.map((t) => {
@@ -1236,7 +1262,9 @@ function bindBuktiButtons(el) {
 function setLencana(view, label, n) {
   const b = document.querySelector(`#nav button[data-v="${view}"]`);
   if (!b) return;
-  b.innerHTML = esc(label) + (n > 0 ? ` <span class="navbadge">${n}</span>` : '');
+  // Ikon tab ikut digambar ulang — isi tombol diganti utuh di sini.
+  const ikon = IKON_TAB[view] ? `<svg class="ik" viewBox="0 0 24 24" aria-hidden="true">${IKON_TAB[view]}</svg>` : '';
+  b.innerHTML = ikon + esc(label) + (n > 0 ? ` <span class="navbadge">${n}</span>` : '');
   const grup = b.closest('.nav-grup');
   if (grup) {
     // Satu grup bisa memuat beberapa tab berlencana; titiknya menyala selama

@@ -1,0 +1,279 @@
+/*
+ * Tampilan baru layar ADMIN & KASIR (index.html) — lapisan di atas style.css.
+ *
+ * Kenapa berkas terpisah, bukan menulis ulang style.css:
+ *   style.css juga dipakai layar Kios santri (kios.html). Semua aturan di sini
+ *   dikurung di `body.admin`, jadi kios tidak tersentuh sama sekali, dan
+ *   seluruh kelas/ID yang dipakai app.js tetap sama — yang berubah hanya rupa.
+ *
+ * Arah: navy & emas logo tetap identitasnya (emas diredam), latar gading,
+ * kartu putih bersudut lembut, menu di bilah samping pada layar kerja dan di
+ * laci ☰ pada tablet/ponsel.
+ */
+
+/* Plus Jakarta Sans (SIL Open Font License), disajikan dari server sendiri —
+   berkas yang sama dengan portal wali, jadi cukup diunduh sekali. */
+@font-face {
+  font-family: 'Plus Jakarta Sans'; font-style: normal; font-weight: 400 800; font-display: swap;
+  src: url(/fonts/plus-jakarta-sans-latin.woff2?v=v12) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308,
+    U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+/* Token warna ditimpa di body, bukan :root — hanya berlaku di halaman ini. */
+body.admin {
+  --bg: #F6F4EE; --card: #fff; --ink: #141B2D; --muted: #676D82;
+  --line: #E6E1D6; --line-2: #F0EDE5;
+  --navy: #1A2856; --navy-dark: #0B1430; --navy-700: #26366B;
+  --gold: #C9A227; --gold-dark: #B08A17; --gold-soft: #F5EBCB; --gold-ink: #7A5E0C;
+  --brand: #2A4B8D; --brand-ink: #fff;
+  --ok: #0F7A5F; --ok-soft: #E3F3EE; --warn: #9A5B00; --warn-soft: #FDF1DC;
+  --err: #B4233F; --err-soft: #FBE9EC; --vio: #5B45B8; --vio-soft: #EEEAFB;
+  --sisi: 252px;
+  --bayang: 0 1px 2px rgba(17,29,66,.04), 0 6px 22px -10px rgba(17,29,66,.12);
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 14.5px; background: var(--bg); color: var(--ink); -webkit-font-smoothing: antialiased;
+}
+body.admin h1, body.admin h2, body.admin h3 { font-family: inherit; letter-spacing: -.01em; }
+body.admin h2 { font-size: 16px; font-weight: 800; margin-bottom: 12px; }
+body.admin code { background: var(--line-2); }
+body.admin svg.ik { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.8;
+  stroke-linecap: round; stroke-linejoin: round; flex: none; }
+
+/* ---------------------------------------------------------------- isian */
+body.admin input, body.admin select, body.admin textarea {
+  border: 1px solid #DAD4C6; border-radius: 10px; padding: 9px 12px; background: #fff; color: var(--ink); }
+body.admin input:focus, body.admin select:focus, body.admin textarea:focus {
+  outline: 2px solid rgba(42,75,141,.35); outline-offset: 0; border-color: var(--brand); }
+body.admin input:disabled, body.admin select:disabled { background: var(--line-2); color: var(--muted); }
+body.admin .field label { font-size: 12.5px; font-weight: 700; color: #4A5268; margin-bottom: 6px; }
+body.admin input[type=checkbox], body.admin input[type=radio] { accent-color: var(--navy); }
+body.admin input[type=file]::file-selector-button { font: inherit; font-weight: 700; border: 0; border-radius: 8px;
+  background: var(--navy); color: #fff; padding: 7px 12px; margin-right: 10px; cursor: pointer; }
+
+/* ---------------------------------------------------------------- memuat */
+body.admin #boot { background: var(--navy-dark); }
+
+/* ---------------------------------------------------------------- masuk */
+body.admin #login { max-width: none; margin: 0; padding: 24px 16px; min-height: 100vh;
+  display: flex; align-items: center; justify-content: center;
+  background: radial-gradient(120% 70% at 50% 0%, #1A2856 0%, #0B1430 60%); }
+body.admin .login-panel { width: 100%; max-width: 400px; margin: 0; background: #fff; border: 0;
+  border-radius: 24px; padding: 30px 26px 26px; box-shadow: 0 30px 60px -24px rgba(0,0,0,.55); }
+body.admin .login-logo { width: 84px; height: 84px; }
+body.admin .login-panel h1 { font-size: 24px; font-weight: 800; color: var(--navy-dark); }
+body.admin .login-panel .muted { color: #5D6378; }             /* 6,0:1 di atas putih */
+body.admin .login-panel .field label { color: #414A62; }        /* 8,6:1 */
+body.admin .login-panel .ortu-link { color: #22407D; }          /* 9,0:1 */
+body.admin .login-panel input { border-color: #8C8678; padding: 11px 13px; }  /* tepi 3,6:1 */
+body.admin .primary-btn { background: var(--navy); color: #fff; border-radius: 12px; padding: 13px; font-weight: 800; }
+body.admin .primary-btn:hover { background: var(--navy-dark); }
+
+/* ======================================================= KERANGKA & MENU
+   ≥1024px : bilah samping tetap di kiri, semua menu terlihat sekaligus.
+   <1024px : bilah atas ringkas; menu di laci yang dibuka tombol ☰.
+   Seluruh tombol tetap berada di #nav (lencana, penanda aktif, dan lompatan
+   antar-tab di app.js mencari `#nav button[data-v=…]`). */
+body.admin header {
+  background: var(--navy-dark); color: #fff; border-bottom: 0;
+  background-image: radial-gradient(140% 40% at 0% 0%, rgba(201,162,39,.13), transparent 60%);
+}
+body.admin .hd-logo { width: 34px; height: 34px; }
+body.admin header h1 { color: #fff; font-size: 15.5px; font-weight: 800; letter-spacing: 0; }
+body.admin .hd-user { color: #A9B1CF; font-size: 12.5px; }
+body.admin #btn-logout { background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.14);
+  color: #E3E6F1; border-radius: 10px; font-weight: 600; font-size: 13px; }
+body.admin #btn-logout:hover { background: rgba(255,255,255,.12); }
+body.admin .hd-suara { color: #fff; }
+
+/* tombol menu */
+body.admin nav button { display: flex; align-items: center; gap: 11px; width: 100%; text-align: left;
+  border: 0; border-radius: 10px; padding: 9px 12px; color: #C5CBE0; font-weight: 600; font-size: 13.5px;
+  background: transparent; white-space: nowrap; }
+body.admin nav button:hover { background: rgba(255,255,255,.06); color: #fff; }
+body.admin nav button.active { background: rgba(255,255,255,.09); color: #fff; border-radius: 10px;
+  box-shadow: inset 3px 0 0 var(--gold); border-bottom: 0; }
+body.admin nav button .ik { opacity: .85; }
+body.admin nav button.active .ik { color: var(--gold); opacity: 1; }
+body.admin .navbadge { margin-left: auto; background: var(--gold); color: var(--navy-dark); }
+
+/* grup: di bilah samping/laci judul kelompok berupa label kecil, anaknya selalu terbuka */
+body.admin .nav-grup { width: 100%; position: static; }
+body.admin .nav-induk { display: flex; width: 100%; padding: 16px 12px 6px; font-size: 10.5px; font-weight: 800;
+  letter-spacing: .12em; text-transform: uppercase; color: #7D86A8; cursor: default; background: none; }
+body.admin .nav-induk:hover { background: none; color: #7D86A8; }
+body.admin .nav-panah { display: none; }
+body.admin .nav-grup.anak-aktif > .nav-induk { color: #A9B1CF; background: none; border-bottom: 0; border-radius: 0; }
+body.admin .nav-grup.ada-lencana > .nav-induk::after { background: var(--gold); margin-left: 6px; }
+body.admin .nav-anak, body.admin .nav-grup:hover > .nav-anak, body.admin .nav-grup:focus-within > .nav-anak,
+body.admin .nav-grup.buka > .nav-anak {
+  position: static; display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 0; margin: 0;
+  background: none; border: 0; border-radius: 0; box-shadow: none; }
+body.admin .nav-anak button { padding: 9px 12px; }
+body.admin .nav-anak button:hover { background: rgba(255,255,255,.06); }
+body.admin .nav-anak button.active { background: rgba(255,255,255,.09); border-radius: 10px; }
+
+/* ---------- layar kerja: bilah samping */
+@media (min-width: 1024px) {
+  body.admin header {
+    position: fixed; top: 0; bottom: 0; left: 0; width: var(--sisi); z-index: 30;
+    display: grid; grid-template-columns: 34px 1fr auto; align-content: start;
+    grid-template-areas: "logo judul suara" "nav nav nav" "user user user" "keluar keluar keluar";
+    grid-template-rows: auto 1fr auto auto;
+    gap: 0 10px; padding: 18px 12px 14px; overflow-y: auto; flex-wrap: nowrap;
+  }
+  body.admin .hd-logo { grid-area: logo; }
+  /* Nama tenant bisa panjang: di bilah samping judul boleh turun ke baris kedua. */
+  body.admin header h1 { grid-area: judul; align-self: center; font-size: 14.5px; line-height: 1.3; }
+  body.admin #hd-suara { grid-area: suara; }
+  body.admin #btn-menu { display: none; }
+  body.admin nav { grid-area: nav; display: flex; flex-direction: column; flex-wrap: nowrap; gap: 2px;
+    margin: 18px 0 16px; align-self: start; }
+  body.admin .hd-user { grid-area: user; display: block; padding: 10px 12px; margin-bottom: 8px;
+    background: rgba(255,255,255,.05); border-radius: 12px; line-height: 1.45; }
+  body.admin #btn-logout { grid-area: keluar; padding: 9px 12px; }
+  body.admin main { max-width: none; margin: 0 0 0 var(--sisi); padding: 26px 32px 4px; }
+  body.admin footer { margin-left: var(--sisi); }
+}
+@media (min-width: 1600px) {
+  /* Layar sangat lebar: isi dibatasi supaya baris tabel tidak terlalu jauh dibaca. */
+  body.admin main > * { max-width: 1440px; }
+}
+
+/* ---------- tablet & ponsel: bilah atas + laci ☰ */
+@media (max-width: 1023px) {
+  body.admin header { position: sticky; top: 0; z-index: 35; display: flex; flex-wrap: nowrap;
+    align-items: center; gap: 10px; padding: 10px 14px; }
+  body.admin header h1 { flex: 1; min-width: 0; max-width: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  body.admin .hd-menu { display: inline-flex; align-items: center; justify-content: center; order: 5; margin: 0;
+    width: 40px; height: 38px; padding: 0; font-size: 18px; border-radius: 10px;
+    background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.16); color: #fff; }
+  body.admin .hd-user { order: 2; flex: none; flex-basis: auto; max-width: 34vw; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  body.admin #hd-suara { order: 3; }
+  body.admin #btn-logout { order: 4; padding: 7px 11px; }
+  body.admin nav {
+    position: fixed; top: 0; bottom: 0; left: 0; z-index: 60; width: min(300px, 86vw);
+    display: none; flex-direction: column; flex-wrap: nowrap; align-items: stretch; gap: 2px;
+    margin: 0; padding: 18px 12px 24px; border: 0; overflow-y: auto; order: 6; flex-basis: auto;
+    background: var(--navy-dark); box-shadow: 0 0 0 100vmax rgba(11,20,48,.55);
+  }
+  body.admin nav.buka { display: flex; }
+  body.admin nav button { padding: 11px 12px; }
+  body.admin main { max-width: none; margin: 18px auto; padding: 0 18px; }
+}
+@media (max-width: 600px) {
+  body.admin .hd-user { display: none; }
+  body.admin main { padding: 0 12px; margin: 14px auto; }
+  body.admin .panel { padding: 14px; border-radius: 14px; }
+}
+
+/* ======================================================= KOMPONEN */
+body.admin .panel { background: var(--card); border: 1px solid var(--line); border-radius: 16px;
+  padding: 20px; margin-bottom: 18px; box-shadow: var(--bayang); }
+body.admin .row { gap: 18px; }
+body.admin .row > * { min-width: min(300px, 100%); }
+body.admin .muted { color: var(--muted); }
+
+/* kartu angka */
+body.admin .cards { gap: 14px; margin-bottom: 18px; }
+body.admin .statcard { border: 1px solid var(--line); border-top: 1px solid var(--line); border-radius: 16px;
+  padding: 16px 16px 14px; box-shadow: var(--bayang); position: relative; overflow: hidden; }
+body.admin .statcard::before { content: ''; position: absolute; left: 0; top: 16px; bottom: 16px; width: 3px;
+  border-radius: 0 3px 3px 0; background: var(--gold); }
+body.admin .statcard .muted { font-size: 12px; font-weight: 600; }
+body.admin .statcard b { display: inline-block; font-size: 22px; font-weight: 800; color: var(--ink);
+  letter-spacing: -.02em; margin: 4px 0 2px; }
+
+/* tombol */
+body.admin .savebtn, body.admin button.go, body.admin .filterbar button.go, body.admin .modal .actions button.primary {
+  background: var(--navy); color: #fff; border: 1px solid var(--navy); border-radius: 11px; font-weight: 700; }
+body.admin .savebtn:hover, body.admin button.go:hover, body.admin .modal .actions button.primary:hover { background: var(--navy-dark); }
+body.admin .savebtn { padding: 10px 20px; }
+body.admin button.go { padding: 9px 16px; }
+body.admin .filterbar button, body.admin .pager button, body.admin .modal .actions button,
+body.admin .exports a, body.admin .aju-unduh .linkbtn {
+  border: 1px solid var(--line); border-radius: 10px; background: #fff; font-weight: 600; }
+body.admin .filterbar button:hover, body.admin .pager button:hover:not(:disabled), body.admin .exports a:hover,
+body.admin .aju-unduh .linkbtn:hover { border-color: #CFC8B6; background: #FBFAF7; }
+body.admin .linkbtn { color: var(--brand); }
+body.admin .linkbtn.danger { color: var(--err); }
+body.admin .paybtn { border-radius: 13px; background: var(--ok); padding: 14px; }
+body.admin .paybtn:disabled { background: #C9CDD6; }
+body.admin .paybtn.danger { background: var(--err); }
+body.admin .primary-btn:focus-visible, body.admin button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+
+/* pilihan cepat & sakelar mode */
+body.admin .quick button { border: 1px solid var(--line); border-radius: 10px; background: #fff; font-weight: 700; color: #4A5268; }
+body.admin .quick button.sel { background: var(--navy); border-color: var(--navy); color: #fff; }
+body.admin .modeswitch { background: var(--line-2); padding: 4px; border-radius: 13px; gap: 4px; }
+body.admin .modeswitch button { border: 0; border-radius: 10px; background: transparent; color: #4A5268; padding: 10px 8px; }
+body.admin .modeswitch button.sel { box-shadow: 0 1px 3px rgba(0,0,0,.1); }
+body.admin .modeswitch button.plus-mode.sel { background: var(--ok); }
+body.admin .modeswitch button.minus-mode.sel { background: var(--err); }
+
+/* tabel */
+body.admin table { font-size: 13.5px; }
+body.admin th { color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .07em;
+  border-bottom: 1px solid var(--line); padding: 10px 12px; }
+body.admin td { border-bottom: 1px solid var(--line-2); padding: 11px 12px; }
+body.admin tbody tr:hover > td { background: #FBFAF7; }
+body.admin tbody tr:last-child > td { border-bottom: 0; }
+body.admin tr.tp-menunggu > td:first-child { border-left: 3px solid var(--gold); }
+body.admin .tblwrap { border-radius: 12px; }
+
+/* lencana */
+body.admin .badge { padding: 3px 9px; font-size: 11.5px; font-weight: 800; }
+body.admin .badge.aktif, body.admin .badge.tp-disetujui { background: var(--ok-soft); color: var(--ok); }
+body.admin .badge.blokir, body.admin .badge.nonaktif, body.admin .badge.tp-ditolak { background: var(--err-soft); color: var(--err); }
+body.admin .badge.tp-pending { background: var(--warn-soft); color: var(--warn); }
+body.admin .badge.tp-batal, body.admin .badge.kat-mk { background: var(--line-2); color: var(--muted); }
+body.admin .badge.kat-nm, body.admin .katdot { background: var(--vio-soft); color: var(--vio); }
+
+/* penyaring, pratinjau, catatan */
+body.admin .filterbar { gap: 10px; }
+body.admin .preview { border-radius: 12px; border-color: #D9D3C3; }
+body.admin .preview.ok { border-color: #E4CF86; background: #FFFBEF; }
+body.admin .preview b { color: var(--navy); }
+body.admin .aju-unduh { background: #FBFAF7; border-radius: 12px; }
+body.admin .set-hint { color: var(--navy-700); }
+body.admin .tapzone { border-radius: 16px; border-color: #D9D3C3; background: #FCFBF8; }
+body.admin .tapzone.pulse { border-color: var(--gold); color: var(--gold-ink); }
+body.admin .stucard { border-radius: 16px; border-left: 4px solid var(--gold); box-shadow: var(--bayang); background: #fff; }
+body.admin .stucard .saldo b, body.admin .reslist .res-saldo, body.admin .total { color: var(--ink); }
+body.admin .avatar { background: var(--navy); color: var(--gold); border-radius: 14px; }
+body.admin .grid button { border-radius: 14px; padding: 12px 8px; }
+body.admin .grid button:hover, body.admin .reslist button:hover, body.admin .reslist button:focus-visible {
+  border-color: #E4CF86; background: #FFFBEF; }
+body.admin .reslist button { border-radius: 12px; }
+body.admin .dn-row, body.admin .gol-baris, body.admin .izin-grup, body.admin .ortu-set, body.admin .kk-jenjang { border-radius: 14px; }
+body.admin .aju-paket { border-radius: 14px; border-color: #E4CF86; background: #FFFBEF; }
+
+/* neraca */
+body.admin .nr-panel { border-top: 1px solid var(--line); position: relative; }
+body.admin .nr-panel::before { content: ''; position: absolute; left: 20px; right: 20px; top: 0; height: 3px;
+  border-radius: 0 0 4px 4px; background: var(--ok); }
+body.admin .nr-panel.nr-alarm::before { background: var(--err); }
+body.admin .nr-hasil { border-radius: 14px; background: var(--ok-soft); border-color: #BFE3D6; }
+body.admin .nr-hasil.alarm { background: var(--err-soft); border-color: #F1C4CD; }
+body.admin .nr-hasil > div > b { font-family: inherit; font-weight: 800; color: var(--ink); }
+body.admin .nr-baris.nr-total { border-top-color: var(--ink); }
+body.admin .nr-baris.nr-total > b, body.admin .nr-rasio b, body.admin .nr-metode { color: var(--ink); }
+body.admin .nr-cek { background: #F8F7F2; border-radius: 10px; }
+body.admin .nr-cek.gagal { background: var(--err-soft); }
+body.admin .nr-saran { border-radius: 14px; background: #FFFBEF; border-color: #E4CF86; }
+
+/* grafik */
+body.admin .hbar-track { background: var(--line-2); height: 10px; }
+body.admin .hbar-head b { color: var(--ink); }
+body.admin #viz-tip { border-radius: 10px; }
+
+/* modal & toast */
+body.admin .modal-bg { background: rgba(11,20,48,.5); }
+body.admin .modal { border-top: 0; border-radius: 20px; padding: 22px 22px 18px;
+  box-shadow: 0 30px 60px -20px rgba(11,20,48,.45); }
+body.admin .modal h2 { font-size: 18px; }
+body.admin .modal .actions button { padding: 9px 16px; }
+body.admin #toast { border-radius: 12px; font-weight: 600; box-shadow: 0 10px 30px rgba(11,20,48,.3); }
+
+@media (prefers-reduced-motion: reduce) { body.admin * { scroll-behavior: auto; } }

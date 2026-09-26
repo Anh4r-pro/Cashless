@@ -5,22 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kantin Imbos — Sistem Kasir Kartu</title>
 <link rel="icon" type="image/png" href="/img/logo-imbos.png">
-<!-- Fonta Google TIDAK BOLEH memblokir render.
-     Sebagai <link rel=stylesheet> biasa, halaman menunggu satu host ASING
-     selesai dijawab sebelum menggambar apa pun — dan di sambungan buruk itu
-     berarti DNS + TCP + TLS ke dua host tambahan sebelum satu huruf muncul.
-     Pola media="print" lalu ditukar saat selesai membuat unduhannya berjalan
-     di latar: teks langsung tampil dengan fonta sistem, lalu berganti sendiri.
-     Tumpukan fallback di style.css (system-ui, sans-serif / serif) memang sudah
-     disiapkan untuk ini, jadi halaman tetap rapi walau Google tak terjangkau. -->
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Slab:wght@600;800&display=swap"
-      rel="stylesheet" media="print" onload="this.media='all'">
-<noscript><link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&family=Roboto+Slab:wght@600;800&display=swap" rel="stylesheet"></noscript>
+<!-- Fonta disajikan dari server sendiri — tidak ada host asing yang harus
+     dihubungi sebelum huruf tampil. Satu berkas variabel (27 KB) untuk semua
+     ketebalan, dipakai bersama portal wali. font-display: swap (admin.css)
+     membuat teks langsung tampil dengan fonta sistem bila fonta telat.
+     ?v= ditulis tangan karena woff2 tidak dicap otomatis — ganti bila berkasnya diganti. -->
+<link rel="preload" href="/fonts/plus-jakarta-sans-latin.woff2?v=v12" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/style.css">
+<!-- Lapisan tampilan admin & kasir; semua aturannya dikurung di body.admin. -->
+<link rel="stylesheet" href="/admin.css">
 </head>
-<body>
+<body class="admin">
 
 <!-- Layar antara: tampil sampai status sesi diketahui, supaya form login tidak
      sempat berkedip saat halaman di-refresh dalam keadaan sudah login. -->
