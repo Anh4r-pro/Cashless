@@ -144,10 +144,16 @@ async function mulaiApp() {
   $('#boot').classList.add('hidden');
   $('#ortu-login').classList.add('hidden');
   $('#ortu-app').classList.remove('hidden');
-  await muatRingkasan();
-  await muatTransaksi();
-  await muatPengajuan();
-  await siapkanTombolTopup();
+  /*
+   * Empat permintaan ini tidak saling bergantung, jadi dikirim BERSAMAAN.
+   * Dulu berurutan: di jaringan seluler tiap permintaan menunggu yang
+   * sebelumnya selesai, dan log server mencatat jeda 5, 4, lalu 16 detik
+   * sebelum halaman lengkap. Sekarang lamanya = permintaan terlama saja.
+   * Masing-masing menangani gagalnya sendiri, jadi satu yang gagal tidak
+   * menahan tiga lainnya tampil. Selama menunggu, kerangka (skeleton) di
+   * ortu.html yang terlihat — bukan layar kosong.
+   */
+  await Promise.all([muatRingkasan(), muatTransaksi(), muatPengajuan(), siapkanTombolTopup()]);
 }
 
 /**

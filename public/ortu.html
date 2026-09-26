@@ -6,14 +6,13 @@
 <meta name="theme-color" content="#0B1430">
 <title>Portal Wali Santri — Kantin Imbos</title>
 <link rel="icon" type="image/png" href="/img/logo-imbos.png">
-<!-- Fonta Google TIDAK BOLEH memblokir render: pola media="print" lalu ditukar
-     membuat unduhannya berjalan di latar, dan teks langsung tampil dengan
-     fonta sistem (tumpukan fallback di ortu.css) sampai fonta siap. -->
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap"
-      rel="stylesheet" media="print" onload="this.media='all'">
-<noscript><link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet"></noscript>
+<!-- Fonta disajikan dari server sendiri (satu berkas variabel 27 KB untuk semua
+     ketebalan), bukan dari Google: di jaringan seluler, dua sambungan tambahan
+     ke host asing (DNS + TCP + TLS masing-masing) terasa sebagai "masih loading".
+     Dipramuat supaya tiba bersamaan dengan CSS; font-display: swap di ortu.css
+     membuat teks tetap langsung tampil dengan fonta sistem bila fonta telat.
+     ?v= ditulis tangan karena woff2 tidak dicap otomatis — ganti bila berkasnya diganti. -->
+<link rel="preload" href="/fonts/plus-jakarta-sans-latin.woff2?v=v12" as="font" type="font/woff2" crossorigin>
 <!-- Sengaja BUKAN style.css: portal punya stylesheet mandiri (lihat kepala ortu.css). -->
 <link rel="stylesheet" href="/ortu.css">
 </head>
@@ -56,6 +55,7 @@
 <!-- ======================================================= ISI -->
 <div id="ortu-app" class="hidden">
 <header class="o-kepala" id="o-atas">
+ <div class="o-lebar">
   <div class="o-kepala-baris">
     <img src="/img/logo-imbos.png" alt="">
     <h1>Kantin Imbos</h1>
@@ -71,12 +71,16 @@
       <span class="muted" id="o-hp"></span>
     </div>
   </div>
+ </div>
 </header>
 
-<main>
+<!-- Dua kolom di layar lebar, satu kolom di ponsel. Urutan di ponsel tetap:
+     kolom kiri dulu (saldo, ringkasan, pengajuan), lalu kolom kanan. -->
+<main class="o-lebar o-grid">
+ <div class="o-kolom">
   <section class="o-saldo">
     <span class="o-saldo-lbl">Saldo kartu saat ini</span>
-    <b id="o-saldo">—</b>
+    <b id="o-saldo"><span class="sk" style="width:170px;height:34px"></span></b>
     <div class="o-saldo-info">
       <span class="hidden" id="o-titipan"></span>
       <span id="o-terakhir"></span>
@@ -93,12 +97,20 @@
     </div>
   </section>
 
-  <div class="cards" id="o-stat"></div>
+  <div class="cards" id="o-stat">
+    <div class="statcard sk-kartu"><span class="sk" style="width:40%"></span><span class="sk" style="width:25%;height:22px"></span></div>
+    <div class="statcard sk-kartu"><span class="sk" style="width:70%"></span><span class="sk" style="width:55%;height:18px"></span></div>
+    <div class="statcard sk-kartu"><span class="sk" style="width:70%"></span><span class="sk" style="width:55%;height:18px"></span></div>
+    <div class="statcard sk-kartu"><span class="sk" style="width:70%"></span><span class="sk" style="width:55%;height:18px"></span></div>
+    <div class="statcard sk-kartu"><span class="sk" style="width:70%"></span><span class="sk" style="width:55%;height:18px"></span></div>
+  </div>
 
   <section class="o-bagian hidden" id="o-tp-panel">
     <div class="o-bagian-head"><h2>Pengajuan isi saldo</h2><span class="muted" id="o-tp-ringkas"></span></div>
     <div class="o-kartu" id="o-tp-list"></div>
   </section>
+ </div>
+ <div class="o-kolom">
 
   <section class="o-bagian" id="o-sek-grafik">
     <div class="o-bagian-head">
@@ -109,18 +121,20 @@
         <button data-hari="90">90 hari</button>
       </div>
     </div>
-    <div class="o-kartu"><div id="o-grafik"></div></div>
+    <div class="o-kartu"><div id="o-grafik"><span class="sk" style="width:100%;height:200px;border-radius:12px"></span></div></div>
   </section>
 
+  <div class="o-berdua">
   <section class="o-bagian" id="o-sek-kantin">
     <div class="o-bagian-head"><h2>Jajan di kantin mana</h2></div>
-    <div class="o-kartu" id="o-tenant"></div>
+    <div class="o-kartu" id="o-tenant"><span class="sk"></span><span class="sk" style="height:8px"></span><span class="sk" style="width:60%"></span><span class="sk" style="height:8px"></span></div>
   </section>
 
   <section class="o-bagian">
     <div class="o-bagian-head"><h2>Yang paling sering dibeli</h2></div>
-    <div class="o-kartu" id="o-menu"></div>
+    <div class="o-kartu" id="o-menu"><span class="sk" style="width:80%"></span><span class="sk" style="width:60%"></span><span class="sk" style="width:70%"></span></div>
   </section>
+  </div>
 
   <section class="o-bagian" id="o-sek-riwayat">
     <div class="o-bagian-head"><h2>Catatan transaksi</h2></div>
@@ -132,12 +146,17 @@
       <button data-tipe="koreksi">Penyesuaian</button>
     </div>
     <div id="o-tx-ringkas" class="muted"></div>
-    <div class="o-txlist" id="o-tx"></div>
+    <div class="o-txlist" id="o-tx">
+      <div class="o-tx"><span class="sk" style="width:40px;height:40px;border-radius:13px;flex:none"></span><span style="flex:1"><span class="sk" style="width:60%"></span><span class="sk" style="width:40%"></span></span></div>
+      <div class="o-tx"><span class="sk" style="width:40px;height:40px;border-radius:13px;flex:none"></span><span style="flex:1"><span class="sk" style="width:55%"></span><span class="sk" style="width:35%"></span></span></div>
+      <div class="o-tx"><span class="sk" style="width:40px;height:40px;border-radius:13px;flex:none"></span><span style="flex:1"><span class="sk" style="width:65%"></span><span class="sk" style="width:40%"></span></span></div>
+    </div>
     <div class="pager">
       <span class="muted" id="o-tx-info"></span>
       <button id="o-tx-prev" aria-label="Sebelumnya">‹</button><button id="o-tx-next" aria-label="Berikutnya">›</button>
     </div>
   </section>
+ </div>
 </main>
 <footer>Kantin Imbos · Insan Mulia Boarding School Pringsewu<br>
   Sesi portal berakhir otomatis setelah 2 jam.</footer>
