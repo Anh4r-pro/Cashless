@@ -251,7 +251,7 @@ body.admin .aju-paket { border-radius: 14px; border-color: #E4CF86; background: 
 
 /* neraca */
 body.admin .nr-panel { border-top: 1px solid var(--line); position: relative; }
-body.admin .nr-panel::before { content: ''; position: absolute; left: 20px; right: 20px; top: 0; height: 3px;
+body.admin .nr-panel::before { content: ""; position: absolute; left: 28px; right: 28px; top: -1px; height: 3px;
   border-radius: 0 0 4px 4px; background: var(--ok); }
 body.admin .nr-panel.nr-alarm::before { background: var(--err); }
 body.admin .nr-hasil { border-radius: 14px; background: var(--ok-soft); border-color: #BFE3D6; }
@@ -277,3 +277,124 @@ body.admin .modal .actions button { padding: 9px 16px; }
 body.admin #toast { border-radius: 12px; font-weight: 600; box-shadow: 0 10px 30px rgba(11,20,48,.3); }
 
 @media (prefers-reduced-motion: reduce) { body.admin * { scroll-behavior: auto; } }
+
+/* ===================================================================
+   PENGHALUSAN (putaran kedua): lebih lapang, lebih tenang.
+   Prinsipnya: garis tipis ketimbang bayangan tebal, emas hanya sebagai
+   aksen kecil, ruang kosong yang cukup, dan gerak yang halus.
+   =================================================================== */
+body.admin { --bayang: 0 1px 2px rgba(17,29,66,.035), 0 10px 30px -18px rgba(17,29,66,.16); letter-spacing: -.003em; }
+body.admin button, body.admin a, body.admin .panel, body.admin .statcard, body.admin nav button,
+body.admin input, body.admin select { transition: background-color .15s, border-color .15s, color .15s, box-shadow .15s; }
+@media (prefers-reduced-motion: reduce) { body.admin * { transition: none !important; } }
+
+/* ---------- halaman masuk: dua sisi di layar lebar */
+body.admin .login-sisi { display: none; }
+@media (min-width: 900px) {
+  body.admin #login { gap: 0; padding: 40px; }
+  body.admin .login-sisi { display: flex; flex-direction: column; justify-content: center; gap: 10px;
+    width: 400px; min-height: 520px; padding: 44px 40px; color: #fff; border-radius: 28px 0 0 28px;
+    background: linear-gradient(160deg, #1D2C5E 0%, #111D42 60%, #0B1430 100%); position: relative; overflow: hidden;
+    box-shadow: 0 30px 60px -24px rgba(0,0,0,.55); }
+  body.admin .login-sisi::after { content: ''; position: absolute; right: -150px; bottom: -150px; width: 300px; height: 300px;
+    border-radius: 50%; border: 40px solid rgba(201,162,39,.10); }
+  body.admin .login-sisi img { width: 64px; height: 64px; object-fit: contain; margin-bottom: 10px; }
+  body.admin .login-sisi b { font-size: 28px; font-weight: 800; letter-spacing: -.02em; }
+  body.admin .login-sisi > span { color: #B9C0DA; line-height: 1.55; font-size: 14px; }
+  body.admin .login-sisi ul { list-style: none; margin: 22px 0 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+  body.admin .login-sisi li { display: flex; gap: 10px; align-items: flex-start; font-size: 13.5px; color: #DCE0EE; line-height: 1.45; }
+  body.admin .login-sisi li::before { content: ''; flex: none; width: 8px; height: 8px; margin-top: 6px; border-radius: 50%;
+    background: var(--gold); box-shadow: 0 0 0 4px rgba(201,162,39,.18); }
+  body.admin .login-panel { border-radius: 0 28px 28px 0; min-height: 520px; margin: 0; display: flex; flex-direction: column;
+    justify-content: center; padding: 44px 40px; text-align: left; }
+  body.admin .login-panel .login-logo { display: none; }
+  body.admin .login-panel h1 { font-size: 26px; }
+  body.admin .login-panel > .muted { margin-top: 4px; margin-bottom: 18px; }
+}
+
+/* ---------- bilah samping */
+@media (min-width: 1024px) {
+  body.admin header { padding: 22px 14px 16px; background: #0B1430;
+    background-image: linear-gradient(180deg, rgba(26,40,86,.55), transparent 55%),
+      radial-gradient(120% 30% at 0% 0%, rgba(201,162,39,.10), transparent 70%);
+    scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.15) transparent; }
+  body.admin header h1 { font-size: 15px; }
+  body.admin header h1::after { content: 'Kantin non-tunai'; display: block; margin-top: 1px;
+    font-size: 11.5px; font-weight: 600; color: #8C94B3; letter-spacing: .01em; }
+  body.admin nav { margin: 26px 0 16px; }
+  body.admin .hd-user { display: flex; align-items: center; gap: 10px; padding: 10px 12px; font-size: 12px; color: #C5CBE0;
+    border: 1px solid rgba(255,255,255,.07); background: rgba(255,255,255,.035); }
+  body.admin .hd-user::before { content: ''; flex: none; width: 30px; height: 30px; border-radius: 10px;
+    background: var(--gold-soft) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%237A5E0C' stroke-width='1.8' stroke-linecap='round'%3E%3Ccircle cx='12' cy='8.5' r='3.5'/%3E%3Cpath d='M5 20c1-3.6 3.7-5.5 7-5.5s6 1.9 7 5.5'/%3E%3C/svg%3E") center / 18px no-repeat; }
+  body.admin #btn-logout { background: transparent; border-color: rgba(255,255,255,.12); color: #C5CBE0; }
+  body.admin #btn-logout:hover { background: rgba(180,35,63,.18); border-color: rgba(180,35,63,.45); color: #fff; }
+}
+body.admin nav button { color: #B7BED6; font-weight: 600; }
+body.admin nav button.active { background: linear-gradient(90deg, rgba(201,162,39,.16), rgba(201,162,39,.04));
+  box-shadow: none; color: #fff; }
+body.admin nav button.active::after { content: ''; margin-left: auto; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--gold); flex: none; }
+body.admin nav button.active:has(.navbadge)::after { display: none; }
+body.admin .nav-induk { color: #6E779A; padding-top: 20px; }
+
+/* ---------- kepala halaman */
+body.admin .kepala-halaman { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px;
+  padding: 28px 32px 0; }
+body.admin .kepala-halaman.hidden { display: none !important; }
+body.admin #kh-grup { display: block; font-size: 11px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--gold-ink); margin-bottom: 4px; min-height: 14px; }
+body.admin #kh-judul { font-size: 28px; font-weight: 800; letter-spacing: -.025em; margin: 0; color: var(--ink); }
+body.admin #kh-tanggal { font-size: 13px; font-weight: 600; color: var(--muted); padding: 8px 14px; border: 1px solid var(--line);
+  border-radius: 99px; background: #fff; white-space: nowrap; }
+@media (min-width: 1024px) {
+  body.admin .kepala-halaman { margin-left: var(--sisi); }
+  body.admin .kepala-halaman + main { padding-top: 20px; }
+}
+@media (max-width: 1023px) {
+  body.admin .kepala-halaman { padding: 20px 18px 0; }
+  body.admin .kepala-halaman + main { margin-top: 14px; }
+  body.admin #kh-judul { font-size: 23px; }
+}
+@media (max-width: 600px) {
+  body.admin .kepala-halaman { padding: 16px 12px 0; }
+  body.admin #kh-tanggal { display: none; }
+  body.admin #kh-judul { font-size: 21px; }
+}
+
+/* ---------- panel & kartu */
+body.admin .panel { border-radius: 20px; padding: 22px 24px; border-color: #E9E5DB; }
+body.admin .panel > h2:first-child, body.admin .panel > .kat-head:first-child h2 { font-size: 16.5px; }
+body.admin .panel > p.muted { line-height: 1.6; }
+@media (max-width: 600px) { body.admin .panel { padding: 16px; border-radius: 16px; } }
+
+body.admin .statcard { border-radius: 18px; padding: 18px 18px 16px; }
+body.admin .statcard::before { display: none; }
+body.admin .statcard .muted { display: block; font-size: 12.5px; font-weight: 600; color: var(--muted); }
+body.admin .statcard b { font-size: 24px; margin: 8px 0 2px; }
+body.admin .statcard:hover { border-color: #DCD5C5; }
+
+/* ---------- tabel */
+body.admin .tblwrap { border: 1px solid var(--line-2); border-radius: 14px; }
+body.admin th { background: #FAF8F3; padding: 11px 14px; border-bottom: 1px solid var(--line); }
+body.admin td { padding: 12px 14px; }
+body.admin thead tr:first-child th:first-child { border-top-left-radius: 13px; }
+body.admin thead tr:first-child th:last-child { border-top-right-radius: 13px; }
+body.admin tbody tr:hover > td { background: #FCFBF7; }
+
+/* ---------- tombol & isian */
+body.admin .savebtn, body.admin button.go, body.admin .filterbar button.go, body.admin .modal .actions button.primary,
+body.admin .primary-btn { background: linear-gradient(180deg, #22326A, #1A2856); border-color: #1A2856;
+  box-shadow: 0 1px 0 rgba(255,255,255,.12) inset, 0 6px 14px -8px rgba(17,29,66,.6); }
+body.admin .savebtn:hover, body.admin button.go:hover, body.admin .modal .actions button.primary:hover,
+body.admin .primary-btn:hover { background: linear-gradient(180deg, #1A2856, #111D42); }
+body.admin .quick button.sel { background: var(--navy); }
+body.admin input, body.admin select, body.admin textarea { border-color: #DDD7CA; background: #FFFEFC; }
+body.admin input:hover:not(:focus):not(:disabled), body.admin select:hover:not(:focus):not(:disabled) { border-color: #CBC3B2; }
+body.admin .linkbtn:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+/* ---------- modal */
+body.admin .modal-bg { background: rgba(11,20,48,.48); }
+body.admin .modal { border-radius: 22px; padding: 24px 24px 20px; }
+/* Kotak masuk tidak ikut aturan jarak kartu umum di atas. */
+body.admin #login .login-panel { padding: 30px 26px 26px; margin: 0; border: 0; }
+@media (min-width: 900px) { body.admin #login .login-panel { padding: 44px 42px; } }

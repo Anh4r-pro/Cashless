@@ -23,6 +23,18 @@
 
 <!-- ============================================================ LOGIN -->
 <div id="login" class="hidden">
+  <!-- Sisi identitas: hanya tampil di layar lebar (admin.css). Murni hiasan —
+       formulirnya tetap di .login-panel dengan ID yang sama. -->
+  <div class="login-sisi" aria-hidden="true">
+    <img src="/img/logo-imbos.png" alt="">
+    <b>Kantin Imbos</b>
+    <span>Sistem kantin non-tunai<br>Insan Mulia Boarding School Pringsewu</span>
+    <ul>
+      <li>Transaksi kartu santri tanpa uang tunai</li>
+      <li>Saldo, top up, dan neraca kas dalam satu tempat</li>
+      <li>Wali santri memantau dari portal sendiri</li>
+    </ul>
+  </div>
   <div class="panel login-panel">
     <img src="/img/logo-imbos.png" alt="Logo IMBOS" class="login-logo">
     <h1>Kantin Imbos</h1>
@@ -57,6 +69,11 @@
   <button id="hd-suara" class="hd-suara hidden" type="button" aria-pressed="true"></button>
   <button id="btn-logout">Keluar</button>
 </header>
+<!-- Kepala halaman: kelompok, judul, dan tanggal — diisi gambarKepala() di app.js. -->
+<div id="kepala-halaman" class="kepala-halaman hidden">
+  <div><span id="kh-grup"></span><h2 id="kh-judul"></h2></div>
+  <span id="kh-tanggal"></span>
+</div>
 <main id="main"></main>
 <footer class="muted">Kantin Imbos · Insan Mulia Boarding School Pringsewu</footer>
 </div>

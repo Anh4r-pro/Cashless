@@ -348,9 +348,35 @@ addEventListener('hashchange', () => {
   renderView(h);
 });
 
+/**
+ * Kepala halaman: "KELOMPOK / Judul" dan tanggal hari ini (WIB). Murni rupa —
+ * diturunkan dari daftar menu yang sama dengan bilah samping, jadi tidak ada
+ * nama halaman yang ditulis dua kali. Layar kasir tidak memakainya: di sana
+ * setiap piksel tinggi layar lebih berguna untuk daftar menu.
+ */
+const NAMA_HARI = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
+const NAMA_BULAN = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus',
+  'September', 'Oktober', 'November', 'Desember'];
+function gambarKepala(name) {
+  const kotak = $('#kepala-halaman');
+  if (!kotak) return;
+  let grup = '', judul = '';
+  for (const t of tabTampil(USER?.role)) {
+    const cocok = t.grup ? t.anak.find(([id]) => id === name) : (t[0] === name ? t : null);
+    if (cocok) { grup = t.grup || ''; judul = cocok[1]; break; }
+  }
+  kotak.classList.toggle('hidden', !judul || name === 'kasir');
+  $('#kh-grup').textContent = grup;
+  $('#kh-judul').textContent = judul;
+  const d = new Date(Date.now() + 7 * 3600 * 1000);
+  $('#kh-tanggal').textContent =
+    `${NAMA_HARI[d.getUTCDay()]}, ${d.getUTCDate()} ${NAMA_BULAN[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
+
 function renderView(name) {
   activeView = name;
   cardHandler = null;
+  gambarKepala(name);
   if (!name) {
     $('#main').innerHTML = `<div class="panel"><h2>Belum ada menu yang terbuka</h2>
       <p class="muted">Kategori akses <b>${esc(USER?.kategori_nama || '—')}</b> belum diberi satu pun
