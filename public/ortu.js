@@ -13,6 +13,24 @@ const digit = (s) => String(s || '').replace(/\D/g, '');
 
 const state = { hari: 30, tipe: '', page: 1 };
 
+// Palet grafik disetel ke warna portal (navy & emas redam). VIZ milik
+// charts.js dipakai bersama layar admin, jadi hanya DIUBAH DI HALAMAN INI —
+// berkas ini tidak pernah dimuat di layar admin.
+Object.assign(VIZ, { s1: '#1A2856', s2: '#C9A227', s3: '#0F7A5F',
+  grid: '#F0EDE5', axis: '#D9D3C3', ink: '#141B2D', muted: '#6E7489' });
+VIZ.kategori = ['#1A2856', '#C9A227', '#0F7A5F', '#5B45B8', '#B4233F', '#26366B'];
+
+/** Ikon garis kecil untuk daftar transaksi — satu jenis, satu bentuk. */
+const IKON = {
+  beli: '<path d="M4 9.5 5.5 4h13L20 9.5"/><path d="M4 9.5a2.7 2.7 0 0 0 5.3 0 2.7 2.7 0 0 0 5.4 0 2.7 2.7 0 0 0 5.3 0"/><path d="M5 12v8h14v-8"/>',
+  masuk: '<path d="M12 5v14M5 12h14"/>',
+  keluar: '<path d="M5 12h14"/>',
+  donasi: '<path d="M12 20s-7.5-4.5-7.5-10A4.3 4.3 0 0 1 12 7.3 4.3 4.3 0 0 1 19.5 10c0 5.5-7.5 10-7.5 10z"/>',
+  kirim: '<path d="M21 3 10 14M21 3l-7 18-4-7-7-4z"/>',
+  admin: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>',
+};
+const ikon = (k) => `<svg class="i" viewBox="0 0 24 24">${IKON[k] || IKON.masuk}</svg>`;
+
 // Apakah kunci ketiga (4 digit HP) sedang diminta sekolah. Dijawab server lewat
 // /api/ortu/me, bukan ditanam di halaman: sekolah bisa mengubahnya kapan saja
 // dan wali tidak perlu menunggu halaman ini dipasang ulang.
@@ -138,10 +156,10 @@ async function mulaiApp() {
  */
 function pasangAvatar(wadah, s) {
   const ini = String(s.nama || '?').split(/\s+/).slice(0, 2).map((w) => w[0] || '').join('').toUpperCase();
-  wadah.innerHTML = `<div class="avatar big">${esc(ini)}</div>`;
+  wadah.innerHTML = `<div class="avatar">${esc(ini)}</div>`;
   if (!s.foto) return;
   const img = new Image();
-  img.onload = () => { img.className = 'avatar big'; img.alt = ''; wadah.replaceChildren(img); };
+  img.onload = () => { img.className = 'avatar'; img.alt = ''; wadah.replaceChildren(img); };
   img.src = '/uploads/' + encodeURIComponent(s.foto);
 }
 
@@ -226,11 +244,16 @@ async function muatTransaksi() {
     `${d.total.toLocaleString('id-ID')} transaksi · masuk ${rp(d.total_masuk)} · keluar ${rp(d.total_keluar)}`;
 
   const LABEL = { beli: 'Jajan', topup: 'Isi saldo', koreksi: 'Penyesuaian', donasi: 'Donasi',
-    transfer_keluar: 'Kirim ke teman', transfer_masuk: 'Terima dari teman' };
+    transfer_keluar: 'Kirim ke teman', transfer_masuk: 'Terima dari teman', biaya_admin: 'Biaya admin' };
+  // [kelas warna, ikon] per jenis. Warna sendiri tidak pernah jadi satu-satunya
+  // penanda: tanda +/− dan labelnya tetap tertulis di sebelahnya.
+  const RUPA = { beli: ['beli', 'beli'], donasi: ['donasi', 'donasi'], transfer_keluar: ['keluar', 'kirim'],
+    transfer_masuk: ['masuk', 'kirim'], biaya_admin: ['keluar', 'admin'] };
   $('#o-tx').innerHTML = d.transaksi.map((t) => {
     const masuk = t.jumlah > 0;
+    const [kelas, bentuk] = RUPA[t.tipe] || (masuk ? ['masuk', 'masuk'] : ['keluar', 'keluar']);
     return `<div class="o-tx">
-      <div class="o-tx-ikon ${masuk ? 'plus' : 'minus'}">${masuk ? '+' : '−'}</div>
+      <div class="o-tx-ikon ${kelas}">${ikon(bentuk)}</div>
       <div class="o-tx-isi">
         <b>${esc(LABEL[t.tipe] || t.tipe)}${t.tenant_nama ? ' · ' + esc(t.tenant_nama) : ''}</b>
         <span class="muted">${esc(waktuWib(t.created_at))}</span>
@@ -301,6 +324,7 @@ async function siapkanTombolTopup() {
     return;                                   // gagal memuat → tombol tetap tersembunyi
   }
   $('#o-topup').classList.toggle('hidden', !topupInfo.aktif);
+  $('#o-tab-topup').classList.toggle('hidden', !topupInfo.aktif);
 }
 
 async function mulaiTopup() {
@@ -311,6 +335,7 @@ async function mulaiTopup() {
   }
   if (!topupInfo.aktif) {
     $('#o-topup').classList.add('hidden');
+    $('#o-tab-topup').classList.add('hidden');
     return toast(topupInfo.ditutup
       ? 'Pengajuan isi saldo sedang ditutup sekolah.'
       : 'Sekolah belum mengisi data pembayaran. Hubungi admin kantin.', 'err');
@@ -324,10 +349,11 @@ function langkahMetode() {
   topupBukti = null;
   const pilihan = topupInfo.metode.map((m) => `
     <button class="o-metode" data-kode="${esc(m.kode)}">
-      <b>${esc(m.nama)}</b>
+      <span class="o-metode-lg">${m.kode === 'qris' ? 'QRIS' : 'BANK'}</span>
+      <span><b>${esc(m.nama)}</b>
       <span class="muted">${m.kode === 'qris'
         ? 'Scan kode QRIS sekolah dari aplikasi bank atau e-wallet'
-        : `Transfer ke rekening ${esc(m.bank)} milik sekolah`}</span>
+        : `Transfer ke rekening ${esc(m.bank)} milik sekolah`}</span></span>
     </button>`).join('');
 
   bukaModal(`
@@ -400,6 +426,7 @@ function langkahKonfirmasi() {
     <div class="field"><label>Nominal yang dibayar</label>
       ${inputUang({ id: 'o-tp-jumlah', placeholder: 'contoh: 50.000' })}
       <span class="muted hint">Antara ${rp(topupInfo.min)} dan ${rp(topupInfo.maks)}</span></div>
+    ${topupInfo.biaya_admin > 0 ? '<div class="o-rincian" id="o-tp-rincian"></div>' : ''}
     <div class="field"><label>Metode pembayaran</label>
       <input value="${esc(m.nama)}" disabled></div>
     <div class="field"><label>Tanggal pembayaran</label>
@@ -480,13 +507,11 @@ function langkahKonfirmasi() {
       const el = $('#o-tp-rincian');
       if (!el) return;
       const bayar = nilaiUang('#o-tp-jumlah') ?? 0;
-      if (!bayar) {
-        el.textContent = `Biaya admin ${rp(topupInfo.biaya_admin)} per pengajuan.`;
-        return;
-      }
       const masuk = Math.max(0, bayar - topupInfo.biaya_admin);
-      el.innerHTML = `Bayar <b>${rp(bayar)}</b> − biaya admin
-        <b>${rp(topupInfo.biaya_admin)}</b> → masuk ke kartu <b>${rp(masuk)}</b>`;
+      el.innerHTML = `
+        <div><span>Nominal dibayar</span><b>${bayar ? rp(bayar) : '—'}</b></div>
+        <div><span>Biaya admin</span><span>${rp(topupInfo.biaya_admin)}</span></div>
+        <div><span>Masuk ke kartu</span><b class="plus">${bayar ? rp(masuk) : '—'}</b></div>`;
     };
     $('#o-tp-jumlah').addEventListener('input', gambarRincian);
     gambarRincian();
@@ -564,6 +589,29 @@ async function muatPengajuan() {
 function pilihGrup(wadah, tombol, jalankan) {
   wadah.querySelectorAll('button').forEach((b) => b.classList.toggle('sel', b === tombol));
   jalankan();
+}
+
+/*
+ * Aksi cepat dan menu bawah hanya MENGGULIR ke bagian yang sudah ada di
+ * halaman — tidak ada layar kedua yang harus dimuat. Sorotan menu bawah
+ * mengikuti bagian yang sedang terlihat, supaya wali tahu posisinya.
+ */
+document.querySelectorAll('[data-ke]').forEach((b) => {
+  b.onclick = () => {
+    const tujuan = document.getElementById(b.dataset.ke);
+    if (tujuan) tujuan.scrollIntoView({ block: 'start' });
+  };
+});
+$('#o-tab-topup').onclick = () => mulaiTopup();
+if ('IntersectionObserver' in window) {
+  const tab = [...document.querySelectorAll('.o-tabbar [data-ke]')];
+  const tampak = new Map();
+  const io = new IntersectionObserver((isi) => {
+    isi.forEach((x) => tampak.set(x.target.id, x.isIntersecting));
+    const aktif = tab.map((b) => b.dataset.ke).reverse().find((id) => tampak.get(id)) || 'o-atas';
+    tab.forEach((b) => b.classList.toggle('on', b.dataset.ke === aktif));
+  }, { rootMargin: '-35% 0px -55% 0px' });
+  tab.forEach((b) => { const t = document.getElementById(b.dataset.ke); if (t) io.observe(t); });
 }
 
 $('#o-masuk').onclick = masuk;
