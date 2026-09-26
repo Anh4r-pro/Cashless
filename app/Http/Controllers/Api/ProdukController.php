@@ -8,6 +8,8 @@ use App\Models\ProdukAjuan;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Services\FormAjuan;
+use App\Services\ImporMenu;
+use App\Services\ImporTopup;
 use App\Services\Pengaturan;
 use App\Services\Rupiah;
 use App\Support\WaktuIso;
@@ -39,8 +41,9 @@ class ProdukController extends Controller
             : Produk::orderBy('tenant_id')->orderBy('nama')->get();
 
         // Halaman kasir perlu tahu jenis tenantnya untuk memutuskan apakah
-        // pilihan kategori pada input manual boleh ditampilkan.
-        $tenant = $tid ? Tenant::select('id', 'nama', 'jenis', 'status')->find($tid) : null;
+        // pilihan kategori pada input manual boleh ditampilkan, dan mode
+        // kasirnya untuk memutuskan apakah daftar menu ditampilkan sama sekali.
+        $tenant = $tid ? Tenant::select('id', 'nama', 'jenis', 'status', 'mode_kasir')->find($tid) : null;
 
         return response()->json(['produk' => $rows, 'tenant' => $tenant]);
     }
@@ -145,6 +148,187 @@ class ProdukController extends Controller
             'jenis' => 'hapus', 'produkId' => $pr->id,
             'namaLama' => $pr->nama, 'hargaLama' => (int) $pr->harga,
         ])]);
+    }
+
+    // ------------------------------------------------ tenant mengusulkan lewat Excel
+
+    public function templateImpor(Request $r)
+    {
+        $u = $this->wajibPeran($r, 'tenant');
+        $t = $this->tenantHarusAktif($u->tenant_id);
+        $stamp = date('Y-m-d');
+
+        return response(ImporMenu::template($t), 200, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition' => "attachment; filename=\"template-pengajuan-barang-{$stamp}.xlsx\"",
+        ]);
+    }
+
+    /** Langkah 1: pratinjau — belum ada ajuan yang dibuat. */
+    public function pratinjauImpor(Request $r)
+    {
+        $u = $this->wajibPeran($r, 'tenant');
+        $t = $this->tenantHarusAktif($u->tenant_id);
+        ['isi' => $isi, 'nama' => $nama] = ImporTopup::berkasDariBody($r->all());
+
+        return response()->json(array_merge(
+            ['ok' => true, 'nama_berkas' => $nama, 'sidik' => ImporTopup::sidik($isi),
+                'koperasi' => $t->jenis === 'koperasi'],
+            ImporMenu::urai($isi, $nama, $t),
+        ));
+    }
+
+    /**
+     * Langkah 2: kirim. Baris yang siap menjadi ajuan 'baru' dalam satu paket;
+     * baris yang gagal tidak dikirim sama sekali.
+     */
+    public function terapkanImpor(Request $r)
+    {
+        $u = $this->wajibPeran($r, 'tenant');
+        $t = $this->tenantHarusAktif($u->tenant_id);
+        ['isi' => $isi, 'nama' => $nama] = ImporTopup::berkasDariBody($r->all());
+
+        $paket = trim((string) $r->input('paket', ''));
+        if (! preg_match('/^[A-Za-z0-9-]{6,40}$/', $paket)) {
+            throw new ApiError(400, 'Kode paket tidak valid');
+        }
+        if ($r->input('sidik') && (string) $r->input('sidik') !== ImporTopup::sidik($isi)) {
+            throw new ApiError(409, 'Berkas berubah sejak dipratinjau — ulangi pratinjau dulu');
+        }
+        // Klik ganda / koneksi putus: paket yang sama tidak dibuat dua kali.
+        $lama = ProdukAjuan::where('paket', $paket)->where('tenant_id', $t->id)->count();
+        if ($lama > 0) {
+            return response()->json(['ok' => true, 'duplikat' => true, 'paket' => $paket, 'n' => $lama]);
+        }
+
+        $urai = ImporMenu::urai($isi, $nama, $t);
+        $siap = array_values(array_filter($urai['baris'], fn ($x) => $x['status'] === 'siap'));
+        if (! $siap) {
+            throw new ApiError(400, 'Tidak ada barang yang siap diajukan — perbaiki berkasnya dulu');
+        }
+        // Satu berkas dihitung satu antrean (lihat hitungAntrean).
+        $this->tolakAjuanGanda($t->id, null);
+
+        DB::transaction(function () use ($siap, $u, $paket) {
+            foreach ($siap as $b) {
+                $this->buatAjuan($u, [
+                    'jenis' => 'baru', 'nama' => $b['nama'], 'harga' => $b['harga'],
+                    'paket' => $paket, 'kategoriUsulan' => $b['kategori'],
+                ]);
+            }
+        });
+
+        return response()->json(['ok' => true, 'paket' => $paket, 'n' => count($siap),
+            'n_dilewati' => count($urai['baris']) - count($siap)]);
+    }
+
+    // ------------------------------------------------ admin: putusan per paket
+
+    /** Paket impor yang masih punya ajuan menunggu. */
+    public function daftarPaket(Request $r)
+    {
+        $this->wajibPeran($r, 'superadmin');
+        $rows = ProdukAjuan::query()
+            ->join('tenant', 'tenant.id', '=', 'produk_ajuan.tenant_id')
+            ->whereNotNull('produk_ajuan.paket')->where('produk_ajuan.status', 'menunggu')
+            ->groupBy('produk_ajuan.paket', 'produk_ajuan.tenant_id', 'tenant.nama', 'tenant.jenis')
+            ->selectRaw('produk_ajuan.paket, produk_ajuan.tenant_id, tenant.nama AS tenant_nama, tenant.jenis AS tenant_jenis')
+            ->selectRaw('COUNT(*) AS n, MIN(produk_ajuan.created_at) AS created_at, MAX(produk_ajuan.pengaju) AS pengaju')
+            ->selectRaw("SUM(CASE WHEN produk_ajuan.kategori_usulan = 'non_makanan' THEN 1 ELSE 0 END) AS n_non_makanan")
+            ->orderBy('created_at')->get();
+
+        return response()->json(['paket' => $rows]);
+    }
+
+    /** Seluruh isi satu paket — tanpa batas 200 baris milik daftar ajuan biasa. */
+    public function isiPaket(Request $r, string $paket)
+    {
+        $this->wajibPeran($r, 'superadmin');
+        $rows = ProdukAjuan::where('paket', $paket)->orderBy('id')->get();
+        if ($rows->isEmpty()) {
+            throw new ApiError(404, 'Paket tidak ditemukan');
+        }
+        $t = Tenant::find($rows->first()->tenant_id);
+
+        return response()->json(['paket' => $paket, 'tenant' => $t?->only(['id', 'nama', 'jenis']), 'ajuan' => $rows]);
+    }
+
+    /**
+     * Setujui sebagian atau seluruh isi paket dalam sekali tekan.
+     *
+     * body: ids = ajuan yang disetujui (kosong = semua yang menunggu),
+     *       kategori = {id: 'makanan'|'non_makanan'} — keputusan admin; yang
+     *       tidak disebut memakai usulan tenant.
+     * Ajuan yang namanya keburu dipakai menu lain tidak menggagalkan seluruh
+     * paket: ia ditolak sendiri dengan alasan yang jelas.
+     */
+    public function setujuiPaket(Request $r, string $paket)
+    {
+        $u = $this->wajibPeran($r, 'superadmin');
+        $ids = array_map('intval', (array) $r->input('ids', []));
+        $kat = (array) $r->input('kategori', []);
+        $catatan = mb_substr(trim((string) $r->input('catatan', '')), 0, 300);
+
+        $hasil = DB::transaction(function () use ($paket, $ids, $kat, $catatan, $u) {
+            $q = ProdukAjuan::where('paket', $paket)->where('status', 'menunggu')->lockForUpdate();
+            if ($ids) {
+                $q->whereIn('id', $ids);
+            }
+            $rows = $q->orderBy('id')->get();
+            if ($rows->isEmpty()) {
+                throw new ApiError(409, 'Tidak ada ajuan menunggu dalam paket ini');
+            }
+            $t = Tenant::find($rows->first()->tenant_id);
+            $koperasi = $t?->jenis === 'koperasi';
+            $sekarang = WaktuIso::sekarang();
+            $n = 0;
+            $kembar = [];
+
+            foreach ($rows as $a) {
+                $ada = Produk::where('tenant_id', $a->tenant_id)
+                    ->whereRaw('lower(nama) = lower(?)', [$a->nama])->exists();
+                if ($ada) {
+                    $a->update(['status' => 'ditolak', 'catatan' => 'Nama sudah ada di daftar menu',
+                        'penilai' => $u->nama, 'decided_at' => $sekarang]);
+                    $kembar[] = $a->nama;
+
+                    continue;
+                }
+                $minta = $kat[$a->id] ?? $kat[(string) $a->id] ?? $a->kategori_usulan;
+                $kategori = ($minta === 'non_makanan' && $koperasi) ? 'non_makanan' : 'makanan';
+                $pr = Produk::create([
+                    'tenant_id' => $a->tenant_id, 'nama' => $a->nama,
+                    'harga' => $a->harga, 'kategori' => $kategori,
+                ]);
+                $a->update(['produk_id' => $pr->id, 'status' => 'disetujui', 'catatan' => $catatan,
+                    'penilai' => $u->nama, 'decided_at' => $sekarang]);
+                $n++;
+            }
+
+            return ['n_disetujui' => $n, 'n_kembar' => count($kembar), 'kembar' => $kembar];
+        });
+
+        return response()->json(array_merge(['ok' => true,
+            'sisa' => ProdukAjuan::where('paket', $paket)->where('status', 'menunggu')->count()], $hasil));
+    }
+
+    /** Tolak seluruh ajuan yang masih menunggu dalam paket. */
+    public function tolakPaket(Request $r, string $paket)
+    {
+        $u = $this->wajibPeran($r, 'superadmin');
+        $catatan = trim((string) $r->input('catatan', ''));
+        if ($catatan === '') {
+            throw new ApiError(400, 'Alasan penolakan wajib diisi');
+        }
+        $n = ProdukAjuan::where('paket', $paket)->where('status', 'menunggu')->update([
+            'status' => 'ditolak', 'catatan' => mb_substr($catatan, 0, 300),
+            'penilai' => $u->nama, 'decided_at' => WaktuIso::sekarang(),
+        ]);
+        if ($n === 0) {
+            throw new ApiError(409, 'Tidak ada ajuan menunggu dalam paket ini');
+        }
+
+        return response()->json(['ok' => true, 'n_ditolak' => $n]);
     }
 
     // ------------------------------------------------ daftar & putusan
@@ -391,10 +575,24 @@ class ProdukController extends Controller
         if ($produkId && ProdukAjuan::where('produk_id', $produkId)->where('status', 'menunggu')->exists()) {
             throw new ApiError(409, 'Menu ini masih punya pengajuan yang menunggu putusan admin');
         }
-        $n = ProdukAjuan::where('tenant_id', $tenantId)->where('status', 'menunggu')->count();
+        $n = self::hitungAntrean($tenantId);
         if ($n >= self::MAKS_AJUAN_MENUNGGU) {
             throw new ApiError(429, "Sudah ada {$n} pengajuan menunggu — tunggu putusan admin dulu");
         }
+    }
+
+    /**
+     * Banyaknya antrean menunggu milik satu tenant. Satu berkas impor dihitung
+     * SATU, berapa pun barangnya — kalau tidak, rem anti-banjir akan menolak
+     * setiap berkas koperasi yang barangnya lebih dari dua puluh.
+     */
+    private static function hitungAntrean(int $tenantId): int
+    {
+        $q = ProdukAjuan::where('tenant_id', $tenantId)->where('status', 'menunggu');
+        $lepas = (clone $q)->whereNull('paket')->count();
+        $paket = (clone $q)->whereNotNull('paket')->distinct()->count('paket');
+
+        return $lepas + $paket;
     }
 
     private function periksaNamaHarga($namaRaw, $hargaRaw): array
@@ -451,6 +649,8 @@ class ProdukController extends Controller
             'tenant_id' => $u->tenant_id,
             'produk_id' => $x['produkId'] ?? null,
             'jenis' => $x['jenis'],
+            'paket' => $x['paket'] ?? null,
+            'kategori_usulan' => $x['kategoriUsulan'] ?? null,
             'nama' => $x['nama'] ?? '',
             'harga' => $x['harga'] ?? null,
             'nama_lama' => $x['namaLama'] ?? '',

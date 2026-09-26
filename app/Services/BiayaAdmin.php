@@ -21,9 +21,11 @@ use App\Models\Transaksi;
  * langsung memungut uang dari mereka tanpa keputusan terpisah. Sakelar yang
  * mati sejak lahir membuat golongan mana pun aman sampai dicentang dengan sadar.
  *
- * Hanya jalur portal wali yang dipungut. Top up massal dari Excel, top up
- * manual admin di loket, isi ulang otomatis dari titipan, dan transfer antar
- * teman tidak — tiga yang terakhir bahkan bukan uang baru.
+ * Jalur portal wali dipungut otomatis menurut lapisan di atas. Top up manual
+ * admin di loket dan top up massal dari Excel TIDAK dipungut, kecuali admin
+ * memilih "biaya admin" pada top up itu (lihat untukManual). Isi ulang otomatis
+ * dari titipan dan transfer antar teman tidak pernah dipungut — keduanya
+ * bahkan bukan uang baru.
  */
 class BiayaAdmin
 {
@@ -67,6 +69,29 @@ class BiayaAdmin
         $g = Pengaturan::golongan($s->golongan);
 
         return ($g && (int) $g->biaya_admin_kena === 1) ? self::tarifSekolah() : 0;
+    }
+
+    /**
+     * Tarif untuk top up manual/massal yang DIPILIH admin sebagai "biaya admin".
+     *
+     * Berbeda dari portal wali, sakelar golongan tidak ikut menentukan: admin
+     * sudah memutuskan memungut dengan memilih opsinya, dan sakelar golongan
+     * yang mati sejak lahir akan membuat pilihan itu diam-diam bernilai Rp0.
+     * Penimpa per santri tetap menang — santri yang dibebaskan (0) tetap bebas.
+     */
+    public static function tarifManual(?Siswa $s): int
+    {
+        if ($s && $s->biaya_admin !== null) {
+            return max(0, (int) $s->biaya_admin);
+        }
+
+        return self::tarifSekolah();
+    }
+
+    /** Biaya top up manual, tidak pernah melebihi nominal yang disetor. */
+    public static function untukManual(?Siswa $s, int $jumlah): int
+    {
+        return min(self::tarifManual($s), max(0, $jumlah));
     }
 
     /**

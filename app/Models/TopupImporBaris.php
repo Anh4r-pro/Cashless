@@ -20,6 +20,7 @@ class TopupImporBaris extends Model
         'nis',
         'nama',
         'jumlah',
+        'biaya',
         'ke_saldo',
         'ke_titipan',
         'metode',
@@ -31,6 +32,7 @@ class TopupImporBaris extends Model
     protected $casts = [
             'baris' => 'int',
             'jumlah' => 'int',
+            'biaya' => 'int',
             'ke_saldo' => 'int',
             'ke_titipan' => 'int',
     ];

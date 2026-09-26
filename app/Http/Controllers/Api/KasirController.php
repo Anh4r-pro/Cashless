@@ -210,6 +210,11 @@ class KasirController extends Controller
         if ($tenant->jenis === 'koperasi' && ($cfg['nonmakanan_aktif'] ?? 0) === 1) {
             throw new ApiError(400, 'Muat ulang halaman kasir: koperasi harus mengirim rincian barang');
         }
+        // Mode bebas mewajibkan deskripsi per barang; jalur lama yang hanya
+        // membawa nominal total tidak punya tempat untuk itu.
+        if (($tenant->mode_kasir ?? 'menu') === 'bebas') {
+            throw new ApiError(400, 'Muat ulang halaman kasir: mode tanpa menu harus mengirim rincian barang');
+        }
         $jumlah = (int) floor((float) $r->input('jumlah'));
         if ($jumlah <= 0) {
             throw new ApiError(400, 'Nominal tidak valid');

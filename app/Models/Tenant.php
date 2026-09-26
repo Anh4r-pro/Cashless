@@ -21,6 +21,7 @@ class Tenant extends Model
         'pemilik',
         'status',
         'jenis',
+        'mode_kasir',
         'created_at',
     ];
 

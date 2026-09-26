@@ -87,12 +87,76 @@ function rapikanUang(el) {
   el.setSelectionRange(pos, pos);
 }
 
+/**
+ * Isian berisi DAFTAR nominal (mis. pilihan donasi): "2.000 / 5.000 / 10.000".
+ *
+ * Pemisahnya garis miring, bukan koma: begitu titik dipakai sebagai pemisah
+ * ribuan, koma dalam kebiasaan Indonesia terbaca sebagai desimal — "2.000, 5.000"
+ * mudah disangka dua koma lima. Koma, titik koma, dan spasi tetap DITERIMA saat
+ * dibaca, supaya kebiasaan lama ("2000, 5000") tidak tiba-tiba ditolak.
+ *
+ * Sambil diketik hanya titik ribuan yang disentuh; pemisah dibiarkan persis
+ * seperti yang diketik. Kalau pemisahnya ikut dirapikan saat mengetik, spasi di
+ * sekitar "/" yang dihapus dengan backspace akan langsung muncul lagi dan
+ * kursornya tidak pernah bisa maju. Pemisah baru diseragamkan saat kotak
+ * ditinggalkan.
+ */
+const UANG_PEMISAH_DAFTAR = /[\/,;\s]+/;
+
+/** "2000, 5.000 /10000" → [2000, 5000, 10000]. Potongan tanpa angka dilewati. */
+function daftarUang(teks) {
+  return String(teks ?? '').split(UANG_PEMISAH_DAFTAR)
+    .map(digitUang).filter((d) => d !== '').map(Number);
+}
+
+/** [2000, 5000] → '2.000 / 5.000'. Teks juga diterima. */
+function teksDaftarUang(nilai) {
+  const arr = Array.isArray(nilai) ? nilai : daftarUang(nilai);
+  return arr.map(teksUang).filter(Boolean).join(' / ');
+}
+
+function rapikanDaftarUang(el) {
+  const sebelum = el.value;
+  const kursor = el.selectionStart ?? sebelum.length;
+  // Hanya angka, titik, dan pemisah yang boleh tinggal.
+  const saring = (s) => s.replace(/[^\d.\/,;\s]/g, '');
+  // Titik ribuan satu-satunya yang berubah, jadi posisi kursor dihitung dari
+  // banyaknya karakter BUKAN-titik di kirinya — sejalan dengan rapikanUang.
+  const kiri = saring(sebelum.slice(0, kursor)).replace(/\./g, '').length;
+  const teks = saring(sebelum).replace(/[\d.]+/g, (m) => teksUang(m));
+  if (teks === sebelum) return;
+  el.value = teks;
+
+  let n = 0, pos = 0;
+  if (kiri > 0) {
+    pos = teks.length;
+    for (let i = 0; i < teks.length; i++) {
+      if (teks[i] !== '.') n++;
+      if (n === kiri) { pos = i + 1; break; }
+    }
+  }
+  el.setSelectionRange(pos, pos);
+}
+
 // Dipasang sekali sebagai penangkap di tingkat dokumen, bukan per elemen: hampir
 // semua isian di aplikasi ini lahir dari innerHTML modal yang dibuat ulang terus
 // menerus, dan memasang pendengar satu per satu berarti selalu ada yang terlewat.
 document.addEventListener('input', (e) => {
   const t = e.target;
-  if (t && t.tagName === 'INPUT' && t.classList.contains('uang')) rapikanUang(t);
+  if (!t || t.tagName !== 'INPUT') return;
+  if (t.classList.contains('uang')) rapikanUang(t);
+  else if (t.classList.contains('uang-daftar')) rapikanDaftarUang(t);
+});
+// Pemisah diseragamkan saat kotak ditinggalkan. 'blur' tidak menggelembung,
+// jadi yang didengar 'focusout'.
+document.addEventListener('focusout', (e) => {
+  const t = e.target;
+  if (!t || t.tagName !== 'INPUT' || !t.classList.contains('uang-daftar')) return;
+  const rapi = teksDaftarUang(t.value);
+  if (rapi === t.value) return;
+  t.value = rapi;
+  // Pemanggil yang menyimpan nilainya lewat oninput perlu tahu isinya berubah.
+  t.dispatchEvent(new Event('input', { bubbles: true }));
 });
 
 // Nilai yang dipasang program (mis. tombol nominal cepat) juga harus tampil rapi.

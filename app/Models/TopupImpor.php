@@ -21,11 +21,13 @@ class TopupImpor extends Model
         'batch_id',
         'berkas',
         'sidik',
+        'biaya_admin',
         'n_baris',
         'n_berhasil',
         'n_gagal',
         'total_saldo',
         'total_titipan',
+        'total_biaya',
         'operator',
         'created_at',
     ];
@@ -36,6 +38,8 @@ class TopupImpor extends Model
             'n_gagal' => 'int',
             'total_saldo' => 'int',
             'total_titipan' => 'int',
+            'total_biaya' => 'int',
+            'biaya_admin' => 'bool',
     ];
 
     public function baris(): \Illuminate\Database\Eloquent\Relations\HasMany

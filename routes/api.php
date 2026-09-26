@@ -48,6 +48,7 @@ Route::post('beli', [KasirController::class, 'beli'])->middleware('peran:tenant'
 // --- uang masuk & keluar di luar kasir (eksklusif superadmin) --------------
 Route::middleware('peran:superadmin')->group(function () {
     Route::post('topup', [SaldoController::class, 'topup'])->middleware('izin:saldo.topup');
+    Route::get('topup/tarif', [SaldoController::class, 'tarifTopup'])->middleware('izin:saldo.topup');
     Route::post('koreksi', [SaldoController::class, 'koreksi'])->middleware('izin:saldo.koreksi');
     Route::post('koreksi-massal', [SaldoController::class, 'koreksiMassal'])->middleware('izin:saldo.koreksi_massal');
 
@@ -97,12 +98,20 @@ Route::middleware('peran:tenant')->group(function () {
     Route::put('produk/{id}/ketersediaan', [ProdukController::class, 'ketersediaan']);
     Route::delete('produk/{id}', [ProdukController::class, 'destroy']);
     Route::delete('produk/ajuan/{id}', [ProdukController::class, 'batalAjuan']);
+    // Pengajuan barang lewat Excel: template → pratinjau → kirim sebagai satu paket.
+    Route::get('produk/impor/template', [ProdukController::class, 'templateImpor']);
+    Route::post('produk/impor/pratinjau', [ProdukController::class, 'pratinjauImpor']);
+    Route::post('produk/impor/terapkan', [ProdukController::class, 'terapkanImpor']);
 });
 
 Route::middleware('peran:superadmin')->group(function () {
     Route::put('produk/{id}/kategori', [ProdukController::class, 'kategori'])->middleware('izin:produk.kategori');
     Route::post('produk/ajuan/{id}/setujui', [ProdukController::class, 'setujui'])->middleware('izin:ajuan.putuskan');
     Route::post('produk/ajuan/{id}/tolak', [ProdukController::class, 'tolak'])->middleware('izin:ajuan.putuskan');
+    Route::get('produk/ajuan/paket', [ProdukController::class, 'daftarPaket'])->middleware('izin:ajuan.lihat');
+    Route::get('produk/ajuan/paket/{paket}', [ProdukController::class, 'isiPaket'])->middleware('izin:ajuan.lihat');
+    Route::post('produk/ajuan/paket/{paket}/setujui', [ProdukController::class, 'setujuiPaket'])->middleware('izin:ajuan.putuskan');
+    Route::post('produk/ajuan/paket/{paket}/tolak', [ProdukController::class, 'tolakPaket'])->middleware('izin:ajuan.putuskan');
 });
 
 // --- riwayat, ekspor, setoran tenant, dashboard ----------------------------

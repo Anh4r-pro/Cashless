@@ -7,6 +7,7 @@ use App\Models\Produk;
 use App\Models\ProdukAjuan;
 use App\Models\SesiStaf;
 use App\Models\Tenant;
+use App\Services\Keranjang;
 use App\Services\StatistikTenant;
 use App\Models\Transaksi;
 use App\Models\User;
@@ -63,6 +64,7 @@ class TenantController extends Controller
                 'nama' => $nama,
                 'pemilik' => trim((string) $r->input('pemilik', '')),
                 'jenis' => in_array($r->input('jenis'), ['kantin', 'koperasi'], true) ? $r->input('jenis') : 'kantin',
+                'mode_kasir' => in_array($r->input('mode_kasir'), Keranjang::MODE_KASIR, true) ? $r->input('mode_kasir') : 'menu',
             ]);
             User::create([
                 'username' => $username, 'password' => $password,
@@ -93,6 +95,8 @@ class TenantController extends Controller
                 'pemilik' => trim((string) $r->input('pemilik', $t->pemilik)),
                 'status' => in_array($r->input('status'), ['aktif', 'nonaktif'], true) ? $r->input('status') : $t->status,
                 'jenis' => $jenis,
+                'mode_kasir' => in_array($r->input('mode_kasir'), Keranjang::MODE_KASIR, true)
+                    ? $r->input('mode_kasir') : ($t->mode_kasir ?? 'menu'),
             ]);
             // Koperasi → kantin: barang non-makanan miliknya dikembalikan ke
             // 'makanan'. Kalau tidak, tenant ini punya barang berkategori

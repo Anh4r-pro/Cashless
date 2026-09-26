@@ -6,7 +6,9 @@ use App\Exceptions\ApiError;
 use App\Models\Siswa;
 use App\Models\TitipanMutasi;
 use App\Models\Transaksi;
+use App\Services\BiayaAdmin;
 use App\Services\BukuBesar;
+use App\Services\DanaAdmin;
 use App\Services\Pengaturan;
 use App\Services\Rupiah;
 use App\Services\Setoran;
@@ -38,14 +40,48 @@ class SaldoController extends Controller
             return response()->json($dupe);
         }
         $keterangan = mb_substr(trim((string) $r->input('keterangan', 'Top up')), 0, 300) ?: 'Top up';
+        // Bawaannya TANPA biaya: memungut orang harus pilihan sadar admin,
+        // bukan akibat lupa mengganti pilihan.
+        $pungut = $r->input('biaya_admin') === true;
+        // Baris biaya harus bisa ditunjuk ke top up-nya (lihat Neraca: biaya_yatim),
+        // dan pasangannya dikenali lewat tx_id — jadi top up berbiaya selalu punya satu.
+        if ($pungut && ! $txId) {
+            $txId = 'adm-srv-' . bin2hex(random_bytes(8));
+        }
 
-        $hasil = DB::transaction(fn () => Setoran::terima($siswaId, $jumlah, [
-            'keTitipan' => $r->input('ke_titipan') === true,
-            'operator' => $user->nama,
-            'keterangan' => $keterangan,
-            'txId' => $txId,
-            'refTitipan' => $txId ? "topup-{$txId}" : null,
-        ]));
+        $hasil = DB::transaction(function () use ($r, $siswaId, $jumlah, $txId, $user, $keterangan, $pungut) {
+            $s = Siswa::find($siswaId);
+            if (! $s) {
+                throw new ApiError(404, 'Pemegang kartu tidak ditemukan');
+            }
+            $biaya = $pungut ? BiayaAdmin::untukManual($s, $jumlah) : 0;
+            if ($biaya > 0 && $biaya >= $jumlah) {
+                throw new ApiError(400, 'Nominal harus lebih besar dari biaya admin (' . Rupiah::f($biaya) . ')');
+            }
+            $ket = $biaya > 0
+                ? mb_substr($keterangan . ' — dari ' . Rupiah::f($jumlah) . ', biaya admin ' . Rupiah::f($biaya), 0, 300)
+                : $keterangan;
+
+            $setor = Setoran::terima($siswaId, $jumlah - $biaya, [
+                'keTitipan' => $r->input('ke_titipan') === true,
+                'operator' => $user->nama,
+                'keterangan' => $ket,
+                'txId' => $txId,
+                'refTitipan' => $txId ? "topup-{$txId}" : null,
+            ]);
+
+            // Pola yang sama dengan portal wali: baris biaya_admin di buku besar
+            // (tidak mengubah saldo kartu) + mutasi masuk Dana Admin. Neraca
+            // mengenali keduanya tanpa perubahan apa pun.
+            if ($biaya > 0) {
+                $txBiaya = BiayaAdmin::catat($setor['siswa'], $biaya, $user->nama,
+                    'Biaya admin top up manual', "{$txId}-biaya");
+                DanaAdmin::terima($biaya, $setor['siswa'], $txBiaya, $user->nama,
+                    "topup-biaya-{$txId}");
+            }
+
+            return $setor + ['biaya' => $biaya];
+        });
 
         // Kalau saldo kartu memang sedang tipis, uang yang baru mengendap di
         // titipan langsung diteteskan — kalau tidak, admin akan bingung melihat
@@ -58,8 +94,17 @@ class SaldoController extends Controller
             'transaksi' => $hasil['transaksi'],
             'ke_saldo' => $hasil['ke_saldo'],
             'ke_titipan' => $hasil['ke_titipan'],
+            'biaya' => $hasil['biaya'],
             'smart' => $smart,
         ]);
+    }
+
+    /** Tarif yang akan dipakai bila admin memilih "biaya admin" — untuk pratinjau layar. */
+    public function tarifTopup(Request $r)
+    {
+        $this->wajibPeran($r, 'superadmin');
+
+        return response()->json(['tarif' => BiayaAdmin::tarifSekolah()]);
     }
 
     public function koreksi(Request $r)

@@ -21,6 +21,8 @@ class ProdukAjuan extends Model
         'tenant_id',
         'produk_id',
         'jenis',
+        'paket',
+        'kategori_usulan',
         'nama',
         'harga',
         'nama_lama',

@@ -421,7 +421,11 @@ function kasirView(el) {
     <div class="panel">
       <h2>Belanja</h2>
       <div class="grid" id="produk-grid"><span class="muted">memuat menu…</span></div>
-      <div style="display:flex; gap:8px; margin-top:12px">
+      <p class="muted hidden" id="mode-bebas-info" style="margin:0 0 4px">
+        🛒 Mode tanpa menu — ketik barang yang dibeli beserta harganya.</p>
+      <input id="manual-desk" maxlength="60" autocomplete="off" style="margin-top:12px"
+        placeholder="Deskripsi barang (opsional), mis. Sabun mandi">
+      <div style="display:flex; gap:8px; margin-top:8px">
         ${inputUang({ id: 'manual-harga', placeholder: 'Input manual (Rp)' })}
         <select id="manual-kat" class="hidden" style="flex:none; width:auto">
           <option value="makanan">Makanan</option>
@@ -441,6 +445,15 @@ function kasirView(el) {
     // Pilihan kategori pada input manual hanya berguna di koperasi; di kantin
     // biasa semuanya makanan dan server pun menolak yang lain.
     $('#manual-kat').classList.toggle('hidden', kasir.tenant?.jenis !== 'koperasi');
+    // Mode bebas: daftar menu disembunyikan dan deskripsi menjadi wajib —
+    // server pun menolak barang tanpa deskripsi di mode ini.
+    const bebas = kasir.tenant?.mode_kasir === 'bebas';
+    $('#produk-grid').classList.toggle('hidden', bebas);
+    $('#mode-bebas-info').classList.toggle('hidden', !bebas);
+    $('#manual-desk').placeholder = bebas
+      ? 'Barang yang dibeli (wajib), mis. Sabun mandi + sikat gigi'
+      : 'Deskripsi barang (opsional), mis. Sabun mandi';
+    $('#manual-harga').placeholder = bebas ? 'Harga (Rp)' : 'Input manual (Rp)';
     $('#produk-grid').innerHTML = kasir.produk.map((p) =>
       `<button data-id="${p.id}"><b>${esc(p.nama)}</b><span class="muted rp">${rp(p.harga)}</span>` +
       (p.kategori === 'non_makanan' ? '<span class="katdot" title="non-makanan">non-makanan</span>' : '') +
@@ -460,13 +473,29 @@ function kasirView(el) {
   $('#btn-manual').onclick = () => { const uid = normUid($('#manual-uid').value); if (uid) onCardTapped(uid); };
   $('#manual-uid').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('#btn-manual').click(); } });
   $('#btn-add-manual').onclick = () => {
+    const desk = $('#manual-desk').value.replace(/\s+/g, ' ').trim();
     const h = nilaiUang('#manual-harga');
-    if (!h || h <= 0) { toast('Isi nominal manual dulu', 'err'); return; }
+    if (kasir.tenant?.mode_kasir === 'bebas' && desk.length < 3) {
+      toast('Tulis dulu barang yang dibeli (minimal 3 huruf)', 'err');
+      $('#manual-desk').focus();
+      return;
+    }
+    if (!h || h <= 0) { toast('Isi nominal manual dulu', 'err'); $('#manual-harga').focus(); return; }
     const kategori = kasir.tenant?.jenis === 'koperasi' ? $('#manual-kat').value : 'makanan';
-    kasir.cart.push({ manual: true, nama: 'Input manual', harga: h, kategori });
+    kasir.cart.push({ manual: true, nama: desk || 'Input manual', harga: h, kategori });
+    $('#manual-desk').value = '';
     $('#manual-harga').value = '';
+    $('#manual-desk').focus();
     renderCart();
   };
+  // Enter di kedua kotak = Tambah: kasir mengetik deskripsi, harga, Enter,
+  // lalu langsung barang berikutnya tanpa menyentuh tetikus.
+  $('#manual-desk').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); $('#manual-harga').focus(); }
+  });
+  $('#manual-harga').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); $('#btn-add-manual').click(); }
+  });
   $('#btn-bayar').onclick = doBayar;
   renderCart();
 }
@@ -596,7 +625,18 @@ function menuView(el) {
   el.innerHTML = `<div class="panel">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px">
       <h2 style="margin:0">Menu ${esc(USER.tenant_nama)}</h2>
-      <button class="linkbtn" id="btn-add-menu">+ Ajukan menu baru</button>
+      <span>
+        <button class="linkbtn" id="btn-add-menu">+ Ajukan menu baru</button> ·
+        <button class="linkbtn" id="btn-impor-menu">⬆ Ajukan banyak dari Excel</button>
+      </span>
+    </div>
+    <div class="aju-unduh hidden" id="impor-menu-box">
+      <span class="muted">Untuk puluhan sampai ratusan barang sekaligus:</span>
+      <button class="linkbtn" id="impor-menu-tpl">⬇ Unduh template Excel</button>
+      <label class="linkbtn" style="cursor:pointer">📂 Pilih berkas yang sudah diisi
+        <input type="file" id="impor-menu-berkas" accept=".xlsx,.csv" class="hidden"></label>
+      <span class="muted set-hint">Berkas diperiksa dulu sebelum dikirim. Semua barangnya menjadi
+        satu paket pengajuan yang diputus admin sekaligus.</span>
     </div>
     <p class="muted">Menambah menu, mengubah nama/harga, dan menghapus menu perlu
       <b>persetujuan admin</b>. Selama menunggu, kasir tetap memakai harga lama.
@@ -615,7 +655,59 @@ function menuView(el) {
     </table></div>
   </div>`;
   $('#btn-add-menu').onclick = () => menuModal(null);
+  $('#btn-impor-menu').onclick = () => $('#impor-menu-box').classList.toggle('hidden');
+  $('#impor-menu-tpl').onclick = () => {
+    // Berkas biner: lewat <a>, bukan fetch+JSON.
+    const a = document.createElement('a');
+    a.href = '/api/produk/impor/template';
+    document.body.appendChild(a); a.click(); a.remove();
+  };
+  $('#impor-menu-berkas').onchange = async (e) => {
+    const f = e.target.files[0];
+    e.target.value = '';   // berkas yang sama boleh dipilih lagi sesudah diperbaiki
+    if (f) imporMenuPratinjau(f);
+  };
   loadMenu();
+}
+
+/** Pratinjau berkas pengajuan barang, lalu kirim sebagai satu paket. */
+async function imporMenuPratinjau(file) {
+  let data, d;
+  try {
+    data = await fileToDataUrl(file);
+    d = await api('/api/produk/impor/pratinjau', { method: 'POST', body: { data, nama_berkas: file.name } });
+  } catch (e) { toast(e.message, 'err'); return; }
+
+  const r = d.ringkas;
+  const baris = d.baris.map((b) => `
+    <tr class="${b.status === 'siap' ? '' : 'tp-menunggu'}">
+      <td class="num muted">${b.baris}</td>
+      <td>${esc(b.nama || '—')}</td>
+      <td class="num rp">${b.harga ? rp(b.harga) : '—'}</td>
+      ${d.koperasi ? `<td style="white-space:nowrap">${lencanaKategori(b.kategori)}</td>` : ''}
+      <td>${b.status === 'siap' ? '<span class="badge aktif">siap</span>'
+        : `<span class="minus">${esc(b.pesan)}</span>`}</td>
+    </tr>`).join('');
+  openModal(`
+    <h2>Pratinjau pengajuan barang</h2>
+    <p><b>${esc(d.nama_berkas)}</b> — ${r.n_baris} baris:
+      <b>${r.n_siap} siap diajukan</b>${r.n_gagal ? `, <span class="minus">${r.n_gagal} dilewati</span>` : ''}.</p>
+    ${d.koperasi ? `<p class="muted">Kategori hanyalah usulan Anda; admin yang menetapkan akhirnya.</p>` : ''}
+    ${r.n_gagal ? `<p class="muted">Baris yang dilewati tidak ikut dikirim. Perbaiki di Excel lalu
+      unggah lagi kalau ingin mengajukannya juga.</p>` : ''}
+    <div class="tblwrap" style="max-height:50vh; overflow:auto"><table>
+      <thead><tr><th class="num">Baris</th><th>Barang</th><th class="num">Harga</th>
+        ${d.koperasi ? '<th>Kategori</th>' : ''}<th>Status</th></tr></thead>
+      <tbody>${baris}</tbody>
+    </table></div>`,
+    r.n_siap ? async () => {
+      const paket = 'MNU-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+      const h = await api('/api/produk/impor/terapkan', { method: 'POST',
+        body: { data, nama_berkas: d.nama_berkas, sidik: d.sidik, paket } });
+      toast(`✔ ${h.n} barang diajukan sebagai satu paket — menunggu putusan admin`, 'ok');
+      loadMenu();
+    } : null, `Kirim ${r.n_siap} barang`);
+  $('#modal-root .modal').classList.add('modal-lebar');
 }
 
 /** Ringkasan "dari → menjadi" supaya isi usulan terbaca tanpa membuka apa pun. */
@@ -724,6 +816,7 @@ function menuAjuanView(el) {
       <span class="muted set-hint">Berisi baris yang sama dengan penyaring di atas, lengkap
         dengan kolom keputusan dan tanda tangan. Versi PDF lewat tombol cetak peramban.</span>
     </div>
+    <div id="aju-paket"></div>
     <div class="tblwrap"><table>
       <thead><tr><th>Waktu</th><th>Tenant</th><th>Jenis</th><th>Usulan</th><th>Pengaju</th><th>Status</th><th></th></tr></thead>
       <tbody id="aju-sa-body"></tbody>
@@ -813,7 +906,100 @@ async function muatKategoriProduk() {
   });
 }
 
+/**
+ * Paket pengajuan dari Excel yang masih menunggu. Ditampilkan di atas daftar
+ * biasa karena satu paket bisa berisi ratusan barang — menyetujuinya satu per
+ * satu dari tabel di bawah hanya memindahkan pekerjaan lambat dari tenant ke admin.
+ */
+async function muatPaketAjuan() {
+  const box = $('#aju-paket');
+  if (!box) return;
+  let d;
+  try { d = await api('/api/produk/ajuan/paket'); } catch { box.innerHTML = ''; return; }
+  if (!d.paket.length) { box.innerHTML = ''; return; }
+  box.innerHTML = `
+    <div class="aju-paket">
+      <h3 style="margin:0 0 6px">📦 Paket dari Excel menunggu putusan</h3>
+      ${d.paket.map((p) => `
+        <div class="aju-paket-baris">
+          <span><b>${esc(p.tenant_nama)}</b> · ${p.n} barang
+            ${Number(p.n_non_makanan) ? `<span class="muted">(${p.n_non_makanan} diusulkan non-makanan)</span>` : ''}
+            <br><span class="muted">diajukan ${esc(waktuSingkat(p.created_at))} oleh ${esc(p.pengaju || '-')}</span></span>
+          <button class="go" data-paket="${esc(p.paket)}">Periksa & putuskan</button>
+        </div>`).join('')}
+    </div>`;
+  box.querySelectorAll('[data-paket]').forEach((b) => { b.onclick = () => paketModal(b.dataset.paket); });
+}
+
+async function paketModal(paket) {
+  let d;
+  try { d = await api('/api/produk/ajuan/paket/' + encodeURIComponent(paket)); }
+  catch (e) { toast(e.message, 'err'); return; }
+  const kop = d.tenant?.jenis === 'koperasi';
+  const menunggu = d.ajuan.filter((a) => a.status === 'menunggu');
+  if (!menunggu.length) { toast('Paket ini sudah diputus seluruhnya', 'ok'); muatPaketAjuan(); return; }
+
+  openModal(`
+    <h2>Paket ${esc(d.tenant?.nama || '')} — ${menunggu.length} barang</h2>
+    <p class="muted">Hapus centang barang yang belum mau disetujui — barang itu tetap menunggu
+      dan bisa diputus satu per satu di daftar bawah.
+      ${kop ? 'Kategori terisi usulan tenant; ubah bila perlu — keputusan akhirnya di sini.' : ''}</p>
+    <p><label><input type="checkbox" id="pk-semua" checked style="width:auto"> centang semua</label></p>
+    <div class="tblwrap" style="max-height:50vh; overflow:auto"><table>
+      <thead><tr><th></th><th>Barang</th><th class="num">Harga</th>${kop ? '<th>Kategori</th>' : ''}</tr></thead>
+      <tbody>${menunggu.map((a) => `<tr>
+        <td><input type="checkbox" class="pk-cek" value="${a.id}" checked style="width:auto"></td>
+        <td>${esc(a.nama)}</td>
+        <td class="num rp">${rp(a.harga)}</td>
+        ${kop ? `<td><select class="pk-kat" data-id="${a.id}">
+          <option value="makanan" ${a.kategori_usulan !== 'non_makanan' ? 'selected' : ''}>Makanan</option>
+          <option value="non_makanan" ${a.kategori_usulan === 'non_makanan' ? 'selected' : ''}>Non-makanan</option>
+        </select></td>` : ''}
+      </tr>`).join('')}</tbody>
+    </table></div>
+    <details style="margin-top:12px"><summary class="linkbtn danger">Tolak seluruh paket…</summary>
+      <div class="field" style="margin-top:8px"><label>Alasan penolakan (wajib — dibaca tenant)</label>
+        <input id="pk-alasan" placeholder="mis. harga belum disepakati koperasi"></div>
+      <button class="linkbtn danger" id="pk-tolak">Tolak ${menunggu.length} barang</button>
+    </details>`,
+    async () => {
+      const ids = [...document.querySelectorAll('.pk-cek:checked')].map((c) => Number(c.value));
+      if (!ids.length) throw new Error('Belum ada barang yang dicentang');
+      const kategori = {};
+      document.querySelectorAll('.pk-kat').forEach((s) => { if (ids.includes(Number(s.dataset.id))) kategori[s.dataset.id] = s.value; });
+      const h = await api(`/api/produk/ajuan/paket/${encodeURIComponent(paket)}/setujui`, {
+        method: 'POST', body: { ids, kategori } });
+      toast(`✔ ${h.n_disetujui} barang disetujui` +
+        (h.n_kembar ? ` · ${h.n_kembar} ditolak karena namanya sudah ada` : '') +
+        (h.sisa ? ` · ${h.sisa} masih menunggu` : ''), 'ok');
+      loadAjuanSA();
+      muatKategoriProduk();
+    }, 'Setujui yang dicentang');
+  $('#modal-root .modal').classList.add('modal-lebar');
+
+  const hitung = () => {
+    const n = document.querySelectorAll('.pk-cek:checked').length;
+    $('#m-save').textContent = `Setujui ${n} barang`;
+  };
+  $('#pk-semua').onchange = (e) => {
+    document.querySelectorAll('.pk-cek').forEach((c) => { c.checked = e.target.checked; });
+    hitung();
+  };
+  document.querySelectorAll('.pk-cek').forEach((c) => { c.onchange = hitung; });
+  hitung();
+  $('#pk-tolak').onclick = async () => {
+    try {
+      const h = await api(`/api/produk/ajuan/paket/${encodeURIComponent(paket)}/tolak`, {
+        method: 'POST', body: { catatan: $('#pk-alasan').value } });
+      toast(`${h.n_ditolak} barang ditolak`, 'ok');
+      closeModal();
+      loadAjuanSA();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+}
+
 async function loadAjuanSA() {
+  muatPaketAjuan();
   // Daftar tenant hanya dipakai untuk mengenali mana yang koperasi, dan tidak
   // bergantung pada daftar ajuan — jadi keduanya diminta bersamaan.
   const [d, tenantResp] = await Promise.all([
@@ -825,7 +1011,7 @@ async function loadAjuanSA() {
     <tr class="${a.status === 'menunggu' ? 'tp-menunggu' : ''}">
       <td>${esc(waktuSingkat(a.created_at))}</td>
       <td>${esc(a.tenant_nama)}</td>
-      <td>${esc(AJU_JENIS[a.jenis] || a.jenis)}</td>
+      <td>${esc(AJU_JENIS[a.jenis] || a.jenis)}${a.paket ? ' <span class="badge" title="bagian dari paket Excel">📦 Excel</span>' : ''}</td>
       <td>${ajuanRingkas(a)}</td>
       <td>${esc(a.pengaju || '-')}</td>
       <td><span class="badge tp-${a.status === 'menunggu' ? 'pending' : esc(a.status)}">${esc(AJU_STATUS[a.status] || a.status)}</span>
@@ -1247,16 +1433,6 @@ async function dashSAView(el) {
         (5 kali salah → terkunci 15 menit), bukan kerahasiaan nomornya.</p>
       ${gridPengaturan(cfg.labels_ortu || {}, cfg.settings)}
       <button class="savebtn" data-simpan="ortu">Simpan Kunci Portal Wali</button>
-    </div>
-    <div class="panel">
-      <h2>🎓 Jenjang Kelas</h2>
-      <p class="muted">Menentukan aturan kenaikan kelas: kelas tertinggi berujung pada
-        <b>Alumni</b>, dan kelas di luar rentang ini <b>ditandai</b> sebagai bentuk menyimpang —
-        tidak dinaikkan, supaya salah ketik satu angka tidak berarti seseorang dikeluarkan.</p>
-      <p class="muted">Paralelnya (A, B, … J, dan seterusnya) <b>tidak perlu didaftarkan</b> —
-        huruf apa pun ikut terbawa aturannya dengan sendirinya.</p>
-      ${gridPengaturan(cfg.labels_kelas || {}, cfg.settings)}
-      <button class="savebtn" data-simpan="kelas">Simpan Jenjang Kelas</button>
     </div>`;
 
   // Semua panel memakai satu mekanisme yang sama; kelompoknya hanya menentukan
@@ -1264,9 +1440,10 @@ async function dashSAView(el) {
   const GRUP = {
     limit: cfg.labels, titipan: cfg.labels_titipan, nonmakanan: cfg.labels_nonmakanan,
     transfer: cfg.labels_transfer || {}, ortu: cfg.labels_ortu || {},
-    kelas: cfg.labels_kelas || {},
   };
-  const semua = { ...(cfg.labels_kelas || {}), ...cfg.labels, ...cfg.labels_titipan, ...cfg.labels_nonmakanan,
+  // Jenjang Kelas tidak lagi di sini: ia tinggal di panel Kenaikan Kelas
+  // (Pemegang Kartu → Santri), satu-satunya tempat angka itu dipakai.
+  const semua = { ...cfg.labels, ...cfg.labels_titipan, ...cfg.labels_nonmakanan,
     ...GRUP.transfer, ...GRUP.ortu };
   bindPengaturan(semua);
   el.querySelectorAll('[data-simpan]').forEach((btn) => {
@@ -1876,6 +2053,14 @@ function saldoView(el) {
           <option value="lewati">Lewati santri itu (saldo tidak berubah)</option>
           <option value="sebisanya">Potong sebisanya sampai saldo 0</option>
         </select></div>
+      <div class="field" id="sd-biaya-field"><label>Biaya admin</label>
+        <select id="sd-biaya">
+          <option value="free" selected>Free — tanpa biaya admin</option>
+          <option value="biaya">Biaya admin</option>
+        </select>
+        <span class="hint-lembut" style="margin-left:0">Biaya dipotong dari nominal dan masuk Dana Admin.
+          Santri yang dibebaskan biaya tetap tidak dipotong.</span>
+      </div>
       <div class="field hidden" id="sd-titipan-field">
         <label><input type="checkbox" id="sd-ke-titipan" style="width:auto"> Simpan kelebihan sebagai saldo titipan</label>
         <span class="hint-lembut">Kartu diisi sebanyak yang tertampung; sisanya menunggu di
@@ -1927,6 +2112,15 @@ function saldoView(el) {
     };
   });
   $('#sd-ke-titipan').addEventListener('change', sdSync);
+  $('#sd-biaya').addEventListener('change', sdSync);
+  api('/api/topup/tarif').then((d) => {
+    saldo.tarif = d.tarif;
+    // Tarif 0 bukan kesalahan, tapi pilihan "biaya admin" lalu tidak memotong
+    // apa pun — itu harus terbaca di labelnya, bukan ketahuan belakangan.
+    $('#sd-biaya').options[1].textContent = d.tarif > 0
+      ? `Biaya admin (${rp(d.tarif)})` : 'Biaya admin (tarif sekolah belum diatur — Rp0)';
+    sdSync();
+  }).catch(() => {});
   $('#sd-kelola-kat').onclick = kelolaKategoriModal;
   $('#sd-jumlah').addEventListener('input', () => {
     saldo.nominal = nilaiUang('#sd-jumlah');
@@ -2396,6 +2590,17 @@ async function muatPanelTitipan() {
     }, 'Simpan setelan');
 }
 
+/**
+ * Biaya admin yang akan dipotong server bila "Biaya admin" dipilih — sama
+ * dengan BiayaAdmin::untukManual: penimpa per santri menang, selain itu tarif
+ * sekolah. Hanya pratinjau; angka pastinya tetap dihitung server.
+ */
+function sdBiaya(s, n) {
+  if (!s || !n || $('#sd-biaya')?.value !== 'biaya') return 0;
+  const tarif = s.biaya_admin != null ? Number(s.biaya_admin) : (saldo.tarif || 0);
+  return Math.min(Math.max(0, tarif), n);
+}
+
 // Satu tempat untuk semua aturan tampilan: label, pratinjau, dan tombol.
 function sdSync() {
   const potong = sdPotong() || sdKolektif();
@@ -2407,22 +2612,30 @@ function sdSync() {
   $('#sd-ket').placeholder = potong
     ? (sdKolektif() ? 'mis. Iuran kegiatan kelas' : 'mis. Penarikan tunai saldo')
     : 'mis. Setoran orang tua';
-  // Pilihan titipan hanya masuk akal pada top up satu santri.
+  // Pilihan titipan dan biaya admin hanya masuk akal pada top up satu santri.
   $('#sd-titipan-field').classList.toggle('hidden', potong);
+  $('#sd-biaya-field').classList.toggle('hidden', potong);
 
   if (sdKolektif()) return sdSyncKolektif(n, ket);
 
+  const biaya = potong ? 0 : sdBiaya(s, n);
   let pesan = '', ok = false;
   if (!s) pesan = 'Pilih santri dulu di panel sebelah kiri.';
   else if (!n || n <= 0) pesan = 'Isi nominal — pilih nominal cepat atau ketik sendiri.';
+  else if (biaya > 0 && biaya >= n) pesan = `⚠️ Nominal harus lebih besar dari biaya admin (${rp(biaya)}).`;
   else if (potong && n > s.saldo) pesan = `⚠️ Melebihi saldo ${esc(s.nama)} (${rp(s.saldo)}).`;
   else if (potong && ket.length < 3) pesan = 'Alasan pemotongan wajib diisi (minimal 3 huruf).';
   else {
     ok = true;
-    const akhir = potong ? s.saldo - n : s.saldo + n;
+    const masuk = n - biaya;
+    const akhir = potong ? s.saldo - n : s.saldo + masuk;
     pesan = `<b>${esc(s.nama)}</b><br>Saldo ${rp(s.saldo)}
-      <span class="${potong ? 'minus' : 'plus'}">${potong ? '−' : '+'}${rp(n)}</span>
+      <span class="${potong ? 'minus' : 'plus'}">${potong ? '−' : '+'}${rp(potong ? n : masuk)}</span>
       → <b class="rp">${rp(akhir)}</b>`;
+    if (biaya > 0) pesan += `<br><span class="muted">Top up ${rp(n)} → masuk kartu ${rp(masuk)},
+      biaya admin ${rp(biaya)}</span>`;
+    else if (!potong && $('#sd-biaya').value === 'biaya' && s.biaya_admin === 0)
+      pesan += `<br><span class="muted">${esc(s.nama)} dibebaskan dari biaya admin.</span>`;
     // Angka pastinya dihitung server (jatah harian ikut menentukan), jadi di sini
     // hanya diberi ancang-ancang berdasarkan batas saldo kartu.
     if (!potong && $('#sd-ke-titipan')?.checked) pesan +=
@@ -2432,7 +2645,8 @@ function sdSync() {
   $('#sd-preview').className = 'preview' + (ok ? ' ok' : '');
 
   const btn = $('#btn-saldo');
-  btn.textContent = potong ? `Potong Saldo${n ? ' ' + rp(n) : ''}` : `Top Up${n ? ' ' + rp(n) : ''}`;
+  btn.textContent = potong ? `Potong Saldo${n ? ' ' + rp(n) : ''}`
+    : `Top Up${n ? ' ' + rp(n) : ''}${biaya > 0 ? ` (biaya ${rp(biaya)})` : ''}`;
   btn.classList.toggle('danger', potong);
   btn.disabled = !ok;
 }
@@ -2500,11 +2714,13 @@ async function kirimSaldo() {
   const potong = sdPotong();
   const nominal = saldo.nominal;
   const keTitipan = !potong && !!$('#sd-ke-titipan')?.checked;
+  const pungut = !potong && $('#sd-biaya').value === 'biaya';
   const d = await api(potong ? '/api/koreksi' : '/api/topup', { method: 'POST', body: {
     siswa_id: saldo.siswa.id,
     jumlah: nominal,
     keterangan: $('#sd-ket').value.trim(),
     ...(keTitipan ? { ke_titipan: true } : {}),
+    ...(pungut ? { biaya_admin: true } : {}),
     tx_id: 'adm-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
   }});
   saldo.siswa = d.siswa;
@@ -2516,8 +2732,9 @@ async function kirimSaldo() {
   sdSync();
   loadPenyesuaian();
   if (d.ke_titipan > 0) muatPanelTitipan();
-  const rincian = d.ke_titipan > 0
-    ? ` (${rp(d.ke_saldo)} ke kartu, ${rp(d.ke_titipan)} ke titipan)` : '';
+  const rincian = (d.ke_titipan > 0
+    ? ` (${rp(d.ke_saldo)} ke kartu, ${rp(d.ke_titipan)} ke titipan)` : '') +
+    (d.biaya > 0 ? ` · biaya admin ${rp(d.biaya)}` : '');
   toast(`✔ ${potong ? 'Saldo dipotong' : 'Top up'} ${rp(nominal)}${rincian} — ` +
     `saldo ${d.siswa.nama} kini ${rp(d.siswa.saldo)}`, 'ok');
 }
@@ -2706,7 +2923,7 @@ async function muatProgramDonasi() {
     const d = await api('/api/donasi/program?semua=1');
     donasiRows = d.program.map((p) => ({
       id: p.id, nama: p.nama, deskripsi: p.deskripsi,
-      nominal: p.nominal.join(', '), aktif: p.aktif === 1,
+      nominal: teksDaftarUang(p.nominal), aktif: p.aktif === 1,
       terpakai: p.terpakai, terkumpul: p.terkumpul,
     }));
     dnGambarBaris();
@@ -2728,8 +2945,8 @@ function dnGambarBaris() {
       </div>
       <input class="dn-desk" data-i="${i}" value="${esc(r.deskripsi)}" maxlength="200"
         placeholder="keterangan singkat (tampil di kios)">
-      <input class="dn-nominal" data-i="${i}" value="${esc(r.nominal)}" inputmode="numeric"
-        placeholder="pilihan nominal, mis. 2000, 5000, 10000">
+      <input class="dn-nominal uang-daftar" data-i="${i}" value="${esc(r.nominal)}" inputmode="numeric"
+        autocomplete="off" placeholder="pilihan nominal, mis. 2.000 / 5.000 / 10.000">
       ${r.terpakai ? `<span class="muted">sudah menerima ${r.terpakai} donasi · terkumpul ${rp(r.terkumpul)}</span>` : ''}
     </div>`).join('') || '<p class="muted">Belum ada jenis donasi. Tambahkan di atas.</p>';
 
@@ -2761,8 +2978,7 @@ async function simpanProgramDonasi() {
       .filter((r) => r.nama.trim() || r.nominal.trim())
       .map((r) => ({
         id: r.id, nama: r.nama.trim(), deskripsi: r.deskripsi.trim(), aktif: r.aktif,
-        nominal: r.nominal.split(',').map((x) => x.trim()).filter(Boolean)
-          .map((x) => Number(x.replace(/\D/g, ''))),
+        nominal: daftarUang(r.nominal),
       }));
     for (const p of kirim) {
       if (p.nama.length < 3) throw new Error('Nama jenis donasi minimal 3 huruf');
@@ -3547,7 +3763,8 @@ async function loadTenants() {
     <tr>
       <td><b>${esc(t.nama)}</b></td>
       <td>${t.jenis === 'koperasi'
-        ? '<span class="badge kat-nm">koperasi</span>' : '<span class="muted">kantin</span>'}</td>
+        ? '<span class="badge kat-nm">koperasi</span>' : '<span class="muted">kantin</span>'}
+        ${t.mode_kasir === 'bebas' ? '<br><span class="badge" title="kasir mengetik deskripsi barang sendiri">tanpa menu</span>' : ''}</td>
       <td>${esc(t.pemilik)}</td>
       <td>${t.usernames ? `<code>${esc(t.usernames)}</code>` : '<span class="muted">—</span>'}</td>
       <td><span class="badge ${t.status}">${t.status}</span></td>
@@ -3582,6 +3799,13 @@ function tenantModal(t) {
       <span class="muted set-hint">Hanya koperasi yang boleh punya barang non-makanan —
         barang itu memakai jatah belanja harian tersendiri. Mengembalikan koperasi menjadi
         kantin akan menandai ulang semua barangnya sebagai makanan.</span></div>
+    <div class="field"><label>Mode kasir</label><select id="m-mode">
+      <option value="menu" ${t?.mode_kasir !== 'bebas' ? 'selected' : ''}>Menu nyala — kasir memilih dari daftar menu</option>
+      <option value="bebas" ${t?.mode_kasir === 'bebas' ? 'selected' : ''}>Menu mati — kasir mengetik deskripsi & harga</option>
+    </select>
+      <span class="muted set-hint">Pakai "menu mati" selama daftar barang belum selesai diinput.
+        Di mode ini kasir yang memilih makanan/non-makanan, dan laporan menu terlaris
+        berisi teks bebas — nyalakan lagi begitu daftar barangnya lengkap.</span></div>
     ${t ? `
     <div class="field"><label>Status</label><select id="m-status">
       <option value="aktif" ${t.status === 'aktif' ? 'selected' : ''}>aktif</option>
@@ -3593,14 +3817,14 @@ function tenantModal(t) {
     async () => {
       if (t) {
         const d = await api('/api/tenants/' + t.id, { method: 'PUT', body: {
-          nama: $('#m-nama').value, pemilik: $('#m-pemilik').value, jenis: $('#m-jenis').value,
+          nama: $('#m-nama').value, pemilik: $('#m-pemilik').value, jenis: $('#m-jenis').value, mode_kasir: $('#m-mode').value,
           status: $('#m-status').value, password_baru: $('#m-pass').value || undefined,
         }});
         if (d.kategori_direset > 0)
           toast(`${d.kategori_direset} barang non-makanan ditandai ulang sebagai makanan`, 'ok');
       } else {
         await api('/api/tenants', { method: 'POST', body: {
-          nama: $('#m-nama').value, pemilik: $('#m-pemilik').value, jenis: $('#m-jenis').value,
+          nama: $('#m-nama').value, pemilik: $('#m-pemilik').value, jenis: $('#m-jenis').value, mode_kasir: $('#m-mode').value,
           username: $('#m-user').value, password: $('#m-pass').value,
         }});
       }
@@ -3647,6 +3871,13 @@ function massalView(el) {
     <label><input type="checkbox" id="ms-titipan" checked style="width:auto">
       Simpan kelebihan sebagai saldo titipan</label>
     <span class="hint-lembut">Tanpa ini, baris yang nominalnya tidak tertampung kartu dianggap gagal.</span>
+    <div class="field" style="margin:8px 0"><label>Biaya admin</label>
+      <select id="ms-biaya">
+        <option value="free" selected>Free — tanpa biaya admin</option>
+        <option value="biaya">Biaya admin per baris</option>
+      </select>
+      <span class="hint-lembut" style="margin-left:0">Berlaku untuk seluruh berkas. Biaya dipotong dari
+        nominal tiap baris dan masuk Dana Admin; santri yang dibebaskan tetap tidak dipotong.</span></div>
     <label><input type="checkbox" id="ms-nama" style="width:auto">
       Terapkan juga baris yang namanya berbeda dari data santri</label>
     <span class="hint-lembut">Nama berbeda biasanya berarti NIS salah ketik — biarkan mati kecuali
@@ -3694,6 +3925,8 @@ function massalView(el) {
     massal = null;
   });
   $('#ms-pra').onclick = massalPratinjau;
+  // Pilihan biaya mengubah angka tiap baris — pratinjau yang sudah tampil dihitung ulang.
+  $('#ms-biaya').onchange = () => { if (massal && $('#ms-file').files[0]) massalPratinjau(); };
   $('#ms-muat-riwayat').onclick = muatRiwayatImpor;
   muatRiwayatImpor();
 }
@@ -3710,6 +3943,7 @@ async function massalPratinjau() {
       nama_berkas: f.name, data,
       ke_titipan: $('#ms-titipan').checked,
       abaikan_nama: $('#ms-nama').checked,
+      ...($('#ms-biaya').value === 'biaya' ? { biaya_admin: true } : {}),
     }});
     massal = { nama: f.name, data, pra };
     massalRenderPratinjau();
@@ -3747,6 +3981,7 @@ function massalRenderPratinjau() {
       <div class="statcard"><span class="muted">Total nominal siap</span><br><b class="rp">${rp(r.total)}</b></div>
       <div class="statcard"><span class="muted">Masuk kartu</span><br><b class="rp">${rp(r.total_saldo)}</b></div>
       <div class="statcard"><span class="muted">Mengendap di titipan</span><br><b class="rp">${rp(r.total_titipan)}</b></div>
+      ${pra.biaya_admin ? `<div class="statcard"><span class="muted">Biaya admin</span><br><b class="rp">${rp(r.total_biaya)}</b></div>` : ''}
     </div>
     <p class="muted">Lembar <b>${esc(pra.lembar)}</b> · berkas <b>${esc(pra.nama_berkas)}</b><br>${metode}
       ${r.n_nama_beda ? `<br>⚠️ ${r.n_nama_beda} baris namanya berbeda dari data santri` : ''}
@@ -3755,7 +3990,8 @@ function massalRenderPratinjau() {
 
     <div class="tblwrap" style="max-height:420px"><table>
       <thead><tr><th>Baris</th><th>NIS</th><th>Nama di berkas</th><th>Nama di data</th>
-      <th class="num">Nominal</th><th class="num">Ke Kartu</th><th class="num">Ke Titipan</th>
+      <th class="num">Nominal</th>${pra.biaya_admin ? '<th class="num">Biaya</th>' : ''}
+      <th class="num">Ke Kartu</th><th class="num">Ke Titipan</th>
       <th>Tanggal</th><th>Metode</th><th>Status</th></tr></thead>
       <tbody>${pra.baris.map((b) => `
         <tr class="${b.status === 'gagal' ? 'tp-menunggu' : ''}">
@@ -3763,6 +3999,7 @@ function massalRenderPratinjau() {
           <td>${esc(b.nama_berkas || '—')}</td>
           <td>${esc(b.nama_db || '—')}${b.kelas ? ` <span class="muted">${esc(b.kelas)}</span>` : ''}</td>
           <td class="num rp">${rp(b.jumlah)}</td>
+          ${pra.biaya_admin ? `<td class="num rp">${b.status === 'siap' ? rp(b.biaya) : '—'}</td>` : ''}
           <td class="num rp">${b.status === 'siap' ? rp(b.ke_saldo) : '—'}</td>
           <td class="num rp">${b.status === 'siap' ? rp(b.ke_titipan) : '—'}</td>
           <td>${esc(b.tgl_terima || '—')}</td>
@@ -3790,8 +4027,9 @@ function massalRenderPratinjau() {
     }
     openModal(`
       <h2>Terapkan ${r.n_siap} baris top up?</h2>
-      <p><b>${rp(r.total)}</b> akan masuk ke rekening siswa: ${rp(r.total_saldo)} ke kartu dan
-        ${rp(r.total_titipan)} mengendap sebagai titipan.</p>
+      <p><b>${rp(r.total)}</b> diterima: ${rp(r.total_saldo)} ke kartu,
+        ${rp(r.total_titipan)} mengendap sebagai titipan${r.total_biaya
+          ? `, dan <b>${rp(r.total_biaya)}</b> biaya admin masuk Dana Admin` : ''}.</p>
       <p class="muted">Tercatat atas nama <b>${esc(USER.nama)}</b>, satu baris riwayat per setoran.
         Pembatalan hanya bisa lewat pemotongan saldo manual di menu Saldo Santri, jadi pastikan
         rekapnya sudah cocok dengan uang yang benar-benar diterima.</p>`,
@@ -3808,6 +4046,8 @@ async function massalTerapkan(izinkanUlang) {
     batch_id: batch,
     ke_titipan: $('#ms-titipan').checked,
     abaikan_nama: $('#ms-nama').checked,
+    // Pilihan biaya mengikuti yang DIPRATINJAU, bukan isi kotak saat ini.
+    ...(massal.pra.biaya_admin ? { biaya_admin: true } : {}),
     ...(izinkanUlang ? { izinkan_ulang: true } : {}),
   }});
   const i = d.impor;
@@ -3821,6 +4061,7 @@ async function massalTerapkan(izinkanUlang) {
         <div class="statcard"><span class="muted">Baris gagal (dilewati)</span><br><b>${i.n_gagal}</b></div>
         <div class="statcard"><span class="muted">Masuk kartu</span><br><b class="rp">${rp(i.total_saldo)}</b></div>
         <div class="statcard"><span class="muted">Ke titipan</span><br><b class="rp">${rp(i.total_titipan)}</b></div>
+        ${i.total_biaya ? `<div class="statcard"><span class="muted">Biaya admin</span><br><b class="rp">${rp(i.total_biaya)}</b></div>` : ''}
         ${d.smart?.n ? `<div class="statcard"><span class="muted">Isi ulang otomatis</span><br>
           <b>${d.smart.n} santri</b><br><span class="muted">${rp(d.smart.total)}</span></div>` : ''}
       </div>
@@ -4895,6 +5136,41 @@ function pulihkanModal(s) {
 
 let kenaikanState = null;
 
+/**
+ * Pengaturan Jenjang Kelas, dibuka dari dalam panel Kenaikan Kelas.
+ *
+ * Dulu panel ini ada di Dashboard, di antara batas belanja dan saldo — padahal
+ * angkanya hanya dipakai kenaikan kelas dan arsip. Di sini admin mengubahnya
+ * tepat di depan tabel yang dipengaruhinya, dan tabelnya langsung digambar
+ * ulang dengan rentang yang baru.
+ */
+async function jenjangForm() {
+  const wadah = $('#kk-jenjang-form');
+  if (wadah.innerHTML) { wadah.innerHTML = ''; return; }   // tombol yang sama menutupnya
+  wadah.innerHTML = '<p class="muted">memuat…</p>';
+  let cfg;
+  try { cfg = await api('/api/settings'); }
+  catch (e) { wadah.innerHTML = `<p class="minus">${esc(e.message)}</p>`; return; }
+  const labels = cfg.labels_kelas || {};
+  wadah.innerHTML = `
+    <p class="muted">Kelas tertinggi berujung pada <b>Alumni</b>, dan kelas di luar rentang ini
+      <b>ditandai</b> sebagai bentuk menyimpang — tidak dinaikkan, supaya salah ketik satu angka
+      tidak berarti seseorang dikeluarkan. Paralelnya (A, B, … J) <b>tidak perlu didaftarkan</b>.</p>
+    ${gridPengaturan(labels, cfg.settings)}
+    <button class="savebtn" id="kk-simpan-jenjang">Simpan Jenjang Kelas</button>`;
+  bindPengaturan(labels);
+  $('#kk-simpan-jenjang').onclick = async (ev) => {
+    const body = {};
+    for (const k of Object.keys(labels)) body[k] = Number($('#set-' + k).value);
+    ev.target.disabled = true;
+    try {
+      await api('/api/settings', { method: 'PUT', body });
+      toast('✔ Jenjang kelas tersimpan', 'ok');
+      kenaikanPanel();   // saran tujuan bergantung pada rentang ini
+    } catch (e) { toast(e.message, 'err'); ev.target.disabled = false; }
+  };
+}
+
 async function kenaikanPanel() {
   $('#sw-impor').innerHTML = '';
   $('#sw-tahun').innerHTML = '<div class="panel"><p class="muted">memuat…</p></div>';
@@ -4924,8 +5200,13 @@ async function kenaikanPanel() {
       <h2 style="margin:0">Kenaikan Kelas Massal</h2>
       <button class="linkbtn" id="kk-tutup">tutup ✕</button>
     </div>
-    <p class="muted">Jenjang yang dibuka sekolah: kelas <b>${d.tingkat_awal}</b> sampai
-      <b>${d.tingkat_lulus}</b> (diatur di Pengaturan). Tujuan di bawah ini <b>saran</b> —
+    <div class="kk-jenjang">
+      <p class="muted" style="margin:0">🎓 Jenjang yang dibuka sekolah: kelas <b>${d.tingkat_awal}</b> sampai
+        <b>${d.tingkat_lulus}</b>.
+        ${boleh('settings.ubah') ? '<button class="linkbtn" id="kk-ubah-jenjang">ubah jenjang</button>' : ''}</p>
+      <div id="kk-jenjang-form"></div>
+    </div>
+    <p class="muted">Tujuan di bawah ini <b>saran</b> —
       periksa dan ubah sesuai kenyataan sebelum diterapkan.</p>
     <p class="muted">Santri kelas ${d.tingkat_lulus - 3} yang <b>lanjut ke SMA di sini</b> cukup
       dinaikkan biasa; yang melanjutkan di luar arsipkan dulu lewat tombol
@@ -4968,6 +5249,7 @@ async function kenaikanPanel() {
   </div>`;
 
   $('#kk-tutup').onclick = () => { $('#sw-tahun').innerHTML = ''; kenaikanState = null; };
+  if ($('#kk-ubah-jenjang')) $('#kk-ubah-jenjang').onclick = jenjangForm;
   $('#kk-terapkan').onclick = kenaikanTerapkan;
   kenaikanRiwayat(d.riwayat);
   $('#sw-tahun').scrollIntoView({ behavior: 'smooth', block: 'nearest' });

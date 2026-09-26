@@ -6,6 +6,8 @@ use App\Exceptions\ApiError;
 use App\Models\Siswa;
 use App\Models\TopupImpor;
 use App\Models\TopupImporBaris;
+use App\Services\BiayaAdmin;
+use App\Services\DanaAdmin;
 use App\Services\ImporTopup;
 use App\Services\Pengaturan;
 use App\Services\Rupiah;
@@ -105,12 +107,14 @@ class TopupMassalController extends Controller
 
         $abaikanNama = $r->input('abaikan_nama') === true;
         $keTitipan = $r->input('ke_titipan') !== false;
-        $hasil = ImporTopup::urai($isi, $nama, $abaikanNama, $keTitipan);
+        $pungut = $r->input('biaya_admin') === true;
+        $hasil = ImporTopup::urai($isi, $nama, $abaikanNama, $keTitipan, $pungut);
         $sidik = ImporTopup::sidik($isi);
 
         return response()->json(array_merge([
             'ok' => true, 'nama_berkas' => $nama, 'sidik' => $sidik,
             'ke_titipan' => $keTitipan, 'abaikan_nama' => $abaikanNama,
+            'biaya_admin' => $pungut, 'tarif_biaya' => BiayaAdmin::tarifSekolah(),
             // Peringatan dini: admin melihat "berkas ini sudah pernah
             // diterapkan" SEBELUM menekan Terapkan, bukan sesudah saldo
             // bertambah dua kali.
@@ -157,15 +161,16 @@ class TopupMassalController extends Controller
 
         $abaikanNama = $r->input('abaikan_nama') === true;
         $keTitipan = $r->input('ke_titipan') !== false;
-        $urai = ImporTopup::urai($isi, $nama, $abaikanNama, $keTitipan);
+        $pungut = $r->input('biaya_admin') === true;
+        $urai = ImporTopup::urai($isi, $nama, $abaikanNama, $keTitipan, $pungut);
 
         if (! array_filter($urai['baris'], fn ($x) => $x['status'] === 'siap')) {
             throw new ApiError(400, 'Tidak ada baris yang siap diterapkan — perbaiki berkasnya dulu');
         }
 
-        $hasil = DB::transaction(function () use ($urai, $batchId, $nama, $sidik, $user, $keTitipan) {
+        $hasil = DB::transaction(function () use ($urai, $batchId, $nama, $sidik, $user, $keTitipan, $pungut) {
             $impor = TopupImpor::create([
-                'batch_id' => $batchId, 'berkas' => $nama, 'sidik' => $sidik,
+                'batch_id' => $batchId, 'berkas' => $nama, 'sidik' => $sidik, 'biaya_admin' => $pungut,
                 'n_baris' => count($urai['baris']), 'operator' => $user->nama,
                 'created_at' => WaktuIso::sekarang(),
             ]);
@@ -174,6 +179,7 @@ class TopupMassalController extends Controller
             $nGagal = 0;
             $totalSaldo = 0;
             $totalTitipan = 0;
+            $totalBiaya = 0;
             $perluSmart = [];
 
             foreach ($urai['baris'] as $b) {
@@ -189,8 +195,9 @@ class TopupMassalController extends Controller
                     continue;
                 }
 
-                $ket = 'Top up massal ' . ImporTopup::METODE[$b['metode']] . " (uang diterima {$b['tgl_terima']})";
-                $setor = Setoran::terima($b['siswa_id'], $b['jumlah'], [
+                $ket = 'Top up massal ' . ImporTopup::METODE[$b['metode']] . " (uang diterima {$b['tgl_terima']})" .
+                    ($b['biaya'] > 0 ? ' — dari ' . Rupiah::f($b['jumlah']) . ', biaya admin ' . Rupiah::f($b['biaya']) : '');
+                $setor = Setoran::terima($b['siswa_id'], $b['bersih'], [
                     'keTitipan' => $keTitipan,
                     'operator' => $user->nama,
                     'keterangan' => $ket,
@@ -201,9 +208,17 @@ class TopupMassalController extends Controller
                     'refTitipan' => "impor-{$batchId}-b{$b['baris']}",
                 ]);
 
+                if ($b['biaya'] > 0) {
+                    $ref = "impor-{$batchId}-b{$b['baris']}-biaya";
+                    $txBiaya = BiayaAdmin::catat($setor['siswa'], $b['biaya'], $user->nama,
+                        "Biaya admin top up massal (batch {$batchId}, baris {$b['baris']})", $ref);
+                    DanaAdmin::terima($b['biaya'], $setor['siswa'], $txBiaya, $user->nama, $ref);
+                    $totalBiaya += $b['biaya'];
+                }
+
                 TopupImporBaris::create([
                     'impor_id' => $impor->id, 'baris' => $b['baris'], 'siswa_id' => $b['siswa_id'],
-                    'nis' => $b['nis'], 'nama' => $b['nama_berkas'], 'jumlah' => $b['jumlah'],
+                    'nis' => $b['nis'], 'nama' => $b['nama_berkas'], 'jumlah' => $b['jumlah'], 'biaya' => $b['biaya'],
                     'ke_saldo' => $setor['ke_saldo'], 'ke_titipan' => $setor['ke_titipan'],
                     'metode' => $b['metode'], 'tgl_terima' => $b['tgl_terima'],
                     'status' => 'berhasil', 'pesan' => $b['pesan'],
@@ -220,6 +235,7 @@ class TopupMassalController extends Controller
             $impor->update([
                 'n_berhasil' => $nBerhasil, 'n_gagal' => $nGagal,
                 'total_saldo' => $totalSaldo, 'total_titipan' => $totalTitipan,
+                'total_biaya' => $totalBiaya,
             ]);
 
             return ['impor_id' => $impor->id, 'perluSmart' => array_keys($perluSmart)];

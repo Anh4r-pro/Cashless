@@ -284,19 +284,25 @@ class Neraca
         $saldoMinus = Siswa::where('saldo', '<', 0)->orWhere('saldo_titipan', '<', 0)->count();
 
         /*
-         * Setiap baris biaya admin harus menempel pada satu pengajuan wali yang
-         * BENAR-BENAR disetujui. Biaya yang berdiri sendiri berarti uang
-         * berpindah dari kewajiban menjadi milik sekolah tanpa ada persetujuan
-         * yang bisa ditunjuk — persis jenis kejadian yang tidak boleh lolos
-         * diam-diam dari sebuah neraca.
+         * Setiap baris biaya admin harus menempel pada satu top up yang sah:
+         *   - pengajuan wali yang BENAR-BENAR disetujui (tx_id ortu-biaya-<id>), atau
+         *   - top up admin / impor massal milik santri yang sama, yang tx_id-nya
+         *     berpasangan: biaya "<tx top up>-biaya".
+         * Biaya yang berdiri sendiri berarti uang berpindah dari kewajiban
+         * menjadi milik sekolah tanpa ada top up yang bisa ditunjuk — persis
+         * jenis kejadian yang tidak boleh lolos diam-diam dari sebuah neraca.
          */
         $biayaYatim = (int) DB::selectOne("
             SELECT COUNT(*) AS n FROM transaksi t
              WHERE t.tipe='biaya_admin'
                AND (t.tx_id IS NULL
-                 OR NOT EXISTS (SELECT 1 FROM topup_request r
-                                 WHERE r.status='disetujui'
-                                   AND CONCAT('ortu-biaya-', r.id) = t.tx_id))")->n;
+                 OR (NOT EXISTS (SELECT 1 FROM topup_request r
+                                  WHERE r.status='disetujui'
+                                    AND CONCAT('ortu-biaya-', r.id) = t.tx_id)
+                     AND NOT (t.tx_id LIKE '%-biaya' AND EXISTS (
+                           SELECT 1 FROM transaksi u
+                            WHERE u.tipe = 'topup' AND u.siswa_id = t.siswa_id
+                              AND u.tx_id = SUBSTRING(t.tx_id, 1, CHAR_LENGTH(t.tx_id) - 6)))))")->n;
 
         $biayaPositif = Transaksi::where('tipe', 'biaya_admin')->where('jumlah', '>=', 0)->count();
 
@@ -355,10 +361,10 @@ class Neraca
                 'ok' => $imporTanpaTx === 0, 'nilai' => $imporTanpaTx, 'catatan' => ''],
             ['kode' => 'saldo_minus', 'label' => 'Tidak ada saldo atau titipan bernilai minus',
                 'ok' => $saldoMinus === 0, 'nilai' => $saldoMinus, 'catatan' => ''],
-            ['kode' => 'biaya_yatim', 'label' => 'Setiap biaya admin menempel pada pengajuan wali yang disetujui',
+            ['kode' => 'biaya_yatim', 'label' => 'Setiap biaya admin menempel pada top up yang sah',
                 'ok' => $biayaYatim === 0, 'nilai' => $biayaYatim,
                 'catatan' => $biayaYatim === 0 ? '' :
-                    "{$biayaYatim} baris biaya admin tidak punya pengajuan yang bisa ditunjuk. " .
+                    "{$biayaYatim} baris biaya admin tidak punya top up yang bisa ditunjuk. " .
                     'Berarti uang berpindah dari kewajiban menjadi milik sekolah tanpa persetujuan.'],
             ['kode' => 'biaya_arah', 'label' => 'Biaya admin selalu tercatat sebagai pengurang',
                 'ok' => $biayaPositif === 0, 'nilai' => $biayaPositif, 'catatan' => ''],

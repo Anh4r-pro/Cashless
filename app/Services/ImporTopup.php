@@ -157,7 +157,13 @@ class ImporTopup
 
     // ------------------------------------------------------------- urai
 
-    public static function urai(string $isi, string $nama, bool $abaikanNama, bool $keTitipan): array
+    /**
+     * @param bool $pungutBiaya admin memilih "biaya admin" untuk seluruh berkas:
+     *   tiap baris dipotong tarif manual (BiayaAdmin::untukManual) sebelum
+     *   sisanya dibagi ke kartu/titipan. Satu pilihan per berkas, bukan kolom
+     *   per baris — lebih sedikit peluang salah isi di Excel.
+     */
+    public static function urai(string $isi, string $nama, bool $abaikanNama, bool $keTitipan, bool $pungutBiaya = false): array
     {
         ['baris' => $baris, 'lembar' => $lembar] = self::barisDariBerkas($isi, $nama);
         ['peta' => $peta, 'barisKepala' => $barisKepala] = self::petakanKolom($baris);
@@ -195,7 +201,7 @@ class ImporTopup
                 'jumlah' => 0, 'metode' => '', 'tgl_terima' => '',
                 'siswa_id' => null, 'nama_db' => '', 'kelas' => '',
                 'saldo' => null, 'titipan' => null,
-                'ke_saldo' => 0, 'ke_titipan' => 0,
+                'ke_saldo' => 0, 'ke_titipan' => 0, 'biaya' => 0, 'bersih' => 0,
                 'status' => 'gagal', 'pesan' => '',
             ];
             $gagal = function (string $pesan) use (&$b, &$hasil) {
@@ -275,6 +281,15 @@ class ImporTopup
                 $b['pesan'] = $b['pesan'] ?: 'Kartu diblokir — seluruh nominal masuk titipan';
             }
 
+            $biaya = $pungutBiaya ? BiayaAdmin::untukManual($s, $jumlah) : 0;
+            if ($biaya > 0 && $biaya >= $jumlah) {
+                $gagal('Nominal ' . Rupiah::f($jumlah) . ' tidak lebih besar dari biaya admin ' . Rupiah::f($biaya));
+
+                continue;
+            }
+            $b['biaya'] = $biaya;
+            $b['bersih'] = $bersih = $jumlah - $biaya;
+
             if (! isset($bayangan[$s->id])) {
                 $bayangan[$s->id] = [
                     'saldo' => (int) $s->saldo, 'titipan' => (int) $s->saldo_titipan,
@@ -290,8 +305,8 @@ class ImporTopup
 
             $b['saldo'] = $bay['saldo'];
             $b['titipan'] = $bay['titipan'];
-            $b['ke_saldo'] = $bolehTitipan ? min($jumlah, $ruang) : $jumlah;
-            $b['ke_titipan'] = $jumlah - $b['ke_saldo'];
+            $b['ke_saldo'] = $bolehTitipan ? min($bersih, $ruang) : $bersih;
+            $b['ke_titipan'] = $bersih - $b['ke_saldo'];
 
             if (! $bolehTitipan && $b['ke_saldo'] > $ruang) {
                 $gagal('Melebihi kapasitas kartu (ruang ' . Rupiah::f($ruang) . ') — ' .
@@ -350,6 +365,7 @@ class ImporTopup
                 'total' => array_sum(array_column($siap, 'jumlah')),
                 'total_saldo' => array_sum(array_column($siap, 'ke_saldo')),
                 'total_titipan' => array_sum(array_column($siap, 'ke_titipan')),
+                'total_biaya' => array_sum(array_column($siap, 'biaya')),
                 'per_metode' => $perMetode,
             ],
         ];
@@ -367,7 +383,7 @@ class ImporTopup
      * "50.000,00". Titik & spasi dianggap pemisah ribuan; apa pun setelah koma
      * dianggap sen dan dibuang — kantin tidak pernah memakai pecahan rupiah.
      */
-    private static function nominal($v): ?int
+    public static function nominal($v): ?int
     {
         if (is_int($v) || is_float($v)) {
             return (int) floor($v);

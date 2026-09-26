@@ -24,6 +24,12 @@ class Keranjang
 
     public const MAKS_QTY = 99;
 
+    /** Mode kasir tenant — lihat migrasi mode_kasir_tenant. */
+    public const MODE_KASIR = ['menu', 'bebas'];
+
+    /** Deskripsi terpendek yang masih bermakna di riwayat santri ("Pulpen" lolos, "a" tidak). */
+    public const MIN_DESKRIPSI = 3;
+
     public static function ringkas(array $items, Tenant $tenant, array $cfg): array
     {
         if (! $items) {
@@ -62,7 +68,15 @@ class Keranjang
                 if ($harga <= 0) {
                     throw new ApiError(400, 'Nominal input manual tidak valid');
                 }
-                $nama = mb_substr(trim((string) ($it['nama'] ?? '')), 0, 60) ?: 'Input manual';
+                $deskripsi = mb_substr(trim(preg_replace('/\s+/u', ' ', (string) ($it['nama'] ?? ''))), 0, 60);
+                // Di mode bebas SEMUA barang lewat jalur ini, jadi deskripsi
+                // diwajibkan: tanpanya riwayat santri dan portal wali hanya
+                // berisi deretan "Input manual" yang tidak menjelaskan apa pun.
+                if (($tenant->mode_kasir ?? 'menu') === 'bebas' && mb_strlen($deskripsi) < self::MIN_DESKRIPSI) {
+                    throw new ApiError(400, 'Tulis apa yang dibeli (minimal ' . self::MIN_DESKRIPSI .
+                        ' huruf) — tenant ini memakai mode kasir tanpa menu');
+                }
+                $nama = $deskripsi !== '' ? $deskripsi : 'Input manual';
                 $kategori = (($it['kategori'] ?? '') === 'non_makanan') ? 'non_makanan' : 'makanan';
                 if ($kategori === 'non_makanan' && $tenant->jenis !== 'koperasi') {
                     throw new ApiError(400, 'Hanya tenant koperasi yang boleh menjual barang non-makanan');
