@@ -61,7 +61,7 @@ class OrtuController extends Controller
         // NIS kembar pada data lama: menebak salah satunya berarti menampilkan
         // data anak orang lain. Berhenti, dan minta sekolah membereskan datanya.
         if ($kandidat->count() > 1) {
-            throw new ApiError(409, 'NIS ini terdaftar pada lebih dari satu anak. Hubungi admin kantin.');
+            throw new ApiError(409, 'NIS ini terdaftar pada lebih dari satu anak. Hubungi admin cashless.');
         }
         $s = $kandidat->first();
         if (! $s) {
@@ -80,7 +80,7 @@ class OrtuController extends Controller
         // supaya orang tua tahu harus menghubungi admin dan tidak menebak terus.
         if (! $s->tgl_lahir || ($mintaHp && ! $s->hp_ortu)) {
             throw new ApiError(409, 'Data tanggal lahir' . ($mintaHp ? ' / nomor HP wali' : '') .
-                ' belum dilengkapi sekolah. Hubungi admin kantin.');
+                ' belum dilengkapi sekolah. Hubungi admin cashless.');
         }
 
         $ddmmyy = KunciWali::ddmmyy($s->tgl_lahir);
