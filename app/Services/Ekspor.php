@@ -57,7 +57,7 @@ class Ekspor
 
         return '
 <meta charset="utf-8">
-<h3>Kantin Imbos — Riwayat Transaksi (' . e($meta['judul']) . ')</h3>
+<h3>IMBOS Cashless — Riwayat Transaksi (' . e($meta['judul']) . ')</h3>
 <p>Periode: ' . e($meta['periode']) . ' · ' . $rows->count() . ' transaksi ·
    Total belanja: ' . Rupiah::f($meta['total_belanja']) . ' ·
    Total top up: ' . Rupiah::f($meta['total_masuk']) . '</p>

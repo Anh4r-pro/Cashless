@@ -211,7 +211,7 @@ function showApp() {
   }
   $('#login').classList.add('hidden');
   $('#app').classList.remove('hidden');
-  $('#hd-title').textContent = USER.role === 'tenant' ? `Kantin Imbos — ${USER.tenant_nama}` : 'Kantin Imbos';
+  $('#hd-title').textContent = USER.role === 'tenant' ? `IMBOS Cashless — ${USER.tenant_nama}` : 'IMBOS Cashless';
   $('#hd-user').textContent = USER.role === 'tenant'
     ? `${USER.nama} (kasir)`
     : `${USER.nama} · ${USER.kategori_nama || 'Akses Penuh'}`;

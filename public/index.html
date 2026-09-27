@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Kantin Imbos — Sistem Kasir Kartu</title>
+<title>IMBOS Cashless — Sistem Transaksi Non-Tunai Terintegrasi</title>
 <link rel="icon" type="image/png" href="/img/logo-imbos.png">
 <!-- Fonta disajikan dari server sendiri — tidak ada host asing yang harus
      dihubungi sebelum huruf tampil. Satu berkas variabel (27 KB) untuk semua
@@ -19,7 +19,7 @@
 
 <!-- Layar antara: tampil sampai status sesi diketahui, supaya form login tidak
      sempat berkedip saat halaman di-refresh dalam keadaan sudah login. -->
-<div id="boot"><img src="/img/logo-imbos.png" alt="Memuat Kantin Imbos"></div>
+<div id="boot"><img src="/img/logo-imbos.png" alt="Memuat IMBOS Cashless"></div>
 
 <!-- ============================================================ LOGIN -->
 <div id="login" class="hidden">
@@ -27,8 +27,8 @@
        formulirnya tetap di .login-panel dengan ID yang sama. -->
   <div class="login-sisi" aria-hidden="true">
     <img src="/img/logo-imbos.png" alt="">
-    <b>Kantin Imbos</b>
-    <span>Sistem kantin non-tunai<br>Insan Mulia Boarding School Pringsewu</span>
+    <b>IMBOS Cashless</b>
+    <span>Sistem Transaksi Non-Tunai Terintegrasi<br>Insan Mulia Boarding School Pringsewu</span>
     <ul>
       <li>Transaksi kartu santri tanpa uang tunai</li>
       <li>Saldo, top up, dan neraca kas dalam satu tempat</li>
@@ -37,7 +37,7 @@
   </div>
   <div class="panel login-panel">
     <img src="/img/logo-imbos.png" alt="Logo IMBOS" class="login-logo">
-    <h1>Kantin Imbos</h1>
+    <h1>IMBOS Cashless</h1>
     <p class="muted">Insan Mulia Boarding School — Sistem Kasir Kartu</p>
     <div class="field"><label>Username</label><input id="login-user" autocomplete="username"></div>
     <div class="field"><label>Password</label><input type="password" id="login-pass" autocomplete="current-password"></div>
@@ -55,7 +55,7 @@
 <div id="app" class="hidden">
 <header>
   <img src="/img/logo-imbos.png" alt="" class="hd-logo">
-  <h1><span id="hd-title">Kantin Imbos</span></h1>
+  <h1><span id="hd-title">IMBOS Cashless</span></h1>
   <!-- Tombol ☰ hanya tampil di layar sempit (diatur CSS). Menu bar TETAP ada
        di DOM pada lebar berapa pun — lencana, penandaan tab aktif, dan lompatan
        antar-tab semuanya mencari `#nav button[data-v=…]`. -->
@@ -75,7 +75,7 @@
   <span id="kh-tanggal"></span>
 </div>
 <main id="main"></main>
-<footer class="muted">Kantin Imbos · Insan Mulia Boarding School Pringsewu</footer>
+<footer class="muted">IMBOS Cashless · Insan Mulia Boarding School Pringsewu</footer>
 </div>
 
 <div id="toast"></div>

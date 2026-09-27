@@ -263,7 +263,7 @@ class ArsipController extends Controller
         $sheet->getColumnDimension('A')->setWidth(110);
 
         $teks = [
-            'Arsip pemegang kartu — Kantin Imbos',
+            'Arsip pemegang kartu — IMBOS Cashless',
             '',
             'Berkas ini dibuat ' . date('d/m/Y H:i') . ' WIB dan memuat ' . $n . ' baris'
                 . ($kelas !== '' ? ' dari kelas ' . strtoupper($kelas) : ' yang sudah terarsip') . '.',

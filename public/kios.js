@@ -305,7 +305,7 @@ function render(extra) {
 function kepalaHtml(judul) {
   return `<header class="k-head">
     <img src="/img/logo-imbos.png" alt="">
-    <div class="k-head-judul"><b>${esc(judul)}</b><span>Kantin Imbos · Insan Mulia Boarding School</span></div>
+    <div class="k-head-judul"><b>${esc(judul)}</b><span>IMBOS Cashless · Insan Mulia Boarding School</span></div>
     <span class="k-mundur" id="k-mundur"></span>
     <button class="k-keluar" data-aksi="selesai">Selesai</button>
   </header>`;
@@ -326,7 +326,7 @@ function idleHtml() {
     </div>`).join('');
   return `<div class="k-idle">
     <img class="k-logo" src="/img/logo-imbos.png" alt="Logo IMBOS">
-    <h1>Kios Santri Kantin Imbos</h1>
+    <h1>Kios Santri IMBOS Cashless</h1>
     <div class="k-tapzone"><span class="k-tap-ikon">${IKON.kartu}</span>
       <b>Tempelkan kartu ke pembaca</b>
       <span class="k-sub">Cek saldo cukup tap · Donasi: tap lalu masukkan PIN</span>

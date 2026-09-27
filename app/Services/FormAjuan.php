@@ -20,7 +20,7 @@ use Illuminate\Support\Collection;
  */
 class FormAjuan
 {
-    public const SEKOLAH = 'Kantin Imbos';
+    public const SEKOLAH = 'IMBOS Cashless';
 
     public const JUDUL = ['No', 'Tenant', 'Jenis Usulan', 'Menu Sekarang', 'Harga Sekarang',
         'Usulan Menu', 'Usulan Harga', 'Selisih', 'Diajukan', 'Pengaju', 'Status'];
@@ -105,7 +105,7 @@ class FormAjuan
         }
 
         $ringkas = self::ringkas($rows);
-        $sekolah = e($meta['sekolah'] ?? 'Kantin Imbos');
+        $sekolah = e($meta['sekolah'] ?? 'IMBOS Cashless');
         $judul = e($meta['judul'] ?? 'Form Pengajuan Perubahan Menu');
         $periode = e($meta['periode'] ?? '—');
         $saring = e($meta['penyaring'] ?? 'Semua usulan');
