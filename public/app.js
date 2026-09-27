@@ -3182,6 +3182,7 @@ function siswaView(el, sdm) {
     <p class="muted">💡 Tap kartu di halaman ini untuk langsung menemukan pemiliknya / mendaftarkan kartu baru.</p>
     <div class="tblwrap"><table>
       <thead><tr><th></th><th>Nama</th><th>${sdm ? 'Golongan' : 'Kelas'}</th>
+      ${sdm ? '<th>NIY</th>' : ''}
       <th>${sdm ? 'Unit &amp; jabatan' : 'NIS'}</th><th>UID Kartu</th>
       <th class="num">Saldo</th><th>Status</th><th>${sdm ? 'Berlaku sampai' : 'Portal ortu'}</th>
       <th>PIN kios</th><th></th></tr></thead>
@@ -3303,9 +3304,9 @@ async function loadSiswa() {
   $('#sw-body').innerHTML = d.siswa.map((s) => `
     <tr>
       <td>${avatarHtml(s, true)}</td>
-      <td><b>${esc(s.nama)}</b>${sdm && s.nis
-        ? `<br><span class="muted">NIY ${esc(s.nis)}</span>` : ''}</td>
+      <td><b>${esc(s.nama)}</b></td>
       <td>${sdm ? esc(golDari(s.golongan).nama) : lencanaKelas(s.kelas)}</td>
+      ${sdm ? `<td>${s.nis ? esc(s.nis) : '<span class="muted">belum ada</span>'}</td>` : ''}
       <td>${sdm
         ? `${esc(s.kelas || '—')}${s.jabatan ? `<br><span class="muted">${esc(s.jabatan)}</span>` : ''}`
         : esc(s.nis)}</td>
@@ -3335,7 +3336,7 @@ async function loadSiswa() {
             : `<button class="linkbtn danger" data-act="arsipkan" data-id="${s.id}">arsipkan</button>`) : '',
       ].filter(Boolean).join(' · ') || '<span class="muted">—</span>'}</td>
     </tr>`).join('') ||
-    `<tr><td colspan="10" class="muted">Tidak ada ${sdm ? 'personil' : 'santri'} cocok filter</td></tr>`;
+    `<tr><td colspan="${sdm ? 11 : 10}" class="muted">Tidak ada ${sdm ? 'personil' : 'santri'} cocok filter</td></tr>`;
   const maxPage = Math.max(1, Math.ceil(d.total / d.limit));
   $('#sw-pageinfo').textContent = `hal ${siswaState.page} / ${maxPage}`;
   $('#sw-prev').disabled = siswaState.page <= 1;
