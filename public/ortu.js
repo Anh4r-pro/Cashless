@@ -116,14 +116,18 @@ function tampilLogin(pesan) {
   $('#o-nis').focus();
 }
 
-/** Keterangan jujur di footer: mengikuti sesi yang SEDANG berjalan, bukan
- *  pilihan kotak centang di layar masuk (yang sudah hilang begitu masuk). */
+/**
+ * Keterangan sesi di footer — hanya tampil kalau ADA sesuatu yang perlu
+ * dijelaskan. Sesi biasa (2 jam) tidak lagi diumumkan sama sekali; baris ini
+ * baru muncul saat "tetap masuk" sedang aktif, supaya wali tahu kenapa ia
+ * tidak diminta login lagi.
+ */
 function gambarFooterSesi(ingat) {
+  const wrap = $('#o-footer-sesi-wrap');
   const el = $('#o-footer-sesi');
-  if (!el) return;
-  el.textContent = ingat
-    ? 'Tetap masuk di HP ini — otomatis keluar bila tidak dibuka 30 hari, atau setelah 6 bulan.'
-    : 'Sesi portal berakhir otomatis setelah 2 jam.';
+  if (!wrap || !el) return;
+  wrap.classList.toggle('hidden', !ingat);
+  if (ingat) el.textContent = 'Tetap masuk di HP ini — otomatis keluar bila tidak dibuka 30 hari, atau setelah 6 bulan.';
 }
 
 function tampilError(pesan) {
