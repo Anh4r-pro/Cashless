@@ -29,6 +29,26 @@ class Sesi
 
     public const TTL_ORTU_MS = 2 * 3600 * 1000;
 
+    /**
+     * "Tetap masuk di HP ini" — dua angka, dua peran berbeda:
+     *
+     *   TTL_ORTU_INGAT_MS      jendela yang BERGESER. Tiap kali sesi dipakai
+     *                          dan sisa umurnya sudah menipis, jendela ini
+     *                          digeser maju dari SAAT ITU — dipakai rutin
+     *                          berarti nyaris tidak pernah kedaluwarsa.
+     *   TTL_ORTU_INGAT_MAKS_MS batas MUTLAK, dihitung dari saat login, bukan
+     *                          dari pemakaian terakhir. Jendela di atas tidak
+     *                          pernah digeser melewati titik ini — jaring
+     *                          pengaman kalau HP hilang dan tetap sesekali
+     *                          dibuka orang lain selama berbulan-bulan.
+     *
+     * Wali yang TIDAK mencentang "tetap masuk" tetap memakai TTL_ORTU_MS
+     * seperti sebelumnya: tetap (bukan bergeser), dan tidak pernah diperpanjang.
+     */
+    public const TTL_ORTU_INGAT_MS = 30 * 24 * 3600 * 1000;
+
+    public const TTL_ORTU_INGAT_MAKS_MS = 180 * 24 * 3600 * 1000;
+
     public static function sekarangMs(): int
     {
         return (int) round(microtime(true) * 1000);
@@ -71,15 +91,18 @@ class Sesi
 
     // ------------------------------------------------------------- ortu
 
-    public static function buatOrtu(Siswa $s): string
+    public static function buatOrtu(Siswa $s, bool $ingat = false): string
     {
         $token = self::token();
+        $sekarang = self::sekarangMs();
         SesiOrtu::create([
             'token' => $token,
             'siswa_id' => $s->id,
-            'expires_at' => self::sekarangMs() + self::TTL_ORTU_MS,
+            'remember' => $ingat,
+            'login_at' => $sekarang,
+            'expires_at' => $sekarang + ($ingat ? self::TTL_ORTU_INGAT_MS : self::TTL_ORTU_MS),
         ]);
-        SesiOrtu::where('expires_at', '<', self::sekarangMs())->delete();
+        SesiOrtu::where('expires_at', '<', $sekarang)->delete();
 
         return $token;
     }
@@ -94,8 +117,36 @@ class Sesi
         if (! $s || $s->expires_at < self::sekarangMs()) {
             return null;
         }
+        if ($s->remember) {
+            self::perpanjangOrtuJikaPerlu($s);
+        }
+        // Dibaca /api/ortu/me untuk menampilkan keterangan sesi yang jujur —
+        // tanpa ini, wali yang masuk lewat sesi lama (bukan login barusan)
+        // tidak ada cara mengetahui apakah "tetap masuk"-nya masih aktif.
+        $r->attributes->set('ortu_ingat', $s->remember);
 
         return Siswa::find($s->siswa_id);
+    }
+
+    /**
+     * Menggeser jendela HANYA kalau sisa umurnya sudah menipis (di bawah
+     * separuh jendela geser) — bukan pada setiap permintaan, supaya sesi yang
+     * dipakai wara-wiri sepanjang hari tidak menulis basis data tiap detik.
+     *
+     * Tidak pernah menggeser melewati login_at + TTL_ORTU_INGAT_MAKS_MS,
+     * berapa pun aktifnya sesi ini.
+     */
+    private static function perpanjangOrtuJikaPerlu(SesiOrtu $s): void
+    {
+        $sekarang = self::sekarangMs();
+        if ($s->expires_at - $sekarang > self::TTL_ORTU_INGAT_MS / 2) {
+            return;
+        }
+        $batasMutlak = $s->login_at + self::TTL_ORTU_INGAT_MAKS_MS;
+        $baru = min($sekarang + self::TTL_ORTU_INGAT_MS, $batasMutlak);
+        if ($baru > $s->expires_at) {
+            $s->update(['expires_at' => $baru]);
+        }
     }
 
     // ------------------------------------------------------------- cookie

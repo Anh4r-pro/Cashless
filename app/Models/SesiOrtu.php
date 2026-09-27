@@ -21,7 +21,7 @@ class SesiOrtu extends Model
 
     public $incrementing = false;
 
-    protected $fillable = ['token', 'siswa_id', 'expires_at'];
+    protected $fillable = ['token', 'siswa_id', 'expires_at', 'remember', 'login_at'];
 
-    protected $casts = ['expires_at' => 'int'];
+    protected $casts = ['expires_at' => 'int', 'login_at' => 'int', 'remember' => 'bool'];
 }

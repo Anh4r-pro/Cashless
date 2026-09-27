@@ -96,12 +96,34 @@ function sejakKapan(iso) {
 }
 
 // ------------------------------------------------------------------ masuk
+// NIS BUKAN kunci rahasia — teman sekelas pun tahu (kunci sebenarnya adalah
+// tanggal lahir, kadang + 4 digit HP). Jadi kotak NIS aman diingat otomatis
+// di HP itu; yang TIDAK pernah diingat adalah tanggal lahir maupun sesi login.
+const NIS_INGAT_KUNCI = 'ortu-nis-terakhir';
+
 function tampilLogin(pesan) {
   $('#boot').classList.add('hidden');
   $('#ortu-app').classList.add('hidden');
   $('#ortu-login').classList.remove('hidden');
   if (pesan) tampilError(pesan);
+  // Tidak menimpa isian yang sedang diketik — hanya mengisi kalau kotaknya
+  // masih kosong (mis. dipanggil ulang setelah percobaan login gagal).
+  if (!$('#o-nis').value) {
+    let terakhir = null;
+    try { terakhir = localStorage.getItem(NIS_INGAT_KUNCI); } catch { /* abaikan */ }
+    if (terakhir) $('#o-nis').value = terakhir;
+  }
   $('#o-nis').focus();
+}
+
+/** Keterangan jujur di footer: mengikuti sesi yang SEDANG berjalan, bukan
+ *  pilihan kotak centang di layar masuk (yang sudah hilang begitu masuk). */
+function gambarFooterSesi(ingat) {
+  const el = $('#o-footer-sesi');
+  if (!el) return;
+  el.textContent = ingat
+    ? 'Tetap masuk di HP ini — otomatis keluar bila tidak dibuka 30 hari, atau setelah 6 bulan.'
+    : 'Sesi portal berakhir otomatis setelah 2 jam.';
 }
 
 function tampilError(pesan) {
@@ -112,10 +134,12 @@ function tampilError(pesan) {
 
 async function masuk() {
   const btn = $('#o-masuk');
+  const ingat = $('#o-ingat').checked;
   const body = {
     nis: digit($('#o-nis').value),
     lahir: digit($('#o-lahir').value),
     hp4: MINTA_HP ? digit($('#o-hp4').value) : '',
+    ingat,
   };
   if (!body.nis || !body.lahir || (MINTA_HP && !body.hp4))
     return tampilError('Semua kolom wajib diisi.');
@@ -124,7 +148,11 @@ async function masuk() {
   btn.textContent = 'Memeriksa…';
   try {
     await api('/api/ortu/login', { method: 'POST', body });
-    $('#o-lahir').value = ''; $('#o-hp4').value = '';
+    // Kegagalan menyimpan (mis. mode penyamaran) tidak boleh dianggap login-nya
+    // gagal — wali sudah berhasil masuk, ini cuma kemudahan tambahan.
+    try { localStorage.setItem(NIS_INGAT_KUNCI, body.nis); } catch { /* abaikan */ }
+    $('#o-lahir').value = ''; $('#o-hp4').value = ''; $('#o-ingat').checked = false;
+    gambarFooterSesi(ingat);
     await mulaiApp();
   } catch (e) {
     tampilError(e.message);
@@ -624,7 +652,9 @@ $('#o-masuk').onclick = masuk;
 $('#o-keluar').onclick = keluar;
 $('#o-topup').onclick = mulaiTopup;
 addEventListener('keydown', (e) => { if (e.key === 'Escape') tutupModal(); });
-document.querySelectorAll('#ortu-login input').forEach((i) => {
+// :not([type=checkbox]) — "tetap masuk" bukan kolom angka, dan nilai bawaan
+// checkbox ("on") tidak boleh ikut dilucuti seolah-olah isian NIS/tanggal.
+document.querySelectorAll('#ortu-login input:not([type=checkbox])').forEach((i) => {
   i.addEventListener('keydown', (e) => { if (e.key === 'Enter') masuk(); });
   // kolom angka: buang karakter non-digit sambil diketik
   i.addEventListener('input', () => { i.value = digit(i.value); });
@@ -650,7 +680,15 @@ $('#o-tx-next').onclick = () => { state.page++; muatTransaksi(); };
 
 // sesi masih hidup? langsung tampilkan data, jangan kedipkan form masuk
 api('/api/ortu/me')
-  .then((d) => { pasangKunci(d.minta_hp); return d.authed ? mulaiApp() : tampilLogin(); })
+  .then((d) => {
+    pasangKunci(d.minta_hp);
+    if (!d.authed) return tampilLogin();
+    // Sesi lama (bukan login barusan) — footer perlu tahu dari server apakah
+    // "tetap masuk"-nya sedang aktif, karena kotak centangnya sendiri sudah
+    // lama tidak ada di layar.
+    gambarFooterSesi(d.ingat);
+    return mulaiApp();
+  })
   // Server tak terjangkau: tampilkan form dengan kunci terlengkap yang mungkin,
   // supaya wali tidak tertahan oleh kolom yang hilang saat sambungan pulih.
   .catch(() => { pasangKunci(true); tampilLogin(); });

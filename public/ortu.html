@@ -41,6 +41,13 @@
         <input id="o-hp4" inputmode="numeric" autocomplete="off" maxlength="4" placeholder="contoh: 1234">
         <span class="hint">Nomor HP yang didaftarkan ke sekolah</span></div>
 
+      <label class="o-ingat" for="o-ingat">
+        <input type="checkbox" id="o-ingat">
+        <span>Tetap masuk di HP ini <span class="hint" style="display:inline">(sampai 30 hari, atau lebih lama bila rutin dipakai)</span></span>
+      </label>
+      <p class="o-ingat-catatan">⚠️ Jangan aktifkan di HP bersama — siapa pun yang memegangnya bisa
+        membuka data ini tanpa mengetik apa-apa lagi.</p>
+
       <button id="o-masuk" class="o-tombol">Lihat Data Anak</button>
       <p id="o-err" class="o-err hidden"></p>
     </div>
@@ -159,7 +166,7 @@
  </div>
 </main>
 <footer>IMBOS Cashless · Insan Mulia Boarding School Pringsewu<br>
-  Sesi portal berakhir otomatis setelah 2 jam.</footer>
+  <span id="o-footer-sesi">Sesi portal berakhir otomatis setelah 2 jam.</span></footer>
 
 <nav class="o-tabbar" aria-label="Menu portal">
   <div class="o-tabbar-isi">

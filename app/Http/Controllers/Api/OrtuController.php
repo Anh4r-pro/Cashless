@@ -92,11 +92,22 @@ class OrtuController extends Controller
         }
 
         Rem::lupakan($kIp, $kNis);
-        $token = Sesi::buatOrtu($s);
+        // "Tetap masuk di HP ini" — sengaja BUKAN lapis keamanan (siapa pun
+        // yang mengetik JSON bisa mengirimnya), melainkan pilihan wali sendiri
+        // tentang berapa lama sesi ini boleh bergeser. Bawaannya mati.
+        $ingat = $r->input('ingat') === true;
+        $token = Sesi::buatOrtu($s, $ingat);
+
+        // Umur COOKIE-nya (di peramban) sengaja dipasang sebesar batas MUTLAK,
+        // bukan sebesar jendela geser: yang menentukan sesi masih sah atau
+        // tidak tetap baris di basis data (Sesi::ortu), bukan cookie ini.
+        // Cookie hanya perlu tidak berhenti dikirim peramban sebelum sesinya
+        // sendiri benar-benar habis.
+        $detikCookie = $ingat ? (int) (Sesi::TTL_ORTU_INGAT_MAKS_MS / 1000) : (int) (Sesi::TTL_ORTU_MS / 1000);
 
         return Sesi::pasangCookie(
             response()->json(['ok' => true, 'siswa' => $this->untukOrtu($s)]),
-            'osid', $token, (int) (Sesi::TTL_ORTU_MS / 1000),
+            'osid', $token, $detikCookie,
         );
     }
 
@@ -121,7 +132,13 @@ class OrtuController extends Controller
             return response()->json(['authed' => false, 'minta_hp' => $mintaHp]);
         }
 
-        return response()->json(['authed' => true, 'minta_hp' => $mintaHp, 'siswa' => $this->untukOrtu($s)]);
+        return response()->json([
+            'authed' => true, 'minta_hp' => $mintaHp, 'siswa' => $this->untukOrtu($s),
+            // Diisi Sesi::ortu() lewat request attribute — dipakai halaman
+            // untuk menjelaskan sesi mana yang sedang berjalan, jujur, walau
+            // wali masuk lewat sesi lama (bukan baru saja menekan tombol Masuk).
+            'ingat' => (bool) $r->attributes->get('ortu_ingat', false),
+        ]);
     }
 
     public function ringkasan(Request $r)
