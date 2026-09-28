@@ -3658,6 +3658,11 @@ function golonganFormModal(g, cfg, sesudah) {
         portal_ortu: $('#gf-ortu').checked ? 1 : 0,
         kios: $('#gf-kios').checked ? 1 : 0,
         transfer: $('#gf-transfer').checked ? 1 : 0,
+        // Sempat hilang dari sini (28 Sep 2026): checkbox tampil dan bisa
+        // dicentang, tapi nilainya tidak pernah ikut terkirim — admin
+        // mencentang lalu Simpan tidak menunjukkan galat apa pun, dan
+        // golongan itu tetap tidak pernah memungut siapa pun.
+        biaya_admin_kena: $('#gf-biaya').checked ? 1 : 0,
       };
       for (const k of Object.keys(BATAS_LABEL)) {
         // Kosong dikirim sebagai null: itulah cara menyatakan "ikut sekolah".
