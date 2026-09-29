@@ -238,17 +238,19 @@ class ImporKartuController extends Controller
                 'NISN (opsional)', 'Boleh dikosongkan. Kalau diisi: 4–20 angka, dan harus khas.',
                 'NISN tidak valid', 'NISN harus 4–20 angka, atau dikosongkan.'];
 
-            $aturan[] = ['lahir', DataValidation::TYPE_CUSTOM, null,
-                'OR(' . $huruf['lahir'] . '2="",AND(' . $bentukTanggal($huruf['lahir']) . '))', null,
-                'Tanggal lahir', 'Format DD/MM/YYYY dengan nol di depan, mis. 05/08/2012. ' .
-                    'Dipakai wali untuk masuk portal orang tua — kosong berarti wali belum bisa masuk.',
-                'Format tanggal salah', 'Tulis DD/MM/YYYY, mis. 05/08/2012, atau kosongkan.'];
-
             $aturan[] = ['hp', DataValidation::TYPE_CUSTOM, null,
                 'OR(' . $huruf['hp'] . '2="",AND(LEN(' . $huruf['hp'] . '2)>=8,LEN(' . $huruf['hp'] . '2)<=15))', null,
                 'No HP wali (opsional)', 'Boleh dikosongkan. Angka saja, 8–15 digit, mis. 081234567890.',
                 'Nomor HP tidak valid', 'Nomor HP 8–15 angka, atau dikosongkan.'];
         }
+
+        $aturan[] = ['lahir', DataValidation::TYPE_CUSTOM, null,
+            'OR(' . $huruf['lahir'] . '2="",AND(' . $bentukTanggal($huruf['lahir']) . '))', null,
+            'Tanggal lahir', 'Format DD/MM/YYYY dengan nol di depan, mis. 05/08/2012. ' .
+                ($jenis === 'sdm'
+                    ? 'Dipakai untuk masuk portal SIMCASHTREN — kosong berarti belum bisa masuk.'
+                    : 'Dipakai wali untuk masuk portal — kosong berarti wali belum bisa masuk.'),
+            'Format tanggal salah', 'Tulis DD/MM/YYYY, mis. 05/08/2012, atau kosongkan.'];
 
         foreach ($aturan as [$kunci, $tipe, $operator, $f1, $f2, $judulPesan, $pesan, $judulGalat, $galat]) {
             if (! isset($huruf[$kunci])) {
@@ -310,14 +312,20 @@ class ImporKartuController extends Controller
                 '6. Unit harus salah satu dari: ' . implode(', ', BidangSiswa::UNIT_SDM) . '.',
                 '7. Golongan boleh dikosongkan — kartu akan memakai golongan SDM bawaan. Golongan menentukan ' .
                     'batas saldo dan belanja kartu, jadi isilah kalau personil ini memang bukan pegawai biasa.',
-                '8. Berlaku Sampai boleh dikosongkan (= tanpa batas waktu). Kalau diisi, pakai DD/MM/YYYY.',
-                '9. Kartu NFC TIDAK didaftarkan lewat berkas ini. Setelah data masuk, tempelkan kartu satu per ' .
+                '8. Tanggal Lahir memakai DD/MM/YYYY dengan nol di depan, mis. 05/08/1990. Tanggal lahir inilah ' .
+                    'kunci masuk portal SIMCASHTREN (pilih "Pegawai / Staf") — baris tanpa tanggal lahir tetap dibuat, ' .
+                    'tapi orangnya belum bisa masuk sampai tanggalnya diisi. Portal hanya melayani golongan yang ' .
+                    'sudah dibuka admin.',
+                '9. Berlaku Sampai boleh dikosongkan (= tanpa batas waktu). Kalau diisi, pakai DD/MM/YYYY.',
+                '10. NIY/Nomor Pegawai yang dipakai masuk portal sebaiknya ANGKA SAJA — huruf dan tanda baca ' .
+                    'dibuang portal saat masuk sehingga tidak akan pernah cocok.',
+                '11. Kartu NFC TIDAK didaftarkan lewat berkas ini. Setelah data masuk, tempelkan kartu satu per ' .
                     'satu lewat tombol "kartu" di tabel SDM & Personil.',
             ]
             : [
                 '6. NISN boleh dikosongkan. Kalau diisi harus 4–20 angka dan khas.',
                 '7. Tanggal Lahir memakai DD/MM/YYYY dengan nol di depan, mis. 05/08/2012. Tanggal lahir inilah ' .
-                    'yang dipakai wali untuk masuk Portal Orang Tua — baris tanpa tanggal lahir tetap dibuat, ' .
+                    'yang dipakai wali untuk masuk portal (SIMCASHTREN) — baris tanpa tanggal lahir tetap dibuat, ' .
                     'tapi walinya belum bisa masuk sampai tanggalnya diisi.',
                 '8. No HP Wali boleh dikosongkan. Angka saja, 8–15 digit.',
                 '9. PIN kios bawaan setiap santri adalah NIS-nya. Mintalah santri menggantinya lewat kios.',

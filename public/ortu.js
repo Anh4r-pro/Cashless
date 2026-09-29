@@ -1,7 +1,8 @@
 'use strict';
 /**
- * Portal Orang Tua / Wali Murid — halaman baca-saja di /ortu.
- * Masuk dengan NIS + tanggal lahir (ddmmyy), plus 4 digit terakhir nomor HP wali
+ * SIMCASHTREN — portal di /ortu untuk wali santri DAN pegawai (halaman baca-saja).
+ * Masuk dengan NIS/NIY + tanggal lahir (ddmmyy), plus 4 digit terakhir nomor HP
+ * bila sekolah masih memintanya
  * bila sekolah masih memintanya (pengaturan `ortu_minta_hp` di panel admin).
  * Tidak memakai sesi staf: cookie sendiri (osid) dan hanya route /api/ortu/*.
  */
@@ -96,24 +97,76 @@ function sejakKapan(iso) {
 }
 
 // ------------------------------------------------------------------ masuk
-// NIS BUKAN kunci rahasia — teman sekelas pun tahu (kunci sebenarnya adalah
-// tanggal lahir, kadang + 4 digit HP). Jadi kotak NIS aman diingat otomatis
-// di HP itu; yang TIDAK pernah diingat adalah tanggal lahir maupun sesi login.
-const NIS_INGAT_KUNCI = 'ortu-nis-terakhir';
+// Dua pintu di satu alamat. Peran bukan sekadar tulisan: server ikut
+// mempersempit pencarian (santri saja / bukan-santri saja), jadi NIS santri
+// dan NIY pegawai tidak bisa saling menabrak.
+const PERAN = {
+  wali: {
+    judul: 'Masuk sebagai Wali Santri', sub: 'Memantau saldo & jajan anak',
+    nis: 'NIS putra/putri', nisPh: 'nomor induk santri',
+    nisHint: 'Nomor induk yang tercetak di kartu kantin anak',
+    lahirPh: 'contoh: 170412', lahirHint: 'Lahir 17 April 2012 → ketik <b>170412</b>',
+    hp: '4 digit terakhir nomor HP wali', tombol: 'Lihat Data Anak', kunciNis: 'ortu-nis-terakhir',
+  },
+  pegawai: {
+    judul: 'Masuk sebagai Pegawai/Staf', sub: 'Cek saldo & transaksi sendiri',
+    nis: 'NIY / Nomor Pegawai', nisPh: 'nomor induk pegawai',
+    nisHint: 'Nomor yang tercetak di kartu kantin Anda',
+    lahirPh: 'contoh: 170490', lahirHint: 'Lahir 17 April 1990 → ketik <b>170490</b>',
+    hp: '4 digit terakhir nomor HP Anda', tombol: 'Lihat Akun Saya', kunciNis: 'ortu-nis-pegawai',
+  },
+};
+const PERAN_KUNCI = 'ortu-peran-terakhir';
+let peranAktif = null;
+
+// NIS/NIY BUKAN kunci rahasia — teman sekelas pun tahu (kunci sebenarnya adalah
+// tanggal lahir, kadang + 4 digit HP). Jadi kotaknya aman diingat otomatis di
+// HP itu; yang TIDAK pernah diingat adalah tanggal lahir maupun sesi login.
+function simpanLokal(k, v) { try { localStorage.setItem(k, v); } catch { /* abaikan */ } }
+function bacaLokal(k) { try { return localStorage.getItem(k); } catch { return null; } }
+
+function pilihPeran(kode) {
+  const p = PERAN[kode];
+  peranAktif = kode;
+  $('#o-peran-pilih').classList.add('hidden');
+  $('#o-form').classList.remove('hidden');
+  $('#o-rk-ikon').innerHTML = document.querySelector(`.o-peran-opsi[data-peran="${kode}"] .ic`).innerHTML;
+  $('#o-rk-judul').textContent = p.judul;
+  $('#o-rk-sub').textContent = p.sub;
+  $('#o-nis-label').textContent = p.nis;
+  $('#o-nis').placeholder = p.nisPh;
+  $('#o-nis-hint').textContent = p.nisHint;
+  $('#o-lahir').placeholder = p.lahirPh;
+  $('#o-lahir-hint').innerHTML = p.lahirHint;
+  $('#o-hp4-label').textContent = p.hp;
+  $('#o-masuk').textContent = p.tombol;
+  $('#o-err').classList.add('hidden');
+  // Tidak menimpa isian yang sedang diketik — hanya mengisi kalau kotaknya kosong.
+  if (!$('#o-nis').value) {
+    const terakhir = bacaLokal(p.kunciNis);
+    if (terakhir) $('#o-nis').value = terakhir;
+  }
+  $('#o-nis').focus();
+}
+
+function tampilPilihanPeran() {
+  peranAktif = null;
+  $('#o-form').classList.add('hidden');
+  $('#o-peran-pilih').classList.remove('hidden');
+  $('#o-nis').value = ''; $('#o-lahir').value = ''; $('#o-hp4').value = '';
+  $('#o-err').classList.add('hidden');
+}
 
 function tampilLogin(pesan) {
   $('#boot').classList.add('hidden');
   $('#ortu-app').classList.add('hidden');
   $('#ortu-login').classList.remove('hidden');
-  if (pesan) tampilError(pesan);
-  // Tidak menimpa isian yang sedang diketik — hanya mengisi kalau kotaknya
-  // masih kosong (mis. dipanggil ulang setelah percobaan login gagal).
-  if (!$('#o-nis').value) {
-    let terakhir = null;
-    try { terakhir = localStorage.getItem(NIS_INGAT_KUNCI); } catch { /* abaikan */ }
-    if (terakhir) $('#o-nis').value = terakhir;
+  // Peran yang dipakai terakhir dibuka langsung; belum pernah → tampilkan pilihan.
+  if (!peranAktif) {
+    const ingat = bacaLokal(PERAN_KUNCI);
+    if (PERAN[ingat]) pilihPeran(ingat); else tampilPilihanPeran();
   }
-  $('#o-nis').focus();
+  if (pesan) tampilError(pesan);
 }
 
 /**
@@ -140,6 +193,7 @@ async function masuk() {
   const btn = $('#o-masuk');
   const ingat = $('#o-ingat').checked;
   const body = {
+    peran: peranAktif,
     nis: digit($('#o-nis').value),
     lahir: digit($('#o-lahir').value),
     hp4: MINTA_HP ? digit($('#o-hp4').value) : '',
@@ -154,7 +208,8 @@ async function masuk() {
     await api('/api/ortu/login', { method: 'POST', body });
     // Kegagalan menyimpan (mis. mode penyamaran) tidak boleh dianggap login-nya
     // gagal — wali sudah berhasil masuk, ini cuma kemudahan tambahan.
-    try { localStorage.setItem(NIS_INGAT_KUNCI, body.nis); } catch { /* abaikan */ }
+    simpanLokal(PERAN[peranAktif].kunciNis, body.nis);
+    simpanLokal(PERAN_KUNCI, peranAktif);
     $('#o-lahir').value = ''; $('#o-hp4').value = ''; $('#o-ingat').checked = false;
     gambarFooterSesi(ingat);
     await mulaiApp();
@@ -162,7 +217,7 @@ async function masuk() {
     tampilError(e.message);
   } finally {
     btn.disabled = false;
-    btn.textContent = 'Lihat Data Anak';
+    if (peranAktif) btn.textContent = PERAN[peranAktif].tombol;
   }
 }
 
@@ -212,10 +267,12 @@ async function muatRingkasan() {
   $('#o-hd-nama').textContent = s.nama;
   pasangAvatar($('#o-avatar'), s);
   $('#o-nama').textContent = s.nama;
-  $('#o-meta').innerHTML = `Kelas ${esc(s.kelas || '—')} · NIS ${esc(s.nis || '—')}` +
+  $('#o-meta').innerHTML = (s.peran === 'pegawai'
+    ? `${esc(s.golongan || 'Pegawai')}${s.kelas ? ' · ' + esc(s.kelas) : ''} · NIY ${esc(s.nis || '—')}`
+    : `Kelas ${esc(s.kelas || '—')} · NIS ${esc(s.nis || '—')}`) +
     (s.status === 'blokir' ? ' · <span class="badge blokir">kartu diblokir</span>' : '') +
     (s.punya_kartu ? '' : ' · <span class="muted">kartu belum dihubungkan</span>');
-  $('#o-hp').textContent = 'HP wali terdaftar: ' + s.hp_ortu_samar;
+  $('#o-hp').textContent = (s.peran === 'pegawai' ? 'HP terdaftar: ' : 'HP wali terdaftar: ') + s.hp_ortu_samar;
   $('#o-hp').classList.toggle('hidden', !MINTA_HP && s.hp_ortu_samar === '—');
   $('#o-saldo').textContent = rp(s.saldo);
   // Saldo titipan: uang yang sudah diterima sekolah tetapi sengaja belum ditaruh
@@ -653,6 +710,8 @@ if ('IntersectionObserver' in window) {
 }
 
 $('#o-masuk').onclick = masuk;
+$('#o-ganti').onclick = tampilPilihanPeran;
+document.querySelectorAll('.o-peran-opsi').forEach((b) => { b.onclick = () => pilihPeran(b.dataset.peran); });
 $('#o-keluar').onclick = keluar;
 $('#o-topup').onclick = mulaiTopup;
 addEventListener('keydown', (e) => { if (e.key === 'Escape') tutupModal(); });

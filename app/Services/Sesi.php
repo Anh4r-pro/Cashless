@@ -125,7 +125,19 @@ class Sesi
         // tidak ada cara mengetahui apakah "tetap masuk"-nya masih aktif.
         $r->attributes->set('ortu_ingat', $s->remember);
 
-        return Siswa::find($s->siswa_id);
+        $orang = Siswa::find($s->siswa_id);
+        if (! $orang) {
+            return null;
+        }
+        // Sesi "tetap masuk" bisa hidup berbulan-bulan, jadi keadaan kartunya
+        // harus diperiksa SETIAP dipakai, bukan hanya saat masuk: golongan yang
+        // portalnya kemudian ditutup, atau kartu tamu yang masa berlakunya habis,
+        // tidak boleh terus terbuka lewat sesi lama.
+        if (! Pengaturan::golongan($orang->golongan)?->portal_ortu || Kartu::kedaluwarsa($orang)) {
+            return null;
+        }
+
+        return $orang;
     }
 
     /**

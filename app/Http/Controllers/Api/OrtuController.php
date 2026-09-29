@@ -3,9 +3,11 @@
 namespace App\Http\Controllers\Api;
 
 use App\Exceptions\ApiError;
+use App\Models\Golongan;
 use App\Models\SesiOrtu;
 use App\Models\Siswa;
 use App\Models\Transaksi;
+use App\Services\Kartu;
 use App\Services\KunciWali;
 use App\Services\Pengaturan;
 use App\Services\Rem;
@@ -30,6 +32,12 @@ class OrtuController extends Controller
         $nis = KunciWali::digitSaja($r->input('nis') ?? $r->input('nisn'));
         $lahir = KunciWali::digitSaja($r->input('lahir'));      // ddmmyy
         $hp4 = KunciWali::digitSaja($r->input('hp4'));
+        // Dua pintu di satu portal (SIMCASHTREN): wali santri dan pegawai. Peran
+        // MENYEMPITKAN pencarian, bukan sekadar mengganti tulisan — NIS santri
+        // dan NIY pegawai tidak boleh saling menabrak. Klien lama tidak
+        // mengirim peran dan selalu wali, jadi bawaannya wali.
+        $pegawai = $r->input('peran') === 'pegawai';
+        $noInduk = $pegawai ? 'NIY' : 'NIS';
         $mintaHp = (Pengaturan::sekolah()['ortu_minta_hp'] ?? 0) === 1;
 
         $kIp = 'ortu-ip:' . Rem::ip($r);
@@ -41,7 +49,7 @@ class OrtuController extends Controller
         }
 
         if (strlen($nis) < 3 || strlen($nis) > 20) {
-            throw new ApiError(400, 'NIS tidak valid');
+            throw new ApiError(400, $noInduk . ' tidak valid');
         }
         if (strlen($lahir) !== 6) {
             throw new ApiError(400, 'Tanggal lahir harus 6 angka (ddmmyy), contoh 170412');
@@ -50,36 +58,49 @@ class OrtuController extends Controller
             throw new ApiError(400, 'Isi 4 digit terakhir nomor HP');
         }
 
-        $gagal = function () use ($kIp, $kNis, $mintaHp) {
+        $gagal = function () use ($kIp, $kNis, $mintaHp, $pegawai, $noInduk) {
             Rem::catatGagal($kIp, $kNis);
 
-            return new ApiError(401, 'Data tidak cocok. Periksa lagi NIS, tanggal lahir' .
-                ($mintaHp ? ', dan 4 digit nomor HP.' : ' anak Anda.'));
+            return new ApiError(401, "Data tidak cocok. Periksa lagi {$noInduk}, tanggal lahir" .
+                ($mintaHp ? ', dan 4 digit nomor HP.' : ($pegawai ? ' Anda.' : ' anak Anda.')));
         };
 
-        $kandidat = Siswa::where('nis', $nis)->where('nis', '!=', '')->get();
+        // Pemisah peran memakai JENIS golongan (siswa vs bukan), bukan kode:
+        // sekolah boleh menambah golongan sendiri.
+        $kodeSantri = Golongan::where('jenis', 'siswa')->pluck('kode')->all();
+        $kandidat = Siswa::where('nis', $nis)->where('nis', '!=', '')
+            ->where(function ($q) use ($pegawai, $kodeSantri) {
+                if ($pegawai) {
+                    $q->whereNotIn('golongan', $kodeSantri)->whereNotNull('golongan')->where('golongan', '!=', '');
+                } else {
+                    $q->whereIn('golongan', $kodeSantri)->orWhereNull('golongan')->orWhere('golongan', '');
+                }
+            })->get();
         // NIS kembar pada data lama: menebak salah satunya berarti menampilkan
         // data anak orang lain. Berhenti, dan minta sekolah membereskan datanya.
         if ($kandidat->count() > 1) {
-            throw new ApiError(409, 'NIS ini terdaftar pada lebih dari satu anak. Hubungi admin cashless.');
+            throw new ApiError(409, $pegawai
+                ? 'NIY ini terdaftar pada lebih dari satu orang. Hubungi admin cashless.'
+                : 'NIS ini terdaftar pada lebih dari satu anak. Hubungi admin cashless.');
         }
         $s = $kandidat->first();
         if (! $s) {
             throw $gagal();
         }
 
-        // Golongan yang bukan santri (SDM, tamu) tidak punya wali yang perlu
-        // memantau, dan datanya justru lebih peka. Ditutup di sini, bukan
+        // Golongan yang belum dibuka sekolah tetap ditutup di sini, bukan
         // diserahkan ke kecocokan data — kartu guru pun punya tanggal lahir.
         $gol = Pengaturan::golongan($s->golongan);
         if (! $gol?->portal_ortu) {
-            throw new ApiError(403, "Kartu {$gol?->nama} tidak dilayani portal wali.");
+            throw new ApiError(403, $pegawai
+                ? "Kartu {$gol?->nama} belum dibuka untuk portal ini. Hubungi admin cashless."
+                : "Kartu {$gol?->nama} tidak dilayani portal wali.");
         }
 
         // Data belum dilengkapi sekolah → pesan yang jelas, bukan "tidak cocok",
         // supaya orang tua tahu harus menghubungi admin dan tidak menebak terus.
         if (! $s->tgl_lahir || ($mintaHp && ! $s->hp_ortu)) {
-            throw new ApiError(409, 'Data tanggal lahir' . ($mintaHp ? ' / nomor HP wali' : '') .
+            throw new ApiError(409, 'Data tanggal lahir' . ($mintaHp ? ($pegawai ? ' / nomor HP' : ' / nomor HP wali') : '') .
                 ' belum dilengkapi sekolah. Hubungi admin cashless.');
         }
 
@@ -89,6 +110,11 @@ class OrtuController extends Controller
             && (! $mintaHp || KunciWali::sama($hp4, $hpAkhir));
         if (! $cocok) {
             throw $gagal();
+        }
+        // Sesudah kunci terbukti benar (bukan sebelum), supaya orang asing tidak
+        // bisa memakai pesan ini untuk mengintip kartu mana yang sudah habis.
+        if (Kartu::kedaluwarsa($s)) {
+            throw new ApiError(403, "Masa berlaku kartu {$s->nama} sudah habis ({$s->berlaku_sampai}). Hubungi admin cashless.");
         }
 
         Rem::lupakan($kIp, $kNis);
@@ -258,6 +284,9 @@ class OrtuController extends Controller
             'status' => $s->status, 'foto' => $s->foto,
             'hp_ortu_samar' => KunciWali::samarkanHp($s->hp_ortu),
             'punya_kartu' => (bool) $s->card_uid,
+            // Dipakai layar untuk menyesuaikan kata-katanya (anak↔Anda, NIS↔NIY).
+            'peran' => Pengaturan::golongan($s->golongan)?->jenis === 'siswa' ? 'wali' : 'pegawai',
+            'golongan' => Pengaturan::golongan($s->golongan)?->nama,
         ];
     }
 

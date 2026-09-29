@@ -58,12 +58,12 @@ svg.i { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-widt
 
 /* ---------------------------------------------------------------- masuk */
 #ortu-login { min-height: 100vh; display: flex; align-items: flex-start; justify-content: center; padding: 6vh 16px 32px;
-  background: radial-gradient(120% 50% at 50% 0%, #1A2856 0%, #0B1430 55%, var(--ivory) 55.1%); }
+  background: radial-gradient(150% 58% at 50% 0%, #1A2856 0%, #0B1430 55%, var(--ivory) 55.1%); }
 .o-login { width: 100%; max-width: 420px; }
 .o-login-atas { text-align: center; color: #fff; margin-bottom: 22px; }
 .o-login-atas img { width: 72px; height: 72px; object-fit: contain; }
 .o-login-atas h1 { font-size: 24px; font-weight: 800; margin-top: 8px; letter-spacing: -.01em; }
-.o-login-atas p { margin: 4px 0 0; color: #B9C0DA; font-size: 14px; }
+.o-login-atas p { margin: 4px auto 0; color: #B9C0DA; font-size: 13px; line-height: 1.45; max-width: 300px; }
 .o-login-kartu { background: #fff; border-radius: 24px; padding: 22px 20px 20px; box-shadow: 0 24px 48px -24px rgba(11,20,48,.45); }
 .field { margin-bottom: 14px; }
 .field label { display: block; font-size: 13px; font-weight: 700; color: var(--ink-2); margin-bottom: 6px; }
@@ -82,6 +82,30 @@ svg.i { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-widt
 .o-ingat-catatan { margin: 6px 0 0; font-size: 12px; color: var(--warn); line-height: 1.5; }
 .o-err { background: var(--err-soft); color: var(--err); border-radius: 12px; padding: 10px 12px; font-size: 13.5px; font-weight: 600; margin: 12px 0 0; }
 .o-login-catatan { margin: 16px 4px 0; font-size: 12.5px; color: var(--ink-3); line-height: 1.6; text-align: center; }
+
+/* Pemilih peran (SIMCASHTREN): tahap 1 = dua kartu, tahap 2 = ringkasan peran + formulir. */
+.o-peran-judul { font-size: 13px; font-weight: 700; color: var(--ink-2); margin: 0 0 10px; }
+.o-peran { display: flex; flex-direction: column; gap: 10px; }
+.o-peran-opsi { display: flex; align-items: center; gap: 12px; padding: 14px 15px; border: 1.5px solid var(--line);
+  border-radius: 16px; background: #fff; text-align: left; width: 100%; font-family: inherit; cursor: pointer; color: inherit; }
+.o-peran-opsi:hover, .o-peran-opsi:focus-visible { border-color: var(--navy-900); background: #F7F8FC; outline: none; }
+.o-peran-opsi .ic, .o-peran-ringkas .ic { border-radius: 13px; background: var(--line-2); color: var(--navy-800);
+  display: grid; place-items: center; flex: none; }
+.o-peran-opsi .ic { width: 42px; height: 42px; }
+.o-peran-opsi .ic svg, .o-peran-ringkas .ic svg { stroke: currentColor; fill: none; stroke-width: 1.8;
+  stroke-linecap: round; stroke-linejoin: round; }
+.o-peran-opsi .ic svg { width: 21px; height: 21px; }
+.o-peran-opsi .teks b { display: block; font-size: 14.5px; color: var(--ink); }
+.o-peran-opsi .teks span { font-size: 12px; color: var(--ink-3); line-height: 1.4; }
+.o-peran-opsi .panah { margin-left: auto; color: var(--ink-3); flex: none; font-size: 20px; }
+.o-peran-ringkas { display: flex; align-items: center; gap: 10px; padding: 10px 12px; background: var(--line-2);
+  border-radius: 13px; margin-bottom: 16px; }
+.o-peran-ringkas .ic { width: 32px; height: 32px; border-radius: 10px; background: var(--navy-900); color: var(--gold); }
+.o-peran-ringkas .ic svg { width: 16px; height: 16px; stroke-width: 2; }
+.o-peran-ringkas b { font-size: 13px; color: var(--ink); display: block; }
+.o-peran-ringkas span span { font-size: 11.5px; color: var(--ink-3); }
+.o-peran-ringkas .ganti { margin-left: auto; font-size: 12.5px; font-weight: 700; color: var(--navy-700);
+  background: none; border: 0; cursor: pointer; font-family: inherit; padding: 6px 4px; }
 
 /* ------------------------------------------------------------- kerangka */
 #ortu-app { padding-bottom: 96px; }

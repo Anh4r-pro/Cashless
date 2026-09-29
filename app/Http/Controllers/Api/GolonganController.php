@@ -24,7 +24,7 @@ class GolonganController extends Controller
     public const LABELS = [
         'nama' => ['label' => 'Nama golongan', 'unit' => 'teks'],
         'label_unit' => ['label' => 'Sebutan kolom kelas/unit', 'unit' => 'teks'],
-        'portal_ortu' => ['label' => 'Bisa dibuka lewat portal wali', 'unit' => 'onoff'],
+        'portal_ortu' => ['label' => 'Bisa dibuka lewat portal SIMCASHTREN', 'unit' => 'onoff'],
         'kios' => ['label' => 'Boleh memakai layar kios', 'unit' => 'onoff'],
         'transfer' => ['label' => 'Boleh mengirim saldo ke teman', 'unit' => 'onoff'],
         'biaya_admin_kena' => ['label' => 'Dipungut biaya admin top up wali', 'unit' => 'onoff'],

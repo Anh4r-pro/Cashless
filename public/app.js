@@ -1477,16 +1477,17 @@ async function dashSAView(el) {
       <button class="savebtn" data-simpan="transfer">Simpan Pengaturan Transfer</button>
     </div>
     <div class="panel">
-      <h2>👪 Kunci Masuk Portal Wali</h2>
-      <p class="muted">Wali masuk ke <b>/ortu</b> dengan <b>NIS + tanggal lahir</b> anak.
-        Kunci ketiga berupa 4 digit terakhir nomor HP wali bisa dimatikan di sini.</p>
+      <h2>👪 Kunci Masuk Portal SIMCASHTREN</h2>
+      <p class="muted">Wali santri dan pegawai masuk ke <b>/ortu</b>: wali dengan <b>NIS + tanggal lahir</b>
+        anak, pegawai dengan <b>NIY + tanggal lahir</b> sendiri.
+        Kunci ketiga berupa 4 digit terakhir nomor HP bisa dimatikan di sini (berlaku untuk keduanya).</p>
       <p class="muted"><b>Pertimbangkan sebelum mematikannya:</b> NIS dan tanggal lahir
         sama-sama diketahui teman sekelas, jadi tanpa kunci ketiga portal ini praktis terbuka
         bagi siapa pun yang mengenal anaknya. Halamannya memang baca-saja, tetapi saldo dan pola
         jajan tetap data pribadi. Yang menahan tebak-tebakan dari luar adalah rem percobaan gagal
         (5 kali salah → terkunci 15 menit), bukan kerahasiaan nomornya.</p>
       ${gridPengaturan(cfg.labels_ortu || {}, cfg.settings)}
-      <button class="savebtn" data-simpan="ortu">Simpan Kunci Portal Wali</button>
+      <button class="savebtn" data-simpan="ortu">Simpan Kunci Portal</button>
     </div>`;
 
   // Semua panel memakai satu mekanisme yang sama; kelompoknya hanya menentukan
@@ -3443,21 +3444,19 @@ function siswaModal(s) {
       <input id="m-catatan" value="${esc(s?.catatan || '')}" maxlength="300" placeholder="catatan internal">
     </div>
     <fieldset class="ortu-set" id="m-ortu-set">
-      <legend>Akses portal orang tua</legend>
+      <legend id="m-ortu-legend">Akses portal orang tua</legend>
       <div class="field"><label>Biaya admin top up
           <span class="muted">(kosongkan = ikut golongan)</span></label>
         ${inputUang({ id: 'm-biaya', nilai: s?.biaya_admin ?? '' })}
-        <span class="muted set-hint">Diisi <b>0</b> berarti santri ini <b>dibebaskan</b>; diisi
+        <span class="muted set-hint">Diisi <b>0</b> berarti <span class="m-orang">santri ini</span> <b>dibebaskan</b>; diisi
           angka berarti tarif khusus untuknya. Dikosongkan berarti mengikuti golongannya —
           dan tiga keadaan itu berbeda.</span></div>
-      <p class="muted" style="margin:0 0 8px">Wali masuk ke <code>/ortu</code> memakai
-        <b>NIS + tanggal lahir (ddmmyy)</b>, plus 4 digit terakhir HP wali bila sekolah masih
-        memintanya (diatur di Dashboard → Kunci Masuk Portal Wali).</p>
-      <div class="field"><label>NISN <span class="muted">(arsip sekolah, bukan kunci masuk)</span></label>
+      <p class="muted" style="margin:0 0 8px" id="m-ortu-catatan"></p>
+      <div class="field" id="m-nisn-wrap"><label>NISN <span class="muted">(arsip sekolah, bukan kunci masuk)</span></label>
         <input id="m-nisn" inputmode="numeric" value="${esc(s?.nisn || '')}" placeholder="10 angka"></div>
       <div class="field"><label>Tanggal lahir</label>
         <input type="date" id="m-lahir" value="${esc(s?.tgl_lahir || '')}"></div>
-      <div class="field"><label>No. HP wali</label>
+      <div class="field"><label id="m-hp-label">No. HP wali</label>
         <input id="m-hp" inputmode="numeric" value="${esc(s?.hp_ortu || '')}" placeholder="08xxxxxxxxxx"></div>
     </fieldset>`,
     async () => {
@@ -3517,9 +3516,23 @@ function siswaModal(s) {
     $('#m-kelas-label').textContent = g.label_unit || 'Kelas';
     gambarUnit(g);
     $('#m-nis-label').textContent = `${t.nomor} / nomor kartu`;
+    const pegawai = (g.jenis ?? (g.kode === 'siswa' ? 'siswa' : 'internal')) !== 'siswa';
     $('#m-nis-hint').textContent = 'Harus khas — dipakai sebagai PIN bawaan kios dan alamat ' +
-      'transfer antar teman' + (g.portal_ortu ? ', serta kunci masuk portal wali.' : '.');
+      'transfer antar teman' + (g.portal_ortu
+        ? ', serta kunci masuk portal SIMCASHTREN (isi angka saja — huruf dan tanda baca tidak akan cocok saat masuk).'
+        : '.');
     $('#m-ortu-set').classList.toggle('hidden', !g.portal_ortu);
+    $('#m-ortu-legend').textContent = pegawai ? 'Akses portal pegawai (SIMCASHTREN)' : 'Akses portal orang tua';
+    $('#m-ortu-catatan').innerHTML = pegawai
+      ? 'Pegawai membuka <code>/ortu</code>, memilih <b>Pegawai / Staf</b>, lalu masuk dengan ' +
+        '<b>NIY + tanggal lahir (ddmmyy)</b>, plus 4 digit terakhir HP bila sekolah masih memintanya ' +
+        '(diatur di Dashboard → Kunci Masuk Portal SIMCASHTREN).'
+      : 'Wali membuka <code>/ortu</code>, memilih <b>Wali Santri</b>, lalu masuk dengan ' +
+        '<b>NIS + tanggal lahir (ddmmyy)</b>, plus 4 digit terakhir HP wali bila sekolah masih ' +
+        'memintanya (diatur di Dashboard → Kunci Masuk Portal SIMCASHTREN).';
+    $('#m-nisn-wrap').classList.toggle('hidden', pegawai);
+    $('#m-hp-label').textContent = pegawai ? 'No. HP' : 'No. HP wali';
+    document.querySelectorAll('#m-ortu-set .m-orang').forEach((e) => { e.textContent = pegawai ? 'orang ini' : 'santri ini'; });
     $('#m-khusus-wrap').classList.toggle('hidden', g.kode === 'siswa');
     const batas = ['max_saldo', 'max_belanja_harian', 'max_beli_harian']
       .filter((k) => g[k] !== null && g[k] !== undefined);
@@ -3571,7 +3584,7 @@ async function kelolaGolonganModal() {
       <div class="muted">
         Kolom unit disebut “${esc(g.label_unit)}” ·
         ${g.aktif ? 'aktif' : '<b>nonaktif</b>'} ·
-        portal wali ${g.portal_ortu ? 'ya' : 'tidak'} ·
+        portal SIMCASHTREN ${g.portal_ortu ? 'ya' : 'tidak'} ·
         kios ${g.kios ? 'ya' : 'tidak'} ·
         kirim saldo ${g.transfer ? 'ya' : 'tidak'}
       </div>
@@ -3634,13 +3647,13 @@ function golonganFormModal(g, cfg, sesudah) {
     <div class="field"><label>Hak akses</label>
       <label class="cek"><input type="checkbox" id="gf-aktif" ${g === null || g?.aktif ? 'checked' : ''}
         ${g?.kode === 'siswa' ? 'disabled' : ''}> golongan aktif${g?.kode === 'siswa' ? ' (golongan santri tidak bisa dinonaktifkan)' : ''}</label>
-      <label class="cek"><input type="checkbox" id="gf-ortu" ${g?.portal_ortu ? 'checked' : ''}> bisa dibuka lewat portal wali</label>
+      <label class="cek"><input type="checkbox" id="gf-ortu" ${g?.portal_ortu ? 'checked' : ''}> bisa dibuka lewat portal SIMCASHTREN</label>
       <label class="cek"><input type="checkbox" id="gf-kios" ${g === null || g?.kios ? 'checked' : ''}> boleh memakai layar kios</label>
       <label class="cek"><input type="checkbox" id="gf-transfer" ${g === null || g?.transfer ? 'checked' : ''}> boleh mengirim saldo ke teman</label>
       <label class="cek"><input type="checkbox" id="gf-biaya" ${g?.biaya_admin_kena ? 'checked' : ''}>
         dipungut biaya admin saat wali top up</label>
       <span class="muted set-hint">Sengaja MATI untuk golongan baru — berbeda dari batas belanja di
-        bawah yang “kosong berarti ikut sekolah”. Menyalakan portal wali bagi sebuah golongan tidak
+        bawah yang “kosong berarti ikut sekolah”. Membuka portal SIMCASHTREN bagi sebuah golongan tidak
         boleh langsung memungut uang dari mereka tanpa keputusan tersendiri. Nominalnya satu untuk
         semua, diatur di menu <b>Topup Ortu</b>.</span>
     </div>

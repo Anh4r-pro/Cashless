@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#0B1430">
-<title>Portal Wali Santri — IMBOS Cashless</title>
+<title>SIMCASHTREN — IMBOS Pringsewu</title>
 <link rel="icon" type="image/png" href="/img/logo-imbos.png">
 <!-- Fonta disajikan dari server sendiri (satu berkas variabel 27 KB untuk semua
      ketebalan), bukan dari Google: di jaringan seluler, dua sambungan tambahan
@@ -18,37 +18,64 @@
 </head>
 <body class="ortu">
 
-<div id="boot"><img src="/img/logo-imbos.png" alt="Memuat Portal Wali Santri"></div>
+<div id="boot"><img src="/img/logo-imbos.png" alt="Memuat SIMCASHTREN"></div>
 
 <!-- ======================================================= MASUK -->
 <div id="ortu-login" class="hidden">
   <div class="o-login">
     <div class="o-login-atas">
       <img src="/img/logo-imbos.png" alt="Logo IMBOS">
-      <h1>Portal Wali Santri</h1>
-      <p>Pantau saldo &amp; jajan putra/putri Anda</p>
+      <h1>SIMCASHTREN</h1>
+      <p>Sistem Informasi Monitoring Cashless Pesantren · IMBOS Pringsewu</p>
     </div>
     <div class="o-login-kartu">
-      <div class="field"><label for="o-nis">NIS putra/putri</label>
-        <input id="o-nis" inputmode="numeric" autocomplete="off" placeholder="nomor induk santri">
-        <span class="hint">Nomor induk yang tercetak di kartu kantin anak</span></div>
-      <div class="field"><label for="o-lahir">Tanggal lahir (ddmmyy)</label>
-        <input id="o-lahir" inputmode="numeric" autocomplete="off" maxlength="6" placeholder="contoh: 170412">
-        <span class="hint">Lahir 17 April 2012 → ketik <b>170412</b></span></div>
-      <!-- Kunci ketiga ini bisa dimatikan sekolah; halaman menyembunyikannya
-           sendiri menurut jawaban /api/ortu/me, bukan menurut berkas ini. -->
-      <div class="field hidden" id="o-hp4-field"><label for="o-hp4">4 digit terakhir nomor HP wali</label>
-        <input id="o-hp4" inputmode="numeric" autocomplete="off" maxlength="4" placeholder="contoh: 1234">
-        <span class="hint">Nomor HP yang didaftarkan ke sekolah</span></div>
+      <!-- Tahap 1: pilih peran. Dua pintu di satu alamat; pilihan terakhir diingat
+           di HP supaya wali yang rutin membuka tidak perlu memilih lagi. -->
+      <div id="o-peran-pilih">
+        <p class="o-peran-judul">Anda masuk sebagai:</p>
+        <div class="o-peran">
+          <button type="button" class="o-peran-opsi" data-peran="wali">
+            <span class="ic"><svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.5 3.3-5.5 6.5-5.5s5.7 2 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.8c1.9.7 3.1 2.4 3.5 5.2"/></svg></span>
+            <span class="teks"><b>Wali Santri</b><span>Memantau saldo &amp; jajan anak</span></span>
+            <span class="panah">›</span>
+          </button>
+          <button type="button" class="o-peran-opsi" data-peran="pegawai">
+            <span class="ic"><svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="9" cy="11" r="2"/><path d="M6 16c.5-1.5 1.6-2.2 3-2.2s2.5.7 3 2.2M15 10h3M15 13.5h3"/></svg></span>
+            <span class="teks"><b>Pegawai / Staf</b><span>Cek saldo &amp; transaksi sendiri</span></span>
+            <span class="panah">›</span>
+          </button>
+        </div>
+      </div>
 
-      <label class="o-ingat" for="o-ingat">
-        <input type="checkbox" id="o-ingat">
-        <span>Tetap masuk di HP ini <span class="hint" style="display:inline">(sampai 30 hari, atau lebih lama bila rutin dipakai)</span></span>
-      </label>
-      <p class="o-ingat-catatan">⚠️ Jangan aktifkan di HP bersama — siapa pun yang memegangnya bisa
-        membuka data ini tanpa mengetik apa-apa lagi.</p>
+      <!-- Tahap 2: formulir. Semua kata di dalamnya (NIS↔NIY, anak↔Anda, nama
+           tombol) diisi ortu.js menurut peran; id kolomnya sama untuk kedua peran. -->
+      <div id="o-form" class="hidden">
+        <div class="o-peran-ringkas">
+          <span class="ic" id="o-rk-ikon"></span>
+          <span><b id="o-rk-judul"></b><span id="o-rk-sub"></span></span>
+          <button type="button" class="ganti" id="o-ganti">Ganti ‹</button>
+        </div>
+        <div class="field"><label for="o-nis" id="o-nis-label"></label>
+          <input id="o-nis" inputmode="numeric" autocomplete="off">
+          <span class="hint" id="o-nis-hint"></span></div>
+        <div class="field"><label for="o-lahir">Tanggal lahir (ddmmyy)</label>
+          <input id="o-lahir" inputmode="numeric" autocomplete="off" maxlength="6">
+          <span class="hint" id="o-lahir-hint"></span></div>
+        <!-- Kunci ketiga ini bisa dimatikan sekolah; halaman menyembunyikannya
+             sendiri menurut jawaban /api/ortu/me, bukan menurut berkas ini. -->
+        <div class="field hidden" id="o-hp4-field"><label for="o-hp4" id="o-hp4-label"></label>
+          <input id="o-hp4" inputmode="numeric" autocomplete="off" maxlength="4" placeholder="contoh: 1234">
+          <span class="hint">Nomor HP yang didaftarkan ke sekolah</span></div>
 
-      <button id="o-masuk" class="o-tombol">Lihat Data Anak</button>
+        <label class="o-ingat" for="o-ingat">
+          <input type="checkbox" id="o-ingat">
+          <span>Tetap masuk di HP ini <span class="hint" style="display:inline">(sampai 30 hari, atau lebih lama bila rutin dipakai)</span></span>
+        </label>
+        <p class="o-ingat-catatan">⚠️ Jangan aktifkan di HP bersama — siapa pun yang memegangnya bisa
+          membuka data ini tanpa mengetik apa-apa lagi.</p>
+
+        <button id="o-masuk" class="o-tombol">Lihat Data Anak</button>
+      </div>
       <p id="o-err" class="o-err hidden"></p>
     </div>
     <p class="o-login-catatan">
@@ -167,7 +194,7 @@
 </main>
 <!-- Baris kedua hanya tampil kalau ada sesuatu yang perlu dijelaskan (saat ini:
      "tetap masuk" sedang aktif). Sesi biasa (2 jam) tidak diumumkan lagi. -->
-<footer>IMBOS Cashless · Insan Mulia Boarding School Pringsewu<span id="o-footer-sesi-wrap" class="hidden"><br>
+<footer>Sistem Informasi Monitoring Cashless Pesantren · IMBOS Pringsewu<span id="o-footer-sesi-wrap" class="hidden"><br>
   <span id="o-footer-sesi"></span></span></footer>
 
 <nav class="o-tabbar" aria-label="Menu portal">

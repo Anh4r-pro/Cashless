@@ -47,6 +47,7 @@ class ImporKartu
             ['kunci' => 'nama', 'judul' => 'Nama Personil', 'lebar' => 32],
             ['kunci' => 'kelas', 'judul' => 'Unit', 'lebar' => 18],
             ['kunci' => 'golongan', 'judul' => 'Golongan', 'lebar' => 20],
+            ['kunci' => 'lahir', 'judul' => 'Tanggal Lahir (Format DD/MM/YYYY)', 'lebar' => 28],
             ['kunci' => 'jabatan', 'judul' => 'Jabatan / Keterangan (opsional)', 'lebar' => 32],
             ['kunci' => 'berlaku', 'judul' => 'Berlaku Sampai (DD/MM/YYYY, opsional)', 'lebar' => 32],
         ],
@@ -68,6 +69,7 @@ class ImporKartu
             'no' => '/^no\.?$|nomor urut|urut/i',
         ],
         'sdm' => [
+            'lahir' => '/lahir/i',
             'nis' => '/niy|pegawai|\bnip\b|\bnis\b|induk/i',
             'nama' => '/nama/i',
             'golongan' => '/golongan|kategori/i',
@@ -278,6 +280,23 @@ class ImporKartu
                 continue;
             }
 
+            // Tanggal lahir = kunci masuk portal, untuk santri MAUPUN personil.
+            $lahirTeks = self::teks($sel('lahir'));
+            if ($lahirTeks !== '') {
+                $tgl = self::tanggal($sel('lahir'));
+                if ($tgl === '') {
+                    $gagal("Tanggal lahir \"{$lahirTeks}\" tidak terbaca — pakai format DD/MM/YYYY");
+
+                    continue;
+                }
+                if ($tgl > Kartu::hariIni()) {
+                    $gagal("Tanggal lahir {$tgl} masih di masa depan");
+
+                    continue;
+                }
+                $b['tgl_lahir'] = $tgl;
+            }
+
             if ($jenis === 'sdm') {
                 if (! in_array($kelas, array_map('strtoupper', BidangSiswa::UNIT_SDM), true)) {
                     $gagal("Unit \"{$kelas}\" tidak dikenal — pilih salah satu dari: " .
@@ -328,6 +347,12 @@ class ImporKartu
                     }
                     $b['berlaku_sampai'] = $tgl;
                 }
+
+                // Hanya golongan yang portalnya sudah dibuka yang butuh tanggal
+                // lahir; golongan lain tak perlu diganggu peringatan.
+                if ($b['tgl_lahir'] === '' && ($golongan[$b['golongan']]->portal_ortu ?? 0)) {
+                    $b['pesan'] = 'Tanggal lahir kosong — belum bisa masuk portal SIMCASHTREN';
+                }
             } else {
                 $nisn = preg_replace('/\D/', '', self::teks($sel('nisn')));
                 if ($nisn !== '') {
@@ -347,22 +372,6 @@ class ImporKartu
                         continue;
                     }
                     $b['nisn'] = $nisn;
-                }
-
-                $lahirTeks = self::teks($sel('lahir'));
-                if ($lahirTeks !== '') {
-                    $tgl = self::tanggal($sel('lahir'));
-                    if ($tgl === '') {
-                        $gagal("Tanggal lahir \"{$lahirTeks}\" tidak terbaca — pakai format DD/MM/YYYY");
-
-                        continue;
-                    }
-                    if ($tgl > Kartu::hariIni()) {
-                        $gagal("Tanggal lahir {$tgl} masih di masa depan");
-
-                        continue;
-                    }
-                    $b['tgl_lahir'] = $tgl;
                 }
 
                 $hp = preg_replace('/\D/', '', self::teks($sel('hp')));
