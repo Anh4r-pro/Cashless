@@ -3142,12 +3142,14 @@ function siswaView(el, sdm) {
   const bolehImpor = boleh(`${sdm ? 'sdm' : 'santri'}.impor`);
   const bolehTambah = boleh(`${sdm ? 'sdm' : 'santri'}.tambah`);
   const bolehArsip = boleh(`${sdm ? 'sdm' : 'santri'}.arsip`);
+  const bolehKartu = boleh(`${sdm ? 'sdm' : 'santri'}.kartu`);
   el.innerHTML = `<div class="panel">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; flex-wrap:wrap; gap:8px">
       <h2 style="margin:0">${judul} <span class="muted" id="sw-count"></span></h2>
       <div style="display:flex; gap:10px; flex-wrap:wrap">
         ${sdm && boleh('golongan.kelola') ? '<button class="linkbtn" id="btn-golongan">⚙ kelola golongan</button>' : ''}
         ${bolehImpor ? `<button class="linkbtn" id="btn-impor">⬆ Impor ${esc(t.orang)} dari Excel</button>` : ''}
+        ${bolehKartu ? '<button class="linkbtn" id="btn-kartu-massal">📇 Daftar Kartu Massal</button>' : ''}
         ${!sdm && boleh('santri.kenaikan') ? '<button class="linkbtn" id="btn-kenaikan">🎓 Kenaikan Kelas</button>' : ''}
         ${bolehArsip ? '<button class="linkbtn" id="btn-arsip">📦 Arsipkan</button>' : ''}
         ${bolehTambah ? `<button class="linkbtn" id="btn-add-siswa">+ Tambah ${esc(t.orang)}</button>` : ''}
@@ -3227,6 +3229,7 @@ function siswaView(el, sdm) {
   if ($('#btn-add-siswa')) $('#btn-add-siswa').onclick = () => siswaModal(null);
   if ($('#btn-golongan')) $('#btn-golongan').onclick = kelolaGolonganModal;
   if ($('#btn-impor')) $('#btn-impor').onclick = () => imporKartuPanel(!!sdm);
+  if ($('#btn-kartu-massal')) $('#btn-kartu-massal').onclick = () => kartuMassalPanel(!!sdm);
   if ($('#btn-arsip')) $('#btn-arsip').onclick = () => arsipPanel(!!sdm);
   if ($('#btn-kenaikan')) $('#btn-kenaikan').onclick = kenaikanPanel;
   loadSiswa();
@@ -5021,6 +5024,323 @@ async function imporKartuTerapkan() {
       </div>`;
     $('#im-file').value = '';
     imporKartu = null;
+    loadSiswa();
+  } catch (e) {
+    toast(e.message, 'err');
+    btn.disabled = false;
+    btn.textContent = 'Coba terapkan lagi';
+  }
+}
+
+// ===========================================================================
+// KARTU RFID KOLEKTIF — dua opsi: tap berturut-turut & template Excel
+// ===========================================================================
+/*
+ * Opsi A (tap) selalu aman: UID datang langsung dari reader, tidak ada yang
+ * diketik. Admin memilih kelas/unit dulu supaya daftar "menunggu kartu"-nya
+ * jelas, lalu tinggal tap-tap-tap kartu berturut-turut — setiap tap mengisi
+ * baris TARGET (baris pertama yang masih menunggu, atau baris yang sengaja
+ * diklik) dan otomatis maju ke baris berikutnya. Baru dikirim ke server saat
+ * admin menekan "Terapkan Semua", supaya tap yang salah tempel masih bisa
+ * dibatalkan dulu di layar.
+ *
+ * Opsi B (template Excel) hanya masuk akal kalau UID kartunya sudah diketahui
+ * SEBELUM ditempel ke reader (tercetak di kartu, atau dicatat sekolah dari
+ * vendor) — pola dua-langkahnya (pratinjau lalu terapkan) disamakan dengan
+ * Impor Excel & Topup Massal.
+ */
+let kartuMassalState = null;
+
+function kartuMassalPanel(sdm) {
+  const jenis = sdm ? 'sdm' : 'santri';
+  const t = ISTILAH(sdm);
+  kartuMassalState = { sdm, jenis, tapRows: [], tapTarget: null, tapBatch: crypto.randomUUID(), excel: null };
+
+  $('#sw-tahun').innerHTML = '';
+  $('#sw-impor').innerHTML = `
+  <div class="panel" style="border-left:4px solid var(--gold)">
+    <div class="kat-head">
+      <h2 style="margin:0">Daftarkan kartu RFID ${esc(t.orang)} — kolektif</h2>
+      <button class="linkbtn" id="km-tutup">tutup ✕</button>
+    </div>
+    <p class="muted">Dua cara mendaftarkan banyak kartu sekaligus. <b>Tap Berturut-turut</b> paling aman
+      dan cocok untuk hampir semua sekolah — UID dibaca langsung dari reader, tidak ada yang diketik.
+      <b>Template Excel</b> hanya berguna kalau UID kartu Anda sudah tercetak/diketahui sebelum
+      ditempel ke reader.</p>
+
+    <div class="kat-head" style="margin-top:6px"><h3 style="margin:0">A · Tap Berturut-turut</h3></div>
+    <div class="filterbar">
+      <div class="field"><label>${sdm ? 'Unit' : 'Kelas'}</label><select id="km-tap-kelas"></select></div>
+      <div class="field" style="align-self:flex-end"><button class="go" id="km-tap-muat">Muat daftar</button></div>
+    </div>
+    <label style="display:flex; gap:6px; align-items:center; font-size:13px; margin:6px 0">
+      <input type="checkbox" id="km-tap-ganti"> Izinkan menimpa kartu yang sudah terdaftar
+    </label>
+    <div id="km-tap-hasil"><p class="muted">Pilih ${sdm ? 'unit' : 'kelas'} lalu klik "Muat daftar" untuk mulai.</p></div>
+
+    <div class="kat-head" style="margin-top:26px"><h3 style="margin:0">B · Template Excel</h3></div>
+    <p class="muted">Hanya untuk kartu yang UID-nya sudah Anda ketahui/catat di luar aplikasi.
+      Template terisi otomatis dengan ${esc(t.orang)} yang belum berkartu.</p>
+    <div class="filterbar">
+      <button class="go" id="km-tpl">⬇ Template ${esc(t.orang)} (.xlsx)</button>
+    </div>
+    <div class="field"><label>Berkas .xlsx atau .csv (maks 4MB)</label>
+      <input type="file" id="km-file"
+        accept=".xlsx,.csv,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></div>
+    <label style="display:flex; gap:6px; align-items:center; font-size:13px; margin:6px 0">
+      <input type="checkbox" id="km-excel-ganti"> Izinkan menimpa kartu yang sudah terdaftar
+    </label>
+    <div style="margin-top:6px"><button class="go" id="km-periksa" disabled>Periksa berkas</button></div>
+    <div id="km-excel-hasil"></div>
+  </div>`;
+
+  // Daftar kelas/unit dipinjam dari filter tabel utama (sudah terisi saat
+  // layar Santri/SDM dimuat) — tidak perlu memanggil /api/kelas lagi.
+  $('#km-tap-kelas').innerHTML = $('#sw-kelas').innerHTML;
+
+  $('#km-tutup').onclick = () => { $('#sw-impor').innerHTML = ''; cardHandler = null; kartuMassalState = null; };
+  $('#km-tap-muat').onclick = () => kartuTapMuat();
+  $('#km-tpl').onclick = () => {
+    const a = document.createElement('a');
+    a.href = '/api/kartu-massal/template?jenis=' + jenis;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  };
+  $('#km-file').addEventListener('change', () => {
+    $('#km-periksa').disabled = !$('#km-file').files[0];
+    $('#km-excel-hasil').innerHTML = '';
+    kartuMassalState.excel = null;
+  });
+  $('#km-periksa').onclick = () => kartuExcelPratinjau();
+  $('#sw-impor').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+async function kartuTapMuat() {
+  const st = kartuMassalState;
+  if (!st) return;
+  $('#km-tap-hasil').innerHTML = '<p class="muted">memuat…</p>';
+  try {
+    const p = new URLSearchParams({ limit: 500, status: 'aktif', golongan: st.sdm ? kodeSdm() : 'siswa' });
+    const kelas = $('#km-tap-kelas').value;
+    if (kelas) p.set('kelas', kelas);
+    const d = await api('/api/siswa?' + p);
+    st.tapRows = (d.siswa || []).filter((s) => !s.card_uid).map((s) => ({
+      siswa_id: s.id, nama: s.nama, kelas: s.kelas, nis: s.nis, uid: '', status: 'menunggu', pesan: '',
+    }));
+    st.tapTarget = null;
+    // Reader RFID mengetik seperti keyboard biasa — mendaftarkan handler ini
+    // membuat SETIAP tap di halaman ini (bukan cuma saat sebuah field fokus)
+    // langsung mengisi baris target, persis mekanisme yang sama dipakai modal
+    // "Hubungkan Kartu" satuan.
+    cardHandler = (uid) => kartuTapOnScan(uid);
+    kartuTapRender();
+  } catch (e) {
+    $('#km-tap-hasil').innerHTML = `<p class="minus">${esc(e.message)}</p>`;
+  }
+}
+
+function kartuTapRender() {
+  const st = kartuMassalState;
+  if (!st) return;
+  const rows = st.tapRows;
+  if (! rows.length) {
+    $('#km-tap-hasil').innerHTML = '<p class="muted">Tidak ada yang belum berkartu di pilihan ini.</p>';
+    return;
+  }
+  const siap = rows.filter((r) => r.status === 'siap').length;
+  const selesai = rows.filter((r) => r.status === 'berhasil').length;
+  const gagalN = rows.filter((r) => r.status === 'gagal').length;
+  const menunggu = rows.filter((r) => r.status === 'menunggu').length;
+  const target = (st.tapTarget && rows.find((r) => r.siswa_id === st.tapTarget && r.status === 'menunggu'))
+    || rows.find((r) => r.status === 'menunggu') || null;
+
+  $('#km-tap-hasil').innerHTML = `
+    <div class="cards" style="margin:10px 0">
+      <div class="statcard"><span class="muted">Menunggu</span><br><b>${menunggu}</b></div>
+      <div class="statcard"><span class="muted">Siap diterapkan</span><br><b class="plus">${siap}</b></div>
+      <div class="statcard"><span class="muted">Tersimpan</span><br><b class="plus">${selesai}</b></div>
+      <div class="statcard"><span class="muted">Gagal</span><br><b class="${gagalN ? 'minus' : ''}">${gagalN}</b></div>
+    </div>
+    ${target
+      ? `<p class="hint-lembut">Tempelkan kartu untuk <b>${esc(target.nama)}</b> sekarang — atau klik baris
+           lain di bawah untuk memindahkan target.</p>`
+      : (menunggu === 0 ? '<p class="muted">Semua baris sudah dapat kartu. Tekan "Terapkan Semua" di bawah.</p>' : '')}
+    <div class="field" style="max-width:280px"><label>Atau ketik UID manual</label>
+      <input id="km-tap-manual" placeholder="lalu tekan Enter"></div>
+    <div class="tblwrap"><table>
+      <thead><tr><th></th><th>Nama</th><th>${st.sdm ? 'Unit' : 'Kelas'}</th><th>${st.sdm ? 'NIY' : 'NIS'}</th>
+      <th>UID</th><th>Keterangan</th></tr></thead>
+      <tbody>${rows.map((r) => `<tr data-id="${r.siswa_id}"
+          style="${target && r.siswa_id === target.siswa_id ? 'background:#FDF6E3;' : ''}${r.status === 'menunggu' ? 'cursor:pointer' : ''}">
+        <td><span class="badge ${r.status === 'berhasil' || r.status === 'siap' ? 'aktif' : r.status === 'gagal' ? 'blokir' : ''}">${
+          r.status === 'menunggu' ? (target && r.siswa_id === target.siswa_id ? 'target' : 'menunggu') : r.status}</span></td>
+        <td>${esc(r.nama)}</td><td>${esc(r.kelas || '—')}</td><td><code>${esc(r.nis || '—')}</code></td>
+        <td>${r.uid ? `<code>${esc(r.uid)}</code>` : '—'}${r.status === 'siap' ? ` <button class="linkbtn" data-undo="${r.siswa_id}">batal</button>` : ''}</td>
+        <td class="${r.status === 'gagal' ? 'minus' : 'muted'}">${esc(r.pesan || '')}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+    ${siap ? `<div style="margin-top:12px"><button class="go" id="km-tap-terapkan">Terapkan Semua — simpan ${siap} kartu</button></div>` : ''}
+  `;
+
+  document.querySelectorAll('#km-tap-hasil tbody tr[data-id]').forEach((tr) => {
+    tr.onclick = () => {
+      const row = rows.find((r) => r.siswa_id === Number(tr.dataset.id));
+      if (row && row.status === 'menunggu') { st.tapTarget = row.siswa_id; kartuTapRender(); }
+    };
+  });
+  document.querySelectorAll('#km-tap-hasil [data-undo]').forEach((b) => {
+    b.onclick = (ev) => {
+      ev.stopPropagation();
+      const row = rows.find((r) => r.siswa_id === Number(b.dataset.undo));
+      if (row) { row.uid = ''; row.status = 'menunggu'; row.pesan = ''; kartuTapRender(); }
+    };
+  });
+  if ($('#km-tap-terapkan')) $('#km-tap-terapkan').onclick = kartuTapTerapkan;
+  if ($('#km-tap-manual')) $('#km-tap-manual').addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const uid = normUid(e.target.value);
+    e.target.value = '';
+    if (uid) kartuTapOnScan(uid);
+  });
+}
+
+function kartuTapOnScan(uid) {
+  const st = kartuMassalState;
+  if (!st || !st.tapRows.length) {
+    toast('Muat daftar kelas/unit dulu sebelum menempelkan kartu', 'err');
+    return;
+  }
+  if (st.tapRows.some((r) => r.uid === uid && (r.status === 'siap' || r.status === 'berhasil'))) {
+    toast('Kartu ini sudah dipakai di daftar ini — klik "batal" pada barisnya kalau salah tempel', 'err');
+    return;
+  }
+  const target = (st.tapTarget && st.tapRows.find((r) => r.siswa_id === st.tapTarget && r.status === 'menunggu'))
+    || st.tapRows.find((r) => r.status === 'menunggu');
+  if (!target) {
+    toast('Semua baris di daftar ini sudah dapat kartu', 'ok');
+    return;
+  }
+  target.uid = uid;
+  target.status = 'siap';
+  target.pesan = 'Siap diterapkan';
+  st.tapTarget = null;
+  kartuTapRender();
+}
+
+async function kartuTapTerapkan() {
+  const st = kartuMassalState;
+  const siap = st.tapRows.filter((r) => r.status === 'siap');
+  if (!siap.length) return;
+  const btn = $('#km-tap-terapkan');
+  btn.disabled = true;
+  btn.textContent = 'menyimpan…';
+  try {
+    const d = await api('/api/kartu-massal/terapkan-tap', { method: 'POST', body: {
+      jenis: st.jenis, batch_id: st.tapBatch, izinkan_ganti: $('#km-tap-ganti').checked,
+      baris: siap.map((r) => ({ siswa_id: r.siswa_id, uid: r.uid, nama: r.nama })),
+    }});
+    const perId = {};
+    d.baris.forEach((b) => { perId[b.siswa_id] = b; });
+    siap.forEach((r) => {
+      const b = perId[r.siswa_id];
+      if (b) { r.status = b.status; r.pesan = b.pesan; }
+    });
+    toast(`✔ ${d.impor.n_berhasil} kartu tersimpan${d.impor.n_gagal ? `, ${d.impor.n_gagal} gagal` : ''}`,
+      d.impor.n_gagal ? 'err' : 'ok');
+    st.tapBatch = crypto.randomUUID();
+    loadSiswa();
+  } catch (e) {
+    toast(e.message, 'err');
+  }
+  kartuTapRender();
+}
+
+async function kartuExcelPratinjau() {
+  const st = kartuMassalState;
+  const f = $('#km-file').files[0];
+  if (!f || !st) return;
+  const btn = $('#km-periksa');
+  btn.disabled = true;
+  $('#km-excel-hasil').innerHTML = '<p class="muted">membaca berkas…</p>';
+  try {
+    const data = await fileToDataUrl(f);
+    const izinkanGanti = $('#km-excel-ganti').checked;
+    const pra = await api('/api/kartu-massal/pratinjau', { method: 'POST', body: {
+      jenis: st.jenis, nama_berkas: f.name, data, izinkan_ganti: izinkanGanti,
+    }});
+    st.excel = { nama: f.name, data, pra, izinkanGanti };
+    kartuExcelRender();
+  } catch (e) {
+    $('#km-excel-hasil').innerHTML = `<p class="minus">${esc(e.message)}</p>
+      <p class="muted">Pakai template resmi di atas, dan pastikan baris judul kolom masih ada.</p>`;
+  }
+  btn.disabled = false;
+}
+
+function kartuExcelRender() {
+  const st = kartuMassalState;
+  const { pra } = st.excel;
+  const r = pra.ringkas;
+  $('#km-excel-hasil').innerHTML = `
+    <div class="panel" style="margin:12px 0 0">
+      <h2>Hasil pemeriksaan <span class="muted">— lembar ${esc(pra.lembar)}</span></h2>
+      <div class="cards">
+        <div class="statcard"><span class="muted">Baris berisi UID</span><br><b>${r.n_baris}</b></div>
+        <div class="statcard"><span class="muted">Siap disimpan</span><br><b class="plus">${r.n_siap}</b></div>
+        <div class="statcard"><span class="muted">Gagal</span><br><b class="${r.n_gagal ? 'minus' : ''}">${r.n_gagal}</b></div>
+        ${r.n_ganti ? `<div class="statcard"><span class="muted">Menimpa kartu lama</span><br><b>${r.n_ganti}</b></div>` : ''}
+      </div>
+      <div class="tblwrap"><table>
+        <thead><tr><th>Baris</th><th></th><th>NIS/NIY</th><th>Nama</th><th>UID</th><th>Keterangan</th></tr></thead>
+        <tbody>${pra.baris.map((b) => `<tr>
+          <td>${b.baris}</td>
+          <td><span class="badge ${b.status === 'siap' ? 'aktif' : 'blokir'}">${b.status}</span></td>
+          <td><code>${esc(b.nis || '—')}</code></td>
+          <td>${esc(b.nama_db || b.nama_berkas || '—')}</td>
+          <td>${b.uid ? `<code>${esc(b.uid)}</code>` : '—'}</td>
+          <td class="${b.status === 'siap' ? 'muted' : 'minus'}">${esc(b.pesan || '')}</td>
+        </tr>`).join('')}</tbody>
+      </table></div>
+      ${r.n_siap
+        ? `<div style="margin-top:12px"><button class="go" id="km-terapkan">Terapkan — simpan ${r.n_siap} kartu</button>
+             <span class="hint-lembut">Baris yang gagal dilewati; sisanya tetap disimpan.</span></div>`
+        : '<p class="minus" style="margin-top:12px">Tidak ada baris yang siap — perbaiki berkasnya lalu periksa lagi.</p>'}
+    </div>`;
+  if ($('#km-terapkan')) $('#km-terapkan').onclick = kartuExcelTerapkan;
+}
+
+async function kartuExcelTerapkan() {
+  const st = kartuMassalState;
+  const { jenis } = st;
+  const { nama, data, pra, izinkanGanti } = st.excel;
+  const btn = $('#km-terapkan');
+  btn.disabled = true;
+  btn.textContent = 'menyimpan…';
+  try {
+    const d = await api('/api/kartu-massal/terapkan', { method: 'POST', body: {
+      jenis, nama_berkas: nama, data, sidik: pra.sidik, batch_id: crypto.randomUUID(),
+      izinkan_ganti: izinkanGanti, abaikan_nama: false,
+    }});
+    const gagalBaris = d.baris.filter((b) => b.status === 'gagal');
+    toast(`✔ ${d.impor.n_berhasil} kartu tersimpan${d.impor.n_gagal ? `, ${d.impor.n_gagal} gagal` : ''}`,
+      d.impor.n_gagal ? 'err' : 'ok');
+    $('#km-excel-hasil').innerHTML = `
+      <div class="panel" style="margin:12px 0 0">
+        <h2>Selesai</h2>
+        <div class="cards">
+          <div class="statcard"><span class="muted">Tersimpan</span><br><b class="plus">${d.impor.n_berhasil}</b></div>
+          <div class="statcard"><span class="muted">Gagal</span><br><b class="${d.impor.n_gagal ? 'minus' : ''}">${d.impor.n_gagal}</b></div>
+        </div>
+        ${gagalBaris.length ? `<div class="tblwrap"><table>
+          <thead><tr><th>Baris</th><th>NIS/NIY</th><th>Nama</th><th>Sebab gagal</th></tr></thead>
+          <tbody>${gagalBaris.map((b) => `<tr><td>${b.baris}</td><td><code>${esc(b.nis || '—')}</code></td>
+            <td>${esc(b.nama || '—')}</td><td class="minus">${esc(b.pesan)}</td></tr>`).join('')}</tbody>
+        </table></div>` : ''}
+      </div>`;
+    $('#km-file').value = '';
+    st.excel = null;
     loadSiswa();
   } catch (e) {
     toast(e.message, 'err');

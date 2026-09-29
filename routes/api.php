@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\AkunController;
 use App\Http\Controllers\Api\ArsipController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ImporKartuController;
+use App\Http\Controllers\Api\KartuMassalController;
 use App\Http\Controllers\Api\KenaikanKelasController;
 use App\Http\Controllers\Api\KasirController;
 use App\Http\Controllers\Api\AnalitikController;
@@ -213,6 +214,16 @@ Route::middleware('peran:superadmin')->group(function () {
     Route::get('impor-kartu/template', [ImporKartuController::class, 'template']);
     Route::post('impor-kartu/pratinjau', [ImporKartuController::class, 'pratinjau']);
     Route::post('impor-kartu/terapkan', [ImporKartuController::class, 'terapkan']);
+});
+
+// --- pendaftaran UID kartu RFID kolektif: template Excel & tap berturut-turut
+// (izinnya santri.kartu / sdm.kartu, diperiksa di controller seperti di atas)
+Route::middleware('peran:superadmin')->group(function () {
+    Route::get('kartu-massal/template', [KartuMassalController::class, 'template']);
+    Route::post('kartu-massal/pratinjau', [KartuMassalController::class, 'pratinjau']);
+    Route::post('kartu-massal/terapkan', [KartuMassalController::class, 'terapkan']);
+    Route::post('kartu-massal/terapkan-tap', [KartuMassalController::class, 'terapkanTap']);
+    Route::get('kartu-massal/riwayat', [KartuMassalController::class, 'riwayat']);
 });
 
 // --- kategori akses & akun pengguna ---------------------------------------
