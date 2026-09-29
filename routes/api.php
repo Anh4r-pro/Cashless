@@ -174,6 +174,7 @@ Route::post('kios/tap', [KiosController::class, 'tap']);
 Route::post('kios/donasi', [KiosController::class, 'donasi']);
 Route::post('kios/transfer/cari', [KiosController::class, 'cariPenerima']);
 Route::post('kios/transfer', [KiosController::class, 'transfer']);
+Route::post('kios/iuran', [KiosController::class, 'iuran']);
 Route::post('kios/ganti-pin', [KiosController::class, 'gantiPin']);
 Route::post('kios/riwayat', [KiosController::class, 'riwayat']);
 Route::post('kios/buka-layar', [KiosController::class, 'bukaLayar']);

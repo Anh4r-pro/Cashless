@@ -14,7 +14,8 @@ use Illuminate\Database\Eloquent\Builder;
  */
 class SaringTransaksi
 {
-    private const TIPE_SAH = ['topup', 'beli', 'koreksi', 'donasi', 'biaya_admin', 'transfer_keluar', 'transfer_masuk'];
+    private const TIPE_SAH = ['topup', 'beli', 'koreksi', 'donasi', 'biaya_admin',
+        'transfer_keluar', 'transfer_masuk', 'iuran_keluar', 'iuran_masuk'];
 
     public static function bangun(User $u, array $q): Builder
     {

@@ -84,6 +84,21 @@ class PengaturanController extends Controller
     ];
 
     /**
+     * Iuran ke PJ (SDM/pegawai) lewat kios. Batasnya sengaja TERPISAH dari
+     * transfer_* meski mesinnya sama — lihat catatan di migrasi
+     * `2026_09_29_000200_iuran_pj`. Siapa yang jadi PJ ditandai per orang di
+     * data SDM (kolom "Boleh terima iuran"), bukan di sini.
+     */
+    public const LABEL_IURAN = [
+        'iuran_aktif' => ['label' => 'Iuran ke PJ lewat kios', 'unit' => 'onoff'],
+        'iuran_min' => ['label' => 'Nominal terkecil sekali bayar', 'unit' => 'rp'],
+        'iuran_maks' => ['label' => 'Nominal terbesar sekali bayar', 'unit' => 'rp'],
+        'iuran_maks_harian' => ['label' => 'Max total bayar / santri / hari', 'unit' => 'rp'],
+        'iuran_terima_harian' => ['label' => 'Max total diterima / PJ / hari', 'unit' => 'rp'],
+        'iuran_maks_kali_harian' => ['label' => 'Max jumlah pembayaran / santri / hari', 'unit' => 'kali'],
+    ];
+
+    /**
      * Kunci yang tidak terdaftar di sini TIDAK bisa disentuh dari HTTP sama
      * sekali — termasuk penanda internal seperti `alasan_potong_terisi` dan
      * angka neraca yang hanya boleh ditulis oleh perhitungannya sendiri.
@@ -91,7 +106,7 @@ class PengaturanController extends Controller
     public static function labelSemua(): array
     {
         return array_merge(self::LABEL_POKOK, self::LABEL_TITIPAN, self::LABEL_NONMAKANAN,
-            self::LABEL_TRANSFER, self::LABEL_ORTU, self::LABEL_KELAS);
+            self::LABEL_TRANSFER, self::LABEL_IURAN, self::LABEL_ORTU, self::LABEL_KELAS);
     }
 
     public function index(Request $r)
@@ -104,6 +119,7 @@ class PengaturanController extends Controller
             'labels_titipan' => self::LABEL_TITIPAN,
             'labels_nonmakanan' => self::LABEL_NONMAKANAN,
             'labels_transfer' => self::LABEL_TRANSFER,
+            'labels_iuran' => self::LABEL_IURAN,
             'labels_ortu' => self::LABEL_ORTU,
             'labels_kelas' => self::LABEL_KELAS,
         ]);

@@ -233,7 +233,8 @@ class OrtuController extends Controller
         $limit = min(50, (int) $r->query('limit', 20) ?: 20);
 
         $q = Transaksi::where('siswa_id', $s->id);
-        if (in_array($r->query('tipe'), ['topup', 'beli', 'koreksi', 'donasi', 'transfer_keluar', 'transfer_masuk'], true)) {
+        if (in_array($r->query('tipe'), ['topup', 'beli', 'koreksi', 'donasi',
+            'transfer_keluar', 'transfer_masuk', 'iuran_keluar', 'iuran_masuk'], true)) {
             $q->where('tipe', $r->query('tipe'));
         }
         if ($dari = $r->query('dari')) {

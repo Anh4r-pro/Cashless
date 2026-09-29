@@ -36,6 +36,9 @@ const IKON = {
   silang: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>`,
   riwayat: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
     <circle cx="12" cy="12" r="9"/><path d="M12 7v5.5l3.5 2"/></svg>`,
+  iuran: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="9" cy="8" r="3.2"/><path d="M2.5 20c.7-3.3 3.1-5.2 6.5-5.2S15 16.7 15.5 20"/>
+    <path d="M16 4.8a3.2 3.2 0 0 1 0 6.6M18.2 14.5c1.8.6 3 2.2 3.3 5"/></svg>`,
 };
 
 const BULAN = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
@@ -296,6 +299,9 @@ function render(extra) {
   else if (layar === 'nominal') el.innerHTML = nominalHtml();
   else if (layar === 'trf-nis') el.innerHTML = nisHtml();
   else if (layar === 'trf-nominal') el.innerHTML = trfNominalHtml();
+  else if (layar === 'iur-pilih') el.innerHTML = iuranPilihHtml();
+  else if (layar === 'iur-nominal') el.innerHTML = iuranNominalHtml();
+  else if (layar === 'papan-ketik') el.innerHTML = papanKetikHtml();
   else if (layar === 'pin') el.innerHTML = pinHtml();
   else if (layar === 'riwayat') el.innerHTML = riwayatHtml();
   else if (layar === 'hasil') el.innerHTML = hasilHtml(extra);
@@ -394,6 +400,7 @@ function siswaHtml() {
 
   const bisaDonasi = s.status === 'aktif' && SESI.program.length > 0 && SESI.sisa_donasi > 0;
   const trf = keadaanTransfer();
+  const iur = keadaanIuran();
   return `${kepalaHtml('Saldo Kartu')}
   <main class="k-main">
     <div class="k-kartu">
@@ -431,6 +438,11 @@ function siswaHtml() {
         <small>${trf.bisa
           ? `pakai NIS teman · maks ${rp(SESI.transfer.maks)}`
           : esc(trf.alasan)}</small>
+      </button>` : ''}
+      ${iur.bisa || iur.alasan ? `
+      <button class="k-btn k-btn-utama" data-aksi="iuran" ${iur.bisa ? '' : 'disabled'}>
+        <span class="k-btn-ikon">${IKON.iuran}</span> Bayar Iuran
+        <small>${iur.bisa ? 'pilih penanggung jawab' : esc(iur.alasan)}</small>
       </button>` : ''}
       <button class="k-btn k-btn-utama" data-aksi="donasi" ${bisaDonasi ? '' : 'disabled'}>
         <span class="k-btn-ikon">${IKON.hati}</span> Donasi
@@ -515,6 +527,19 @@ function keadaanTransfer() {
   return { bisa: false, alasan: 'belum bisa dipakai' };
 }
 
+/** Sama seperti keadaanTransfer(), plus alasan khusus daftar PJ kosong. */
+function keadaanIuran() {
+  const t = SESI?.iuran;
+  if (!t) return { bisa: false, alasan: '' };
+  if (t.bisa) return { bisa: true, alasan: '' };
+  if (SESI.siswa.status !== 'aktif') return { bisa: false, alasan: 'kartu diblokir' };
+  if (!t.daftar || !t.daftar.length) return { bisa: false, alasan: 'belum ada PJ terdaftar' };
+  if (t.sisa_kali <= 0) return { bisa: false, alasan: 'jatah bayar hari ini habis' };
+  if (t.sisa_harian < t.min) return { bisa: false, alasan: 'batas bayar hari ini tercapai' };
+  if (SESI.siswa.saldo < t.min) return { bisa: false, alasan: `saldo kurang dari ${rp(t.min)}` };
+  return { bisa: false, alasan: 'belum bisa dipakai' };
+}
+
 function nisHtml() {
   const nis = alur.nis || '';
   return `${kepalaHtml('Kirim Saldo ke Teman')}
@@ -573,9 +598,173 @@ function papanAngkaHtml(aksiOk, labelOk, matikanOk) {
   </div>`;
 }
 
+// ========================================================= iuran ke PJ
+// Alurnya: tombol → pilih PJ dari DAFTAR (bukan ketik NIY, santri tidak
+// mungkin hafal) → nominal (keypad, sama seperti transfer) → deskripsi WAJIB
+// (papan ketik di layar, lihat papanKetikHtml) → PIN.
+
+function iuranPilihHtml() {
+  const daftar = SESI.iuran.daftar || [];
+  return `${kepalaHtml('Pilih Penerima Iuran')}
+  <main class="k-main">
+    <p class="k-sub">Dari <b>${esc(SESI.siswa.nama)}</b> · saldo ${rp(SESI.siswa.saldo)}</p>
+    <div class="k-pilihan">${daftar.map((p) => `
+      <button class="k-pilih pilih-pj" data-pj="${p.id}">
+        <span class="k-pilih-avatar">${esc(initials(p.nama))}</span>
+        <span class="k-pilih-teks"><b>${esc(p.nama)}</b>
+          ${p.label ? `<span class="k-pilih-label">${esc(p.label)}</span>` : ''}</span>
+      </button>`).join('')}
+    </div>
+    <p class="k-sub">Tidak menemukan nama PJ Anda? Sampaikan ke admin cashless agar didaftarkan.</p>
+    <button class="k-btn k-btn-kecil" data-aksi="kembali">‹ Batal</button>
+  </main>`;
+}
+
+function iuranNominalHtml() {
+  const p = alur.penerima;
+  const maks = alur.maks;
+  const cepat = [5000, 10000, 20000, 50000].filter((n) => n >= alur.min && n <= maks);
+  const ketik = alur.jumlah || 0;
+  return `${kepalaHtml('Berapa yang Dibayar?')}
+  <main class="k-main">
+    <div class="k-penerima"><span class="k-sub">Uang akan masuk ke kartu</span>
+      <b>${esc(p.nama)}</b>${p.label ? `<span class="k-sub">${esc(p.label)}</span>` : ''}</div>
+    <div class="k-nominal-grid">${cepat.map((n) => `
+      <button class="k-nominal ${ketik === n ? 'sel' : ''}" data-trf-cepat="${n}">${rp(n)}</button>`).join('')}
+    </div>
+    <div class="k-isian-besar">
+      <span class="k-isian-label">Nominal</span>
+      <b class="k-isian-nilai">${ketik ? rp(ketik) : '<span class="k-isian-kosong">Rp0</span>'}</b>
+    </div>
+    ${papanAngkaHtml('lanjut', 'Lanjut', !(ketik >= alur.min && ketik <= maks))}
+    <p class="k-sub">Antara ${rp(alur.min)} dan ${rp(maks)} — dibatasi saldo dan sisa jatah hari ini.</p>
+    <button class="k-btn k-btn-kecil" data-aksi="iuran">‹ Ganti penerima</button>
+  </main>`;
+}
+
+function mulaiIuran() {
+  const t = SESI.iuran;
+  alur = { jenis: 'iuran', penerima: null, min: t.min, maks: t.maks, jumlah: 0, deskripsi: '' };
+  layar = 'iur-pilih';
+  segarkanMundur();
+  render();
+}
+
+function pilihPJ(id) {
+  const p = (SESI.iuran.daftar || []).find((x) => x.id === Number(id));
+  if (!p) return;
+  alur.penerima = p;
+  // Beda dari transfer: penerima sudah diketahui dari daftar (bukan hasil
+  // pencarian NIS), jadi tidak perlu bolak-balik ke server untuk menghitung
+  // ulang jatah — angka dari bekal() saat tap sudah cukup segar.
+  alur.maks = SESI.iuran.maks;
+  alur.jumlah = 0;
+  layar = 'iur-nominal';
+  segarkanMundur();
+  render();
+}
+
+// --------------------------------------------------- papan ketik di layar
+// Kios tidak punya keyboard fisik maupun keyboard OS yang bisa diandalkan
+// (monitor sentuh, bukan tablet) — jadi kolom teks bebas di sini (deskripsi
+// iuran, catatan transfer) dilayani papan ketik SENDIRI, bukan <input> biasa.
+// Satu implementasi dipakai KEDUANYA lewat alur.papanUntuk ('deskripsi' |
+// 'catatan') supaya aturannya (wajib/opsional, panjang maksimal) tidak
+// bercabang jadi dua kode yang bisa bergeser sendiri-sendiri.
+const PAPAN_BARIS = [
+  ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'],
+  ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
+  ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l'],
+  ['⇧', 'z', 'x', 'c', 'v', 'b', 'n', 'm', '-'],
+];
+
+function papanKetikHtml() {
+  const wajib = !!alur.papanWajib;
+  const nilai = alur.papanNilai || '';
+  const cepat = alur.papanCepat || [];
+  const besar = !!alur.papanBesar;
+  const baris = PAPAN_BARIS.map((row, i) => `<div class="k-kbd-baris">${row.map((k) => {
+    if (k === '⇧') return `<button class="k-key k-key-shift ${besar ? 'aktif' : ''}" data-kbd="shift">⇧</button>`;
+    const huruf = i >= 1 && i <= 3 ? (besar ? k.toUpperCase() : k) : k;
+    return `<button class="k-key" data-kbd="${esc(huruf)}">${esc(huruf)}</button>`;
+  }).join('')}</div>`).join('');
+  return `${kepalaHtml(alur.papanJudul)}
+  <main class="k-main">
+    ${alur.papanKeterangan ? `<p class="k-sub" style="margin:0 0 8px">${alur.papanKeterangan}</p>` : ''}
+    ${cepat.length ? `<div class="k-chip-baris">${cepat.map((c) => `
+      <button class="k-chip ${nilai === c ? 'aktif' : ''}" data-kbd-cepat="${esc(c)}">${esc(c)}</button>`).join('')}
+      <button class="k-chip ${alur.papanCustom ? 'aktif' : ''}" data-kbd-custom="1">Lainnya…</button>
+    </div>` : ''}
+    ${!cepat.length || alur.papanCustom ? `
+    <div class="k-teks-field"><label>${esc(alur.papanLabel || 'Deskripsi')}</label>
+      <div class="isi ${nilai ? '' : 'kosong'}">${nilai ? esc(nilai) : 'ketik di papan bawah…'}</div></div>
+    ${wajib ? '<p class="k-wajib">✱ wajib diisi</p>' : ''}
+    <div class="k-kbd">${baris}
+      <div class="k-kbd-baris">
+        <button class="k-key k-key-lebar" data-kbd="spasi">spasi</button>
+        <button class="k-key k-key-lebar" data-kbd="hapus">⌫ hapus</button>
+      </div>
+    </div>` : ''}
+    <div style="display:flex; gap:10px; margin-top:14px">
+      ${!wajib ? '<button class="k-btn k-btn-kecil" data-kbd-lewati="1">Lewati</button>' : ''}
+      <button class="k-btn k-btn-utama" style="flex:1" data-kbd-selesai="1"
+        ${wajib && nilai.trim().length < 3 ? 'disabled' : ''}>${esc(alur.papanTombol || 'Lanjut')}</button>
+    </div>
+  </main>`;
+}
+
+function ketikPapan(tuts) {
+  if (tuts === 'shift') { alur.papanBesar = !alur.papanBesar; return render(); }
+  if (tuts === 'hapus') { alur.papanNilai = (alur.papanNilai || '').slice(0, -1); return render(); }
+  const tambah = tuts === 'spasi' ? ' ' : tuts;
+  const nilai = (alur.papanNilai || '') + tambah;
+  if (nilai.length > 80) return;
+  alur.papanNilai = nilai;
+  return render();
+}
+
+function selesaiPapanKetik(nilai) {
+  const v = (nilai ?? alur.papanNilai ?? '').trim();
+  if (alur.papanUntuk === 'deskripsi') { alur.deskripsi = v; mintaPinIuran(); }
+  else if (alur.papanUntuk === 'catatan') { alur.catatan = v; mintaPinTransfer(); }
+}
+
+function mulaiDeskripsiIuran() {
+  alur.papanUntuk = 'deskripsi';
+  alur.papanJudul = 'Untuk Apa Iuran Ini?';
+  alur.papanKeterangan = `Kirim <b>${rp(alur.jumlah)}</b> ke <b>${esc(alur.penerima.nama)}</b>. ` +
+    'PJ memakai catatan ini untuk mencocokkan siapa yang sudah membayar.';
+  alur.papanLabel = 'Deskripsi';
+  alur.papanTombol = 'Lanjut ke PIN';
+  alur.papanWajib = true;
+  alur.papanCepat = ['Kas Kelompok', 'Kegiatan Kelas', 'Piknik', 'Study Tour'];
+  alur.papanCustom = false;
+  alur.papanNilai = alur.deskripsi || '';
+  alur.papanBesar = false;
+  layar = 'papan-ketik';
+  segarkanMundur();
+  render();
+}
+
+function mulaiCatatanTransfer() {
+  alur.papanUntuk = 'catatan';
+  alur.papanJudul = 'Tambah Catatan? (opsional)';
+  alur.papanKeterangan = `Kirim <b>${rp(alur.jumlah)}</b> ke <b>${esc(alur.penerima.nama)}</b>.`;
+  alur.papanLabel = 'Catatan';
+  alur.papanTombol = 'Lanjut ke PIN';
+  alur.papanWajib = false;
+  alur.papanCepat = [];
+  alur.papanCustom = true;
+  alur.papanNilai = alur.catatan || '';
+  alur.papanBesar = false;
+  layar = 'papan-ketik';
+  segarkanMundur();
+  render();
+}
+
 function mulaiTransfer() {
   const t = SESI.transfer;
-  alur = { jenis: 'transfer', nis: '', min: t.min, maks: t.maks, jumlah: 0 };
+  alur = { jenis: 'transfer', nis: '', min: t.min, maks: t.maks, jumlah: 0, catatan: '' };
   layar = 'trf-nis';
   render();
 }
@@ -590,9 +779,15 @@ async function ketikAngka(tuts) {
   }
   if (layar === 'trf-nominal') {
     if (tuts === 'hapus') alur.jumlah = Math.floor(alur.jumlah / 10);
-    else if (tuts === 'kirim') return mintaPinTransfer();
+    else if (tuts === 'kirim') return mulaiCatatanTransfer();
     // Batas digit menjaga angka tetap masuk akal; batas nominal sesungguhnya
     // tetap ditegakkan server, bukan di sini.
+    else if (alur.jumlah < 100000000) alur.jumlah = alur.jumlah * 10 + Number(tuts);
+    return render();
+  }
+  if (layar === 'iur-nominal') {
+    if (tuts === 'hapus') alur.jumlah = Math.floor(alur.jumlah / 10);
+    else if (tuts === 'lanjut') return mulaiDeskripsiIuran();
     else if (alur.jumlah < 100000000) alur.jumlah = alur.jumlah * 10 + Number(tuts);
     return render();
   }
@@ -620,7 +815,18 @@ function mintaPinTransfer() {
   alur.judul = 'Masukkan PIN';
   alur.info = `Kirim <b>${rp(alur.jumlah)}</b> ke <b>${esc(alur.penerima.nama)}</b>
     (${esc(alur.penerima.label_unit)} ${esc(alur.penerima.kelas || '-')}, NIS ${esc(alur.nis)}).
+    ${alur.catatan ? `Catatan: <b>${esc(alur.catatan)}</b>. ` : ''}
     Uang yang sudah terkirim tidak bisa ditarik kembali. Masukkan PIN untuk menyetujui.`;
+  pin = '';
+  layar = 'pin';
+  render();
+}
+
+function mintaPinIuran() {
+  alur.judul = 'Masukkan PIN';
+  alur.info = `Bayar iuran <b>${rp(alur.jumlah)}</b> ke <b>${esc(alur.penerima.nama)}</b> —
+    "${esc(alur.deskripsi)}". Uang yang sudah terkirim tidak bisa ditarik kembali.
+    Masukkan PIN untuk menyetujui.`;
   pin = '';
   layar = 'pin';
   render();
@@ -733,6 +939,7 @@ function pasangAksi() {
       else if (a === 'donasi') { layar = 'program'; render(); }
       else if (a === 'transfer') mulaiTransfer();
       else if (a === 'transfer-ulang') { alur.penerima = null; alur.jumlah = 0; layar = 'trf-nis'; render(); }
+      else if (a === 'iuran') mulaiIuran();
       else if (a === 'program') { layar = 'program'; render(); }
       else if (a === 'ganti-pin') mulaiGantiPin();
       else if (a === 'kunci') nyalakanModeKios();
@@ -777,6 +984,29 @@ function pasangAksi() {
   document.querySelectorAll('[data-trf-cepat]').forEach((b) => {
     b.onclick = () => { segarkanMundur(); alur.jumlah = Number(b.dataset.trfCepat); render(); };
   });
+  document.querySelectorAll('[data-pj]').forEach((b) => {
+    b.onclick = () => { segarkanMundur(); pilihPJ(b.dataset.pj); };
+  });
+  document.querySelectorAll('[data-kbd]').forEach((b) => {
+    b.onclick = () => { segarkanMundur(); ketikPapan(b.dataset.kbd); };
+  });
+  document.querySelectorAll('[data-kbd-cepat]').forEach((b) => {
+    b.onclick = () => {
+      segarkanMundur();
+      alur.papanNilai = b.dataset.kbdCepat;
+      alur.papanCustom = false;
+      render();
+    };
+  });
+  document.querySelectorAll('[data-kbd-custom]').forEach((b) => {
+    b.onclick = () => { segarkanMundur(); alur.papanCustom = true; alur.papanNilai = ''; render(); };
+  });
+  document.querySelectorAll('[data-kbd-lewati]').forEach((b) => {
+    b.onclick = () => { segarkanMundur(); selesaiPapanKetik(''); };
+  });
+  document.querySelectorAll('[data-kbd-selesai]').forEach((b) => {
+    b.onclick = () => { segarkanMundur(); selesaiPapanKetik(); };
+  });
   if (layar === 'idle') mulaiJam();
 }
 
@@ -804,7 +1034,7 @@ function ketikPin(tuts) {
 function batalPin() {
   pin = '';
   if (alur?.jenis === 'donasi') { layar = 'nominal'; render(); }
-  else if (alur?.jenis === 'transfer') { layar = 'trf-nominal'; render(); }
+  else if (alur?.jenis === 'transfer' || alur?.jenis === 'iuran') { layar = 'papan-ketik'; render(); }
   else kembaliKeSiswa();
 }
 
@@ -926,6 +1156,27 @@ async function kirimPin() {
     return;
   }
 
+  // ---- iuran ke PJ ----
+  if (alur.jenis === 'iuran') {
+    try {
+      const d = await api('/api/kios/iuran', {
+        token: SESI.token, penerima_id: alur.penerima.id, jumlah: alur.jumlah,
+        deskripsi: alur.deskripsi, pin: isian,
+        tx_id: alur.txId || (alur.txId = 'iur-' + Date.now() + '-' + Math.random().toString(16).slice(2, 8)),
+      });
+      hentikanMundur();
+      layar = 'hasil';
+      render({
+        judul: d.duplikat ? 'Iuran sudah tercatat' : 'Iuran berhasil',
+        rincian: `<b>${rp(d.jumlah)}</b> terkirim ke <b>${esc(d.penerima.nama)}</b> — "${esc(alur.deskripsi)}"`,
+        saldo: d.saldo,
+      });
+      SESI = null; RIW = null;
+      setTimeout(() => { if (layar === 'hasil') keIdle(); }, 7000);
+    } catch (e) { tanganiGagal(e, 'iur-nominal'); }
+    return;
+  }
+
   // ---- donasi ----
   try {
     const d = await api('/api/kios/donasi', {
@@ -958,6 +1209,7 @@ function tanganiGagal(e, kembaliKe) {
     const judul = alur?.jenis === 'riwayat' ? 'Riwayat tidak dapat dibuka'
       : alur?.jenis === 'pin' ? 'PIN tidak dapat diganti'
       : alur?.jenis === 'transfer' ? 'Transfer tidak dapat diproses'
+      : alur?.jenis === 'iuran' ? 'Iuran tidak dapat diproses'
       : 'Donasi tidak dapat diproses';
     layar = 'hasil';
     render({ judul, rincian: esc(e.message), gagal: true });
@@ -966,8 +1218,9 @@ function tanganiGagal(e, kembaliKe) {
   }
   pin = '';
   if (kembaliKe === 'lama' && alur?.jenis === 'pin') mulaiGantiPin();
-  else if (kembaliKe === 'trf-nis' || kembaliKe === 'trf-nominal') { layar = kembaliKe; render(); }
-  else render();
+  else if (kembaliKe === 'trf-nis' || kembaliKe === 'trf-nominal' || kembaliKe === 'iur-nominal') {
+    layar = kembaliKe; render();
+  } else render();
 }
 
 // ========================================================== jalan

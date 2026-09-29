@@ -9,6 +9,7 @@ use App\Models\KiosConfig;
 use App\Models\Siswa;
 use App\Models\Transaksi;
 use App\Services\BidangSiswa;
+use App\Services\Iuran;
 use App\Services\Kartu;
 use App\Services\Pengaturan;
 use App\Services\Pin;
@@ -247,6 +248,10 @@ class KiosController extends Controller
 
         $penerima = Transfer::cariPenerima($r->input('nis'), $s);
         $jumlah = (int) floor((float) $r->input('jumlah'));
+        // Catatan OPSIONAL — beda dari deskripsi iuran yang wajib. Transfer
+        // pertemanan biasa tidak boleh dipersulit oleh kolom wajib; catatan
+        // ini sekadar pengingat tambahan ("buat jajan besok"), bukan syarat.
+        $catatan = mb_substr(trim((string) $r->input('catatan', '')), 0, 60);
         $cfg = Pengaturan::sekolah();
 
         if ($jumlah <= 0) {
@@ -290,7 +295,7 @@ class KiosController extends Controller
                 Rupiah::f($maksPenerima) . ' — kirim nominal lebih kecil');
         }
 
-        $hasil = DB::transaction(function () use ($s, $penerima, $jumlah, $txId, $maksPenerima) {
+        $hasil = DB::transaction(function () use ($s, $penerima, $jumlah, $txId, $maksPenerima, $catatan) {
             // Sisi keluar: bersyarat, jadi dua permintaan bersamaan tidak bisa
             // mengirimkan saldo yang sama dua kali.
             $keluar = Siswa::where('id', $s->id)->where('saldo', '>=', $jumlah)->where('status', 'aktif')
@@ -320,7 +325,7 @@ class KiosController extends Controller
                 'tx_id' => $txId, 'tipe' => 'transfer_keluar', 'siswa_id' => $sBaru->id,
                 'siswa_nama' => $sBaru->nama, 'kelas' => $sBaru->kelas,
                 'jumlah' => -$jumlah, 'saldo_sesudah' => $sBaru->saldo, 'operator' => 'Kios Santri',
-                'keterangan' => "Kirim ke {$pBaru->nama} (NIS {$pBaru->nis})",
+                'keterangan' => "Kirim ke {$pBaru->nama} (NIS {$pBaru->nis})" . ($catatan ? " — {$catatan}" : ''),
                 'lawan_id' => $pBaru->id, 'lawan_nama' => $pBaru->nama, 'created_at' => $waktu,
             ]);
             // tx_id sisi penerima diberi akhiran: kunci UNIQUE tetap menolak
@@ -329,7 +334,7 @@ class KiosController extends Controller
                 'tx_id' => $txId ? $txId . '-r' : null, 'tipe' => 'transfer_masuk', 'siswa_id' => $pBaru->id,
                 'siswa_nama' => $pBaru->nama, 'kelas' => $pBaru->kelas,
                 'jumlah' => $jumlah, 'saldo_sesudah' => $pBaru->saldo, 'operator' => 'Kios Santri',
-                'keterangan' => "Terima dari {$sBaru->nama} (NIS {$sBaru->nis})",
+                'keterangan' => "Terima dari {$sBaru->nama} (NIS {$sBaru->nis})" . ($catatan ? " — {$catatan}" : ''),
                 'lawan_id' => $sBaru->id, 'lawan_nama' => $sBaru->nama, 'created_at' => $waktu,
             ]);
 
@@ -342,6 +347,132 @@ class KiosController extends Controller
             'sisa_harian' => max(0, $cfg['transfer_maks_harian'] - ($hari['kirim'] + $jumlah)),
         ];
         $this->tandaiSelesai($token, $sesi, $txId, $jawab);   // satu tap = satu transfer
+
+        return response()->json($jawab);
+    }
+
+    /**
+     * Bayar iuran ke PJ. Mesinnya sama persis dengan transfer() di atas —
+     * dua baris buku besar, batas harian, kunci bersyarat pada UPDATE supaya
+     * dua permintaan bersamaan tidak saling melangkahi — bedanya penerima
+     * WAJIB berasal dari daftar PJ (Iuran::penerima, bukan ketik NIS) dan
+     * deskripsi WAJIB diisi (identitas kelompok/keperluan iuran).
+     */
+    public function iuran(Request $r)
+    {
+        $this->harusAktif();
+        Iuran::harusAktif();
+        $txId = $r->input('tx_id') ? mb_substr((string) $r->input('tx_id'), 0, 80) : null;
+
+        if ($jawab = $this->jawabUlang($r, $txId, 'iuran')) {
+            return $jawab;
+        }
+
+        ['token' => $token, 'sesi' => $sesi, 'siswa' => $s] = SesiKios::ambil($r->input('token'));
+        $g = Pengaturan::golongan($s->golongan);
+        if (! $g?->transfer) {
+            throw new ApiError(403, "Kartu {$g?->nama} tidak bisa membayar iuran");
+        }
+
+        $penerima = Iuran::penerima((int) $r->input('penerima_id'));
+        if ($penerima->id === $s->id) {
+            throw new ApiError(400, 'Tidak bisa membayar iuran ke kartu sendiri');
+        }
+
+        $jumlah = (int) floor((float) $r->input('jumlah'));
+        $deskripsi = mb_substr(trim((string) $r->input('deskripsi', '')), 0, 80);
+        $cfg = Pengaturan::sekolah();
+
+        if ($jumlah <= 0) {
+            throw new ApiError(400, 'Nominal tidak valid');
+        }
+        if ($jumlah < $cfg['iuran_min']) {
+            throw new ApiError(400, 'Minimal bayar ' . Rupiah::f($cfg['iuran_min']));
+        }
+        if ($jumlah > $cfg['iuran_maks']) {
+            throw new ApiError(400, 'Maksimal sekali bayar ' . Rupiah::f($cfg['iuran_maks']));
+        }
+        if (mb_strlen($deskripsi) < 3) {
+            throw new ApiError(400, 'Deskripsi wajib diisi (minimal 3 huruf) — untuk apa iuran ini dibayarkan');
+        }
+
+        Pin::verifikasi($s, $r->input('pin'), $r);
+        Kartu::pastikanBerlaku($s);
+
+        if ($txId && $dupe = Transaksi::where('tx_id', $txId)->first()) {
+            return response()->json([
+                'ok' => true, 'duplikat' => true, 'jumlah' => -$dupe->jumlah,
+                'saldo' => Siswa::find($s->id)->saldo,
+                'penerima' => ['nama' => $dupe->lawan_nama], 'waktu' => $dupe->created_at,
+            ]);
+        }
+
+        $hari = Iuran::hariIni($s->id);
+        if ($hari['n_kirim'] >= $cfg['iuran_maks_kali_harian']) {
+            throw new ApiError(429, "Sudah {$hari['n_kirim']}x bayar iuran hari ini (batas {$cfg['iuran_maks_kali_harian']}x/hari)");
+        }
+        if ($hari['kirim'] + $jumlah > $cfg['iuran_maks_harian']) {
+            throw new ApiError(429, 'Melebihi batas bayar iuran harian (hari ini sudah ' . Rupiah::f($hari['kirim']) .
+                ', batas ' . Rupiah::f($cfg['iuran_maks_harian']) . ')');
+        }
+        $hariP = Iuran::hariIni($penerima->id);
+        if ($hariP['terima'] + $jumlah > $cfg['iuran_terima_harian']) {
+            throw new ApiError(429, "{$penerima->nama} sudah menerima " . Rupiah::f($hariP['terima']) .
+                ' iuran hari ini — batasnya ' . Rupiah::f($cfg['iuran_terima_harian']) . '/hari');
+        }
+
+        $maksPenerima = Pengaturan::untuk($penerima, $cfg)['max_saldo'];
+        if ($penerima->saldo + $jumlah > $maksPenerima) {
+            throw new ApiError(400, "Saldo {$penerima->nama} akan melebihi batas " .
+                Rupiah::f($maksPenerima) . ' — bayar nominal lebih kecil, atau minta PJ mencairkan dulu');
+        }
+
+        $hasil = DB::transaction(function () use ($s, $penerima, $jumlah, $txId, $maksPenerima, $deskripsi) {
+            $keluar = Siswa::where('id', $s->id)->where('saldo', '>=', $jumlah)->where('status', 'aktif')
+                ->update(['saldo' => DB::raw("saldo - {$jumlah}")]);
+            if ($keluar === 0) {
+                $cek = Siswa::find($s->id);
+                if ($cek->status !== 'aktif') {
+                    throw new ApiError(403, 'Kartu sedang diblokir');
+                }
+                throw new ApiError(402, 'Saldo tidak cukup (saldo ' . Rupiah::f($cek->saldo) . ')');
+            }
+            $masuk = Siswa::where('id', $penerima->id)->where('status', 'aktif')
+                ->whereRaw('saldo + ? <= ?', [$jumlah, $maksPenerima])
+                ->update(['saldo' => DB::raw("saldo + {$jumlah}")]);
+            if ($masuk === 0) {
+                throw new ApiError(409, "Saldo {$penerima->nama} sudah penuh — coba nominal lebih kecil");
+            }
+
+            $sBaru = Siswa::find($s->id);
+            $pBaru = Siswa::find($penerima->id);
+            $waktu = WaktuIso::sekarang();
+
+            Transaksi::create([
+                'tx_id' => $txId, 'tipe' => 'iuran_keluar', 'siswa_id' => $sBaru->id,
+                'siswa_nama' => $sBaru->nama, 'kelas' => $sBaru->kelas,
+                'jumlah' => -$jumlah, 'saldo_sesudah' => $sBaru->saldo, 'operator' => 'Kios Santri',
+                'keterangan' => "Bayar iuran ke {$pBaru->nama} — {$deskripsi}",
+                'lawan_id' => $pBaru->id, 'lawan_nama' => $pBaru->nama, 'created_at' => $waktu,
+            ]);
+            Transaksi::create([
+                'tx_id' => $txId ? $txId . '-r' : null, 'tipe' => 'iuran_masuk', 'siswa_id' => $pBaru->id,
+                'siswa_nama' => $pBaru->nama, 'kelas' => $pBaru->kelas,
+                'jumlah' => $jumlah, 'saldo_sesudah' => $pBaru->saldo, 'operator' => 'Kios Santri',
+                'keterangan' => "Terima iuran dari {$sBaru->nama} — {$deskripsi}",
+                'lawan_id' => $sBaru->id, 'lawan_nama' => $sBaru->nama, 'created_at' => $waktu,
+            ]);
+
+            return ['saldo' => $sBaru->saldo, 'waktu' => $waktu];
+        });
+
+        $jawab = [
+            'ok' => true, 'jumlah' => $jumlah, 'saldo' => $hasil['saldo'], 'waktu' => $hasil['waktu'],
+            'penerima' => Transfer::penerimaUntukKios($penerima),
+            'deskripsi' => $deskripsi,
+            'sisa_harian' => max(0, $cfg['iuran_maks_harian'] - ($hari['kirim'] + $jumlah)),
+        ];
+        $this->tandaiSelesai($token, $sesi, $txId, $jawab);   // satu tap = satu pembayaran iuran
 
         return response()->json($jawab);
     }
@@ -566,6 +697,14 @@ class KiosController extends Controller
         // mengetik NIS temannya di depan antrean.
         $sisaKirim = max(0, $cfg['transfer_maks_harian'] - $hariT['kirim']);
 
+        // Sama seperti transfer: daftar PJ dan status "bisa" dikirim di sini,
+        // bukan lewat endpoint terpisah — kalau daftarnya kosong (belum ada PJ
+        // ditandai admin) tombolnya memang harus hilang, bukan menampilkan
+        // layar pilihan yang kosong.
+        $daftarPJ = Iuran::daftarPJ();
+        $hariI = Iuran::hariIni($s->id);
+        $sisaIuranHarian = max(0, $cfg['iuran_maks_harian'] - $hariI['kirim']);
+
         return [
             'token' => $token,
             'siswa' => ['nama' => $s->nama, 'kelas' => $s->kelas, 'saldo' => $s->saldo,
@@ -585,6 +724,16 @@ class KiosController extends Controller
                 'maks' => min($cfg['transfer_maks'], $sisaKirim, $s->saldo),
                 'sisa_harian' => $sisaKirim,
                 'sisa_kali' => max(0, $cfg['transfer_maks_kali_harian'] - $hariT['n_kirim']),
+            ],
+            'iuran' => [
+                'bisa' => $cfg['iuran_aktif'] === 1 && (bool) $g?->transfer && count($daftarPJ) > 0
+                    && $hariI['n_kirim'] < $cfg['iuran_maks_kali_harian']
+                    && $sisaIuranHarian >= $cfg['iuran_min'] && $s->saldo >= $cfg['iuran_min'],
+                'daftar' => $daftarPJ,
+                'min' => $cfg['iuran_min'],
+                'maks' => min($cfg['iuran_maks'], $sisaIuranHarian, $s->saldo),
+                'sisa_harian' => $sisaIuranHarian,
+                'sisa_kali' => max(0, $cfg['iuran_maks_kali_harian'] - $hariI['n_kirim']),
             ],
             'sesi_detik' => SesiKios::detikSesi(),
             'transaksi' => Transaksi::where('siswa_id', $s->id)

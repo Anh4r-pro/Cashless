@@ -33,6 +33,8 @@ class Siswa extends Model
         'arsip_pada', 'arsip_catatan',
         // NULL = ikut golongan · 0 = dibebaskan · angka = tarif sendiri
         'biaya_admin',
+        // PJ iuran kios — ditandai per orang, lihat BidangSiswa::golongan().
+        'terima_iuran',
         'created_at',
     ];
 
@@ -41,6 +43,7 @@ class Siswa extends Model
         'saldo_titipan' => 'int',
         'smart_ambang' => 'int',
         'smart_isi' => 'int',
+        'terima_iuran' => 'bool',
     ];
 
     /**

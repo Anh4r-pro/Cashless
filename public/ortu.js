@@ -339,11 +339,13 @@ async function muatTransaksi() {
     `${d.total.toLocaleString('id-ID')} transaksi · masuk ${rp(d.total_masuk)} · keluar ${rp(d.total_keluar)}`;
 
   const LABEL = { beli: 'Jajan', topup: 'Isi saldo', koreksi: 'Penyesuaian', donasi: 'Donasi',
-    transfer_keluar: 'Kirim ke teman', transfer_masuk: 'Terima dari teman', biaya_admin: 'Biaya admin' };
+    transfer_keluar: 'Kirim ke teman', transfer_masuk: 'Terima dari teman', biaya_admin: 'Biaya admin',
+    iuran_keluar: 'Bayar iuran', iuran_masuk: 'Terima iuran' };
   // [kelas warna, ikon] per jenis. Warna sendiri tidak pernah jadi satu-satunya
   // penanda: tanda +/− dan labelnya tetap tertulis di sebelahnya.
   const RUPA = { beli: ['beli', 'beli'], donasi: ['donasi', 'donasi'], transfer_keluar: ['keluar', 'kirim'],
-    transfer_masuk: ['masuk', 'kirim'], biaya_admin: ['keluar', 'admin'] };
+    transfer_masuk: ['masuk', 'kirim'], biaya_admin: ['keluar', 'admin'],
+    iuran_keluar: ['keluar', 'kirim'], iuran_masuk: ['masuk', 'kirim'] };
   $('#o-tx').innerHTML = d.transaksi.map((t) => {
     const masuk = t.jumlah > 0;
     const [kelas, bentuk] = RUPA[t.tipe] || (masuk ? ['masuk', 'masuk'] : ['keluar', 'keluar']);

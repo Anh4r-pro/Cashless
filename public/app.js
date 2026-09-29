@@ -1141,7 +1141,10 @@ function riwayatView(el) {
         <option value="topup,koreksi">penyesuaian admin</option>
         <option value="transfer_keluar,transfer_masuk">transfer antar teman</option>
         <option value="transfer_keluar">transfer — kirim</option>
-        <option value="transfer_masuk">transfer — terima</option></select></div>
+        <option value="transfer_masuk">transfer — terima</option>
+        <option value="iuran_keluar,iuran_masuk">iuran ke PJ</option>
+        <option value="iuran_keluar">iuran — bayar</option>
+        <option value="iuran_masuk">iuran — terima (PJ)</option></select></div>
       ${isSA ? `<div class="field"><label>Tenant</label><select id="f-tenant"><option value="">semua</option></select></div>` : ''}
       <div class="field"><label>Kelas</label><select id="f-kelas"><option value="">semua</option></select></div>
       <div class="field"><label>Cari (nama/NIS/UID)</label><input id="f-cari" placeholder="cari…"></div>
@@ -1477,6 +1480,16 @@ async function dashSAView(el) {
       <button class="savebtn" data-simpan="transfer">Simpan Pengaturan Transfer</button>
     </div>
     <div class="panel">
+      <h2>🧾 Iuran ke PJ (SDM)</h2>
+      <p class="muted">Santri membayar iuran kelompok/kelas lewat layar <b>Kios</b> — memilih PJ dari
+        daftar (bukan mengetik NIY), lalu wajib mengisi <b>deskripsi</b> untuk apa iuran itu. Siapa
+        yang boleh jadi PJ penerima ditandai per orang di menu <b>SDM &amp; Personil</b> ("Boleh
+        terima iuran"), bukan di sini. Batasnya sengaja terpisah dari batas transfer pertemanan di
+        atas — PJ yang jelas identitasnya wajar menerima nominal lebih besar.</p>
+      ${gridPengaturan(cfg.labels_iuran || {}, cfg.settings)}
+      <button class="savebtn" data-simpan="iuran">Simpan Pengaturan Iuran</button>
+    </div>
+    <div class="panel">
       <h2>👪 Kunci Masuk Portal SIMCASHTREN</h2>
       <p class="muted">Wali santri dan pegawai masuk ke <b>/ortu</b>: wali dengan <b>NIS + tanggal lahir</b>
         anak, pegawai dengan <b>NIY + tanggal lahir</b> sendiri.
@@ -1494,12 +1507,12 @@ async function dashSAView(el) {
   // kunci mana yang dikirim saat tombol simpannya ditekan.
   const GRUP = {
     limit: cfg.labels, titipan: cfg.labels_titipan, nonmakanan: cfg.labels_nonmakanan,
-    transfer: cfg.labels_transfer || {}, ortu: cfg.labels_ortu || {},
+    transfer: cfg.labels_transfer || {}, iuran: cfg.labels_iuran || {}, ortu: cfg.labels_ortu || {},
   };
   // Jenjang Kelas tidak lagi di sini: ia tinggal di panel Kenaikan Kelas
   // (Pemegang Kartu → Santri), satu-satunya tempat angka itu dipakai.
   const semua = { ...cfg.labels, ...cfg.labels_titipan, ...cfg.labels_nonmakanan,
-    ...GRUP.transfer, ...GRUP.ortu };
+    ...GRUP.transfer, ...GRUP.iuran, ...GRUP.ortu };
   bindPengaturan(semua);
   el.querySelectorAll('[data-simpan]').forEach((btn) => {
     btn.onclick = async () => {
@@ -3478,6 +3491,11 @@ function siswaModal(s) {
         tetapi saldonya tetap tercatat.</span>
       <label style="margin-top:8px">Catatan</label>
       <input id="m-catatan" value="${esc(s?.catatan || '')}" maxlength="300" placeholder="catatan internal">
+      <label style="display:flex; gap:8px; align-items:flex-start; margin-top:10px; font-weight:400">
+        <input type="checkbox" id="m-iuran" ${s?.terima_iuran ? 'checked' : ''} style="margin-top:3px">
+        <span>Boleh menerima iuran dari santri (jadi PJ) — muncul di daftar pilihan penerima
+          iuran di layar Kios. Label kelompoknya diambil dari kolom Jabatan di atas.</span>
+      </label>
     </div>
     <fieldset class="ortu-set" id="m-ortu-set">
       <legend id="m-ortu-legend">Akses portal orang tua</legend>
@@ -3502,6 +3520,7 @@ function siswaModal(s) {
         nisn: $('#m-nisn').value, tgl_lahir: $('#m-lahir').value, hp_ortu: $('#m-hp').value,
         golongan: $('#m-golongan').value, jabatan: $('#m-jabatan').value,
         berlaku_sampai: $('#m-berlaku').value, catatan: $('#m-catatan').value,
+        terima_iuran: $('#m-iuran') ? $('#m-iuran').checked : false,
         // Kosong dikirim sebagai string kosong — dibaca server sebagai "ikut
         // golongan", BUKAN sebagai nol yang berarti dibebaskan.
         biaya_admin: $('#m-biaya').value.trim() === '' ? '' : nilaiUang('#m-biaya'),

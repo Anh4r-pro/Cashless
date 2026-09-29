@@ -93,6 +93,10 @@ class BidangSiswa
             'catatan' => mb_substr(trim((string) ($b['catatan'] ?? $lama->catatan ?? '')), 0, 300),
             'berlaku_sampai' => $sampai,
             'biaya_admin' => self::biayaAdmin($b, $lama),
+            // PJ iuran ditandai per ORANG, bukan per golongan — dua orang di
+            // golongan SDM yang sama bisa saja hanya satu yang jadi PJ.
+            'terima_iuran' => array_key_exists('terima_iuran', $b)
+                ? (bool) $b['terima_iuran'] : (bool) ($lama->terima_iuran ?? false),
         ];
     }
 

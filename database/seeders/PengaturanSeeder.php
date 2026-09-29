@@ -79,6 +79,16 @@ class PengaturanSeeder extends Seeder
             'transfer_terima_harian' => 100000,   // rem penampungan
             'transfer_maks_kali_harian' => 5,
 
+            // iuran ke PJ (SDM) lewat kios — batas TERPISAH dari transfer_*
+            // meski mesinnya sama, sebab PJ yang jelas identitasnya boleh
+            // menerima nominal lebih besar daripada transfer antar teman.
+            'iuran_aktif' => 1,
+            'iuran_min' => 1000,
+            'iuran_maks' => 100000,
+            'iuran_maks_harian' => 200000,
+            'iuran_maks_kali_harian' => 10,
+            'iuran_terima_harian' => 1000000,
+
             // portal wali: 4 digit HP sebagai kunci ketiga
             'ortu_minta_hp' => 0,
 
