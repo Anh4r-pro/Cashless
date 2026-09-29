@@ -150,11 +150,26 @@ class SiswaController extends Controller
         $total = (clone $q)->count();
         $jumlah = (clone $q)->selectRaw('COALESCE(SUM(saldo),0) s, COALESCE(SUM(saldo_titipan),0) t')->first();
 
+        /*
+         * Kolom urut dibatasi daftar putih: parameternya datang langsung dari
+         * query string, dan `orderBy` tidak memparameterkan nama kolom — daftar
+         * ini yang menutup jalan injeksi lewat `urut`.
+         */
+        $kolomUrut = ['nama', 'kelas', 'nis', 'saldo', 'status', 'golongan', 'berlaku_sampai', 'card_uid'];
+        $urut = in_array($r->query('urut'), $kolomUrut, true) ? $r->query('urut') : 'nama';
+        $arah = $r->query('arah') === 'desc' ? 'desc' : 'asc';
+        $q->orderBy($urut, $arah);
+        // Nama sebagai penentu kedua: baris dengan kelas/saldo/status yang sama
+        // tidak melompat-lompat urutannya di antara satu halaman dan halaman berikutnya.
+        if ($urut !== 'nama') {
+            $q->orderBy('nama');
+        }
+
         // pin_kustom: santri sudah mengganti PIN kios sendiri. Yang dikirim hanya
         // penanda ya/tidak — hash PIN tidak pernah keluar dari server.
         $rows = $q->select('siswa.*')
             ->selectRaw('EXISTS(SELECT 1 FROM siswa_pin p WHERE p.siswa_id = siswa.id) AS pin_kustom')
-            ->orderBy('nama')->limit($limit)->offset(($page - 1) * $limit)->get();
+            ->limit($limit)->offset(($page - 1) * $limit)->get();
 
         return response()->json([
             'siswa' => $rows, 'total' => $total, 'page' => $page, 'limit' => $limit,

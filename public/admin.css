@@ -380,6 +380,8 @@ body.admin td { padding: 12px 14px; }
 body.admin thead tr:first-child th:first-child { border-top-left-radius: 13px; }
 body.admin thead tr:first-child th:last-child { border-top-right-radius: 13px; }
 body.admin tbody tr:hover > td { background: #FCFBF7; }
+body.admin th.th-urut { cursor: pointer; user-select: none; white-space: nowrap; }
+body.admin th.th-urut:hover { color: var(--navy-900, #1A2856); }
 
 /* ---------- tombol & isian */
 body.admin .savebtn, body.admin button.go, body.admin .filterbar button.go, body.admin .modal .actions button.primary,

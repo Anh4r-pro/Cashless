@@ -3136,7 +3136,7 @@ const golDari = (kode) => GOLONGAN.find((g) => g.kode === kode) || { kode, nama:
 function sdmView(el) { siswaView(el, true); }
 
 function siswaView(el, sdm) {
-  siswaState = { page: 1, sdm: !!sdm };
+  siswaState = { page: 1, sdm: !!sdm, urut: 'nama', arah: 'asc' };
   const t = ISTILAH(sdm);
   const judul = sdm ? 'SDM &amp; Personil Khusus' : 'Data Santri';
   const bolehImpor = boleh(`${sdm ? 'sdm' : 'santri'}.impor`);
@@ -3182,11 +3182,7 @@ function siswaView(el, sdm) {
     </div>
     <p class="muted">💡 Tap kartu di halaman ini untuk langsung menemukan pemiliknya / mendaftarkan kartu baru.</p>
     <div class="tblwrap"><table>
-      <thead><tr><th></th><th>Nama</th><th>${sdm ? 'Golongan' : 'Kelas'}</th>
-      ${sdm ? '<th>NIY</th>' : ''}
-      <th>${sdm ? 'Unit &amp; jabatan' : 'NIS'}</th><th>UID Kartu</th>
-      <th class="num">Saldo</th><th>Status</th><th>${sdm ? 'Berlaku sampai' : 'Portal ortu'}</th>
-      <th>PIN kios</th><th></th></tr></thead>
+      <thead id="sw-thead"></thead>
       <tbody id="sw-body"></tbody>
     </table></div>
     <div class="pager">
@@ -3194,6 +3190,21 @@ function siswaView(el, sdm) {
       <button id="sw-prev">‹</button><button id="sw-next">›</button>
     </div>
   </div>`;
+
+  renderTheadSiswa(sdm);
+  // Satu pendengar klik di kepala tabel yang menyertakan atribut data-urut —
+  // dipasang sekali di sini, bukan setiap kali header digambar ulang, sebab
+  // #sw-thead sendiri tidak pernah diganti, hanya isinya (lewat innerHTML).
+  $('#sw-thead').addEventListener('click', (e) => {
+    const th = e.target.closest('th[data-urut]');
+    if (!th) return;
+    const kolom = th.dataset.urut;
+    if (siswaState.urut === kolom) siswaState.arah = siswaState.arah === 'asc' ? 'desc' : 'asc';
+    else { siswaState.urut = kolom; siswaState.arah = 'asc'; }
+    siswaState.page = 1;
+    renderTheadSiswa(sdm);
+    loadSiswa();
+  });
 
   // Daftar Unit untuk SDM datang dari KODE (lewat /api/kelas), bukan dari data:
   // pilihannya harus tetap lengkap walau belum ada personil di unit tersebut.
@@ -3219,6 +3230,27 @@ function siswaView(el, sdm) {
   if ($('#btn-arsip')) $('#btn-arsip').onclick = () => arsipPanel(!!sdm);
   if ($('#btn-kenaikan')) $('#btn-kenaikan').onclick = kenaikanPanel;
   loadSiswa();
+}
+
+/**
+ * Kepala tabel Santri/SDM, digambar ulang setiap kolom urut berubah supaya
+ * panah penanda pindah ke kolom yang baru diklik. Hanya kolom dengan makna
+ * tunggal yang boleh diurutkan — "Unit & jabatan" gabungan dua data sekaligus
+ * jadi sengaja dilewati.
+ */
+function renderTheadSiswa(sdm) {
+  const panah = (k) => siswaState.urut === k ? (siswaState.arah === 'asc' ? ' ▲' : ' ▼') : '';
+  const th = (k, label, cls = '') => `<th class="th-urut${cls}" data-urut="${k}" title="Urutkan berdasarkan ${esc(label)}">${esc(label)}${panah(k)}</th>`;
+  $('#sw-thead').innerHTML = `<tr><th></th>
+    ${th('nama', 'Nama')}
+    ${sdm ? th('golongan', 'Golongan') : th('kelas', 'Kelas')}
+    ${sdm ? th('nis', 'NIY') : ''}
+    ${sdm ? '<th>Unit &amp; jabatan</th>' : th('nis', 'NIS')}
+    <th>UID Kartu</th>
+    ${th('saldo', 'Saldo', ' num')}
+    ${th('status', 'Status')}
+    ${sdm ? th('berlaku_sampai', 'Berlaku sampai') : '<th>Portal ortu</th>'}
+    <th>PIN kios</th><th></th></tr>`;
 }
 
 /**
@@ -3278,7 +3310,8 @@ function lencanaBerlaku(s) {
 }
 
 async function loadSiswa() {
-  const p = new URLSearchParams({ page: siswaState.page, limit: 20 });
+  const p = new URLSearchParams({ page: siswaState.page, limit: 20,
+    urut: siswaState.urut || 'nama', arah: siswaState.arah || 'asc' });
   const sdm = siswaState.sdm;
   if ($('#sw-cari').value.trim()) p.set('cari', $('#sw-cari').value.trim());
   if ($('#sw-kelas').value) p.set('kelas', $('#sw-kelas').value);
