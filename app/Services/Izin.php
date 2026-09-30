@@ -78,7 +78,7 @@ class Izin
             'sdm.reset_pin' => 'Mereset PIN kios personil',
             'sdm.impor' => 'Menambah personil kolektif via Excel',
             'sdm.arsip' => 'Mengarsipkan personil (keluar / pindah)',
-            'golongan.kelola' => 'Mengelola golongan & batasnya',
+            'golongan.kelola' => 'Mengelola golongan & batasnya, serta daftar Unit SDM',
         ],
         'Kantin & Koperasi' => [
             'tenant.lihat' => 'Melihat daftar tenant',

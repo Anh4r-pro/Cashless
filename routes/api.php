@@ -25,6 +25,7 @@ use App\Http\Controllers\Api\ProdukController;
 use App\Http\Controllers\Api\SaldoController;
 use App\Http\Controllers\Api\SiswaController;
 use App\Http\Controllers\Api\TenantController;
+use App\Http\Controllers\Api\UnitSdmController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -78,6 +79,11 @@ Route::middleware('peran:superadmin')->group(function () {
     Route::post('golongan', [GolonganController::class, 'store'])->middleware('izin:golongan.kelola');
     Route::put('golongan/{id}', [GolonganController::class, 'update'])->middleware('izin:golongan.kelola');
     Route::delete('golongan/{id}', [GolonganController::class, 'destroy'])->middleware('izin:golongan.kelola');
+
+    Route::get('unit-sdm', [UnitSdmController::class, 'index'])->middleware('izin:golongan.kelola');
+    Route::post('unit-sdm', [UnitSdmController::class, 'store'])->middleware('izin:golongan.kelola');
+    Route::put('unit-sdm/{id}', [UnitSdmController::class, 'update'])->middleware('izin:golongan.kelola');
+    Route::delete('unit-sdm/{id}', [UnitSdmController::class, 'destroy'])->middleware('izin:golongan.kelola');
 
     Route::get('tenants', [TenantController::class, 'index'])->middleware('izin:tenant.lihat');
     Route::post('tenants', [TenantController::class, 'store'])->middleware('izin:tenant.tambah');

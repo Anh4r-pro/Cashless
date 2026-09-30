@@ -289,10 +289,10 @@ class PengaturanController extends Controller
             // sehingga 10A melompat ke depan 7A begitu jenjang SMA masuk.
             'kelas' => Siswa::where('kelas', '!=', '')->distinct()
                 ->orderByRaw(\App\Services\Kelas::urutSql())->pluck('kelas'),
-            // Daftar Unit untuk SDM & personil datang dari kode, bukan dari data:
-            // pilihannya harus tetap lengkap walau belum ada satu pun personil
-            // yang terdaftar di unit tersebut.
-            'unit_sdm' => \App\Services\BidangSiswa::UNIT_SDM,
+            // Daftar Unit untuk SDM & personil datang dari tabel unit_sdm (bisa
+            // disunting admin), bukan dari data siswa: pilihannya harus tetap
+            // lengkap walau belum ada satu pun personil di unit tersebut.
+            'unit_sdm' => \App\Models\UnitSdm::aktifNama(),
         ]);
     }
 }

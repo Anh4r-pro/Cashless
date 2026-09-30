@@ -3161,6 +3161,7 @@ function siswaView(el, sdm) {
       <h2 style="margin:0">${judul} <span class="muted" id="sw-count"></span></h2>
       <div style="display:flex; gap:10px; flex-wrap:wrap">
         ${sdm && boleh('golongan.kelola') ? '<button class="linkbtn" id="btn-golongan">⚙ kelola golongan</button>' : ''}
+        ${sdm && boleh('golongan.kelola') ? '<button class="linkbtn" id="btn-unit-sdm">⚙ kelola unit</button>' : ''}
         ${bolehImpor ? `<button class="linkbtn" id="btn-impor">⬆ Impor ${esc(t.orang)} dari Excel</button>` : ''}
         ${bolehKartu ? '<button class="linkbtn" id="btn-kartu-massal">📇 Daftar Kartu Massal</button>' : ''}
         ${!sdm && boleh('santri.kenaikan') ? '<button class="linkbtn" id="btn-kenaikan">🎓 Kenaikan Kelas</button>' : ''}
@@ -3241,6 +3242,7 @@ function siswaView(el, sdm) {
   $('#sw-next').onclick = () => { siswaState.page++; loadSiswa(); };
   if ($('#btn-add-siswa')) $('#btn-add-siswa').onclick = () => siswaModal(null);
   if ($('#btn-golongan')) $('#btn-golongan').onclick = kelolaGolonganModal;
+  if ($('#btn-unit-sdm')) $('#btn-unit-sdm').onclick = kelolaUnitSdmModal;
   if ($('#btn-impor')) $('#btn-impor').onclick = () => imporKartuPanel(!!sdm);
   if ($('#btn-kartu-massal')) $('#btn-kartu-massal').onclick = () => kartuMassalPanel(!!sdm);
   if ($('#btn-arsip')) $('#btn-arsip').onclick = () => arsipPanel(!!sdm);
@@ -3745,6 +3747,77 @@ function golonganFormModal(g, cfg, sesudah) {
         await api('/api/golongan', { method: 'POST', body });
       }
       toast('✔ Golongan tersimpan', 'ok');
+      sesudah();
+    });
+}
+
+/**
+ * Daftar Unit untuk SDM & personil — dulu angka tetap di kode, sekarang bisa
+ * admin tambah/ubah/hapus sendiri. Jauh lebih sederhana dari golongan (cuma
+ * nama, tanpa batas keuangan), jadi satu modal saja tanpa formulir terpisah.
+ */
+async function kelolaUnitSdmModal() {
+  const d = await api('/api/unit-sdm');
+
+  const baris = (u) => `
+    <div class="gol-baris" data-id="${u.id}">
+      <div class="gol-kepala">
+        <b>${esc(u.nama)}</b>
+        <span class="muted">${u.jumlah} personil</span>
+        ${u.aktif ? '' : '<span class="badge">nonaktif</span>'}
+        <button class="linkbtn" data-ubah-unit="${u.id}">ubah</button>
+        <button class="linkbtn" data-toggle-unit="${u.id}">${u.aktif ? 'nonaktifkan' : 'aktifkan'}</button>
+        <button class="linkbtn danger" data-hapus-unit="${u.id}"
+          ${u.jumlah ? 'disabled title="masih ada personil di unit ini"' : ''}>hapus</button>
+      </div>
+    </div>`;
+
+  openModal(`
+    <h2>Unit untuk SDM &amp; Personil</h2>
+    <p class="muted">Daftar pilihan kolom Unit di formulir SDM dan template impor Excel.
+      Mengganti nama di sini <b>tidak</b> mengubah data personil yang sudah memakai nama lama —
+      sama seperti kartu lama yang unitnya di luar daftar tetap tersimpan apa adanya.
+      Unit yang masih dipakai personil tidak bisa dihapus; nonaktifkan saja supaya
+      tidak ditawarkan lagi ke personil baru.</p>
+    <div class="gol-list">${d.unit.map(baris).join('')}</div>
+    <button class="linkbtn" id="unit-tambah">+ Tambah unit</button>`);
+
+  const segarkan = () => { closeModal(); kelolaUnitSdmModal(); };
+  $('#unit-tambah').onclick = () => unitSdmFormModal(null, segarkan);
+  document.querySelectorAll('[data-ubah-unit]').forEach((b) => {
+    b.onclick = () => unitSdmFormModal(d.unit.find((u) => u.id === Number(b.dataset.ubahUnit)), segarkan);
+  });
+  document.querySelectorAll('[data-toggle-unit]').forEach((b) => {
+    b.onclick = async () => {
+      const u = d.unit.find((x) => x.id === Number(b.dataset.toggleUnit));
+      try {
+        await api('/api/unit-sdm/' + u.id, { method: 'PUT', body: { aktif: u.aktif ? 0 : 1 } });
+        toast(u.aktif ? '✔ Unit dinonaktifkan' : '✔ Unit diaktifkan', 'ok');
+        segarkan();
+      } catch (e) { toast(e.message, 'err'); }
+    };
+  });
+  document.querySelectorAll('[data-hapus-unit]').forEach((b) => {
+    b.onclick = async () => {
+      try {
+        await api('/api/unit-sdm/' + b.dataset.hapusUnit, { method: 'DELETE' });
+        toast('✔ Unit dihapus', 'ok');
+        segarkan();
+      } catch (e) { toast(e.message, 'err'); }
+    };
+  });
+}
+
+function unitSdmFormModal(u, sesudah) {
+  openModal(`
+    <h2>${u ? 'Ubah' : 'Tambah'} Unit</h2>
+    <div class="field"><label>Nama unit</label>
+      <input id="uf-nama" value="${esc(u?.nama || '')}" maxlength="30" placeholder="mis. TU / Satpam"></div>`,
+    async () => {
+      const body = { nama: $('#uf-nama').value };
+      if (u) await api('/api/unit-sdm/' + u.id, { method: 'PUT', body });
+      else await api('/api/unit-sdm', { method: 'POST', body });
+      toast('✔ Unit tersimpan', 'ok');
       sesudah();
     });
 }

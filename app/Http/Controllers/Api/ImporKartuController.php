@@ -5,7 +5,6 @@ namespace App\Http\Controllers\Api;
 use App\Exceptions\ApiError;
 use App\Models\Golongan;
 use App\Models\Siswa;
-use App\Services\BidangSiswa;
 use App\Services\ImporKartu;
 use App\Support\WaktuIso;
 use Illuminate\Http\Request;
@@ -210,9 +209,10 @@ class ImporKartuController extends Controller
         ];
 
         if ($jenis === 'sdm') {
+            $unitSdm = \App\Models\UnitSdm::aktifNama();
             $aturan[] = ['kelas', DataValidation::TYPE_LIST, null,
-                '"' . implode(',', BidangSiswa::UNIT_SDM) . '"', null,
-                'Unit', 'Pilih dari daftar: ' . implode(', ', BidangSiswa::UNIT_SDM) . '.',
+                '"' . implode(',', $unitSdm) . '"', null,
+                'Unit', 'Pilih dari daftar: ' . implode(', ', $unitSdm) . '.',
                 'Unit tidak dikenal', 'Pilih salah satu dari daftar yang tersedia.'];
 
             $gol = Golongan::where('kode', '!=', 'siswa')->where('aktif', 1)
@@ -309,7 +309,7 @@ class ImporKartuController extends Controller
 
         $khusus = $jenis === 'sdm'
             ? [
-                '6. Unit harus salah satu dari: ' . implode(', ', BidangSiswa::UNIT_SDM) . '.',
+                '6. Unit harus salah satu dari: ' . implode(', ', \App\Models\UnitSdm::aktifNama()) . '.',
                 '7. Golongan boleh dikosongkan — kartu akan memakai golongan SDM bawaan. Golongan menentukan ' .
                     'batas saldo dan belanja kartu, jadi isilah kalau personil ini memang bukan pegawai biasa.',
                 '8. Tanggal Lahir memakai DD/MM/YYYY dengan nol di depan, mis. 05/08/1990. Tanggal lahir inilah ' .

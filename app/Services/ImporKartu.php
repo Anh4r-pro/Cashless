@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Exceptions\ApiError;
 use App\Models\Golongan;
 use App\Models\Siswa;
+use App\Models\UnitSdm;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
 
@@ -215,6 +216,7 @@ class ImporKartu
         $golBawaan = $jenis === 'sdm'
             ? ($golongan->first(fn ($g) => $g->kode !== 'siswa' && $g->aktif)?->kode ?? 'sdm')
             : 'siswa';
+        $unitSdm = $jenis === 'sdm' ? UnitSdm::aktifNama() : [];
 
         $nisDipakai = [];      // nomor induk yang sudah muncul di berkas ini
         $nisnDipakai = [];
@@ -298,15 +300,15 @@ class ImporKartu
             }
 
             if ($jenis === 'sdm') {
-                if (! in_array($kelas, array_map('strtoupper', BidangSiswa::UNIT_SDM), true)) {
+                if (! in_array($kelas, array_map('strtoupper', $unitSdm), true)) {
                     $gagal("Unit \"{$kelas}\" tidak dikenal — pilih salah satu dari: " .
-                        implode(', ', BidangSiswa::UNIT_SDM));
+                        implode(', ', $unitSdm));
 
                     continue;
                 }
                 // Huruf besar dipulihkan ke bentuk resmi daftarnya, supaya tabel
                 // tidak berisi campuran "SMP" dan "Smp" yang menyulitkan saringan.
-                foreach (BidangSiswa::UNIT_SDM as $u) {
+                foreach ($unitSdm as $u) {
                     if (strtoupper($u) === $kelas) {
                         $b['kelas'] = $u;
                     }
