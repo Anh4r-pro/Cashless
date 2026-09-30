@@ -17,6 +17,10 @@ class Produk extends Model
     protected $fillable = [
         'tenant_id',
         'nama',
+        // Barcode dipasang/diganti LANGSUNG oleh kasir Mart tanpa lewat
+        // pengajuan: ia penanda barang, bukan syarat dagang seperti nama &
+        // harga yang menentukan berapa santri dibebani.
+        'barcode',
         'harga',
         'aktif',
         'kategori',

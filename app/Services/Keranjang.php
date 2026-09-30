@@ -24,8 +24,11 @@ class Keranjang
 
     public const MAKS_QTY = 99;
 
-    /** Mode kasir tenant — lihat migrasi mode_kasir_tenant. */
-    public const MODE_KASIR = ['menu', 'bebas'];
+    /**
+     * Mode kasir tenant — lihat migrasi mode_kasir_tenant.
+     * 'mart' memakai layar swalayan tersendiri (pindai barcode, qty, tunai).
+     */
+    public const MODE_KASIR = ['menu', 'bebas', 'mart'];
 
     /** Deskripsi terpendek yang masih bermakna di riwayat santri ("Pulpen" lolos, "a" tidak). */
     public const MIN_DESKRIPSI = 3;

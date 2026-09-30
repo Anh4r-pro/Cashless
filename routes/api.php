@@ -18,6 +18,7 @@ use App\Http\Controllers\Api\TopupOrtuController;
 use App\Http\Controllers\Api\TransaksiController;
 use App\Http\Controllers\Api\DonasiController;
 use App\Http\Controllers\Api\KiosController;
+use App\Http\Controllers\Api\MartController;
 use App\Http\Controllers\Api\OrtuController;
 use App\Http\Controllers\Api\PengaturanController;
 use App\Http\Controllers\Api\NotifController;
@@ -46,6 +47,19 @@ Route::post('logout', [AuthController::class, 'logout']);
 // --- kasir: tap kartu & pembelian -----------------------------------------
 Route::post('card-lookup', [KasirController::class, 'cardLookup'])->middleware('peran:tenant,superadmin');
 Route::post('beli', [KasirController::class, 'beli'])->middleware('peran:tenant');
+
+// --- IMBOS Mart: kasir swalayan (pindai barcode, qty, tunai/kartu) ---------
+// Pembayaran KARTU tetap lewat /api/beli di atas; yang di sini hanya yang
+// memang belum pernah ada — cari barcode, jual tunai, dan tutup kas harian.
+// Pagarnya di controller: akunnya harus tenant BERMODE mart.
+Route::middleware('peran:tenant')->group(function () {
+    Route::get('mart/info', [MartController::class, 'info']);
+    Route::post('mart/cari', [MartController::class, 'cari']);
+    Route::put('mart/produk/{id}/barcode', [MartController::class, 'pasangBarcode']);
+    Route::post('mart/jual-tunai', [MartController::class, 'jualTunai']);
+    Route::post('mart/tutup-kas', [MartController::class, 'tutupKas']);
+    Route::get('mart/riwayat', [MartController::class, 'riwayat']);
+});
 
 // --- uang masuk & keluar di luar kasir (eksklusif superadmin) --------------
 Route::middleware('peran:superadmin')->group(function () {

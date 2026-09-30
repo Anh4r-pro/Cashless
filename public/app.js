@@ -385,7 +385,7 @@ function renderView(name) {
     return;
   }
   const render = {
-    kasir: kasirView, menu: menuView, riwayat: riwayatView,
+    kasir: USER?.tenant_mode === 'mart' ? martView : kasirView, menu: menuView, riwayat: riwayatView,
     dashboard: USER?.role === 'tenant' ? dashTenantView : dashSAView,
     saldo: saldoView, santri: siswaView, tenant: tenantView, analitik: analitikView,
     donasi: donasiView, topup: topupOrtuView, 'menu-ajuan': menuAjuanView, sdm: sdmView,
@@ -438,7 +438,17 @@ document.addEventListener('keydown', (e) => {
 
 function onCardTapped(uid) {
   const now = Date.now();
-  if (uid === lastTap.uid && now - lastTap.at < 2000) return; // anti double-read
+  /*
+   * Rem anti-baca-ganda: reader RFID kerap melaporkan satu tap dua kali, dan
+   * di layar kasir/saldo itu berarti satu kartu terbaca dobel.
+   *
+   * TAPI di kasir Mart, memindai barang yang sama tiga kali berturut-turut
+   * adalah hal paling biasa (beli 3 bungkus) — remnya justru membuat dua
+   * barang terakhir hilang diam-diam. Karena itu penangan yang memang
+   * mengharapkan pindaian beruntun bisa melepas remnya sendiri.
+   */
+  if (!(cardHandler && cardHandler.tanpaRem)
+      && uid === lastTap.uid && now - lastTap.at < 2000) return;
   lastTap = { uid, at: now };
   if (cardHandler) { cardHandler(uid); return; }
   if (USER.role === 'tenant' && activeView === 'kasir') kasirLookup(uid);
@@ -659,6 +669,363 @@ async function doBayar() {
     toast(e.message, 'err');
     updatePayBtn();               // token masih hidup jika transaksi gagal
   }
+}
+
+// ╔══════════════════════════════════════════════════════════╗
+// ║ TENANT: IMBOS MART — kasir swalayan                       ║
+// ╚══════════════════════════════════════════════════════════╝
+/*
+ * Bedanya dengan kasir biasa ada tiga: barang masuk lewat PINDAI BARCODE
+ * (bukan grid tombol), tiap baris punya JUMLAH, dan pembeli boleh bayar
+ * TUNAI — bukan cuma kartu santri.
+ *
+ * Satu alat, dua makna: pemindai barcode dan reader RFID sama-sama "mengetik"
+ * ke halaman lalu menekan Enter, jadi tidak bisa dibedakan dari bentuk
+ * angkanya (UID kartu di sini pun angka semua). Yang membedakan KEADAAN
+ * layar: selama keranjang diisi, pindaian dibaca sebagai barcode barang;
+ * hanya setelah kasir memilih "Kartu (RFID)" pindaian berikutnya dibaca
+ * sebagai kartu. Jadi salah baca tidak pernah menghanguskan keranjang.
+ */
+let mart = null;
+
+function martView(el) {
+  mart = { cart: [], metode: null, siswa: null, tapToken: null, uang: 0, info: null, barcodeBaru: null };
+  el.innerHTML = `
+  <div class="row">
+    <div class="panel">
+      <div class="kat-head"><h2 style="margin:0">Barang</h2>
+        <button class="linkbtn" id="mart-kas">🧾 Tutup kas harian</button></div>
+      <div class="tapzone" id="mart-scan">
+        <div class="big">🔎</div>
+        <b>Pindai barcode barang</b><br>
+        <span class="muted">barang langsung masuk keranjang</span>
+      </div>
+      <div style="display:flex; gap:8px; margin-top:10px">
+        <input id="mart-q" placeholder="atau ketik barcode / nama barang" autocomplete="off">
+        <button class="linkbtn" id="mart-cari" style="flex:none">Cari</button>
+      </div>
+      <div id="mart-hasil"></div>
+      <div id="mart-ringkas" class="muted" style="margin-top:12px"></div>
+    </div>
+    <div class="panel">
+      <h2>Keranjang <span class="muted" id="mart-n"></span></h2>
+      <div id="mart-cart"></div>
+      <div class="total"><span>Total</span><span class="rp" id="mart-total">Rp0</span></div>
+      <div class="modeswitch" style="margin-top:12px">
+        <button id="mart-m-kartu">💳 Kartu (RFID)<br><span class="muted" style="font-size:11px">santri & pegawai</span></button>
+        <button id="mart-m-tunai">💵 Tunai<br><span class="muted" style="font-size:11px">umum</span></button>
+      </div>
+      <div id="mart-bayar"></div>
+    </div>
+  </div>`;
+
+  // Pindaian apa pun di layar ini lewat sini — lihat catatan di atas.
+  // `tanpaRem`: memindai barang yang sama berkali-kali memang disengaja.
+  martScan.tanpaRem = true;
+  cardHandler = martScan;
+
+  $('#mart-cari').onclick = () => { const q = $('#mart-q').value.trim(); if (q) martCari(q, false); };
+  $('#mart-q').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); $('#mart-cari').click(); }
+  });
+  $('#mart-m-kartu').onclick = () => martPilihMetode('kartu');
+  $('#mart-m-tunai').onclick = () => martPilihMetode('tunai');
+  $('#mart-kas').onclick = martKasModal;
+
+  martRender();
+  martMuatInfo();
+}
+
+async function martMuatInfo() {
+  try {
+    mart.info = await api('/api/mart/info');
+    const h = mart.info.hari_ini;
+    const box = $('#mart-ringkas');
+    if (!box) return;
+    box.innerHTML = `Hari ini — tunai <b>${rp(h.tunai.total)}</b> (${h.tunai.n} transaksi) ·
+      cashless <b>${rp(h.cashless.total)}</b> (${h.cashless.n})
+      ${mart.info.kas ? '<br><span class="badge aktif">kas hari ini sudah ditutup</span>' : ''}
+      <br><span style="font-size:12px">${mart.info.n_barcode} dari ${mart.info.n_produk} barang sudah punya barcode</span>`;
+  } catch { /* ringkasan opsional — layar tetap bisa dipakai */ }
+}
+
+/** Pindaian: barcode barang, kecuali saat layar memang sedang menunggu kartu. */
+function martScan(kode) {
+  if (!mart) return;
+  if (mart.metode === 'kartu' && !mart.siswa) { martTapKartu(kode); return; }
+  martCari(kode, true);
+}
+
+async function martCari(q, dariPindai) {
+  try {
+    const d = await api('/api/mart/cari', { method: 'POST', body: { q } });
+    mart.barcodeBaru = d.barcode_baru || null;
+    if (d.cocok) { martTambah(d.cocok); $('#mart-q').value = ''; $('#mart-hasil').innerHTML = ''; return; }
+    if (d.daftar.length === 1 && !dariPindai) { martTambah(d.daftar[0]); $('#mart-q').value = ''; $('#mart-hasil').innerHTML = ''; return; }
+    martRenderHasil(d, q);
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+function martRenderHasil(d, q) {
+  const box = $('#mart-hasil');
+  if (d.barcode_baru) {
+    // Barcode tak dikenal: langsung tawarkan menempelkannya, supaya pendataan
+    // terjadi sambil melayani — bukan jadi proyek input data tersendiri.
+    box.innerHTML = `<div class="aju-unduh" style="margin-top:10px">
+      <b>Barcode <code>${esc(d.barcode_baru)}</code> belum terdaftar.</b>
+      <span class="muted set-hint">Ketik nama barangnya di kotak atas, lalu pilih
+        "tempelkan barcode" pada barang yang benar.</span></div>`;
+    return;
+  }
+  box.innerHTML = d.daftar.length
+    ? `<div class="grid" style="margin-top:10px">${d.daftar.map((p) => `
+        <button data-tambah="${p.id}"><b>${esc(p.nama)}</b>
+          <span class="muted rp">${rp(p.harga)}</span>
+          ${p.kategori === 'non_makanan' ? '<span class="katdot">non-makanan</span>' : ''}
+          ${mart.barcodeBaru ? '<span class="katdot" style="background:#e3f4ea;color:var(--ok)">tempelkan barcode</span>' : ''}
+        </button>`).join('')}</div>`
+    : `<p class="muted" style="margin-top:10px">Tidak ada barang cocok dengan "${esc(q)}".</p>`;
+  box.querySelectorAll('[data-tambah]').forEach((b) => {
+    b.onclick = async () => {
+      const p = d.daftar.find((x) => x.id === Number(b.dataset.tambah));
+      if (mart.barcodeBaru) {
+        try {
+          const h = await api(`/api/mart/produk/${p.id}/barcode`, { method: 'PUT', body: { barcode: mart.barcodeBaru } });
+          toast(`✔ Barcode ditempelkan ke ${h.produk.nama}`, 'ok');
+          mart.barcodeBaru = null;
+          martMuatInfo();
+        } catch (e) { toast(e.message, 'err'); return; }
+      }
+      martTambah(p);
+      $('#mart-q').value = '';
+      $('#mart-hasil').innerHTML = '';
+    };
+  });
+}
+
+/** Barang yang sama dipindai dua kali menambah JUMLAH, bukan menumpuk baris. */
+function martTambah(p) {
+  const ada = mart.cart.find((x) => x.produk_id === p.id);
+  if (ada) ada.qty += 1;
+  else mart.cart.push({ produk_id: p.id, nama: p.nama, harga: p.harga, kategori: p.kategori, qty: 1 });
+  martRender();
+}
+
+function martTotal() { return mart.cart.reduce((n, p) => n + p.harga * p.qty, 0); }
+
+function martRender() {
+  const box = $('#mart-cart');
+  if (!box) return;
+  box.innerHTML = mart.cart.length
+    ? `<div class="cart">${mart.cart.map((p, i) => `
+        <div class="cart-line" style="align-items:center; gap:8px">
+          <span style="flex:1; min-width:0"><b>${esc(p.nama)}</b>
+            ${p.kategori === 'non_makanan' ? '<span class="katdot">non-makanan</span>' : ''}
+            <br><span class="muted" style="font-size:11.5px">${rp(p.harga)} / satuan</span></span>
+          <span style="display:flex; align-items:center; gap:5px; flex:none">
+            <button class="linkbtn" data-kurang="${i}" style="font-weight:800">−</button>
+            <b style="min-width:18px; text-align:center">${p.qty}</b>
+            <button class="linkbtn" data-tambah-qty="${i}" style="font-weight:800">+</button>
+          </span>
+          <span class="rp" style="width:86px; text-align:right; font-weight:700; flex:none">${rp(p.harga * p.qty)}</span>
+          <button data-hapus="${i}">✕</button>
+        </div>`).join('')}</div>`
+    : '<p class="muted" style="text-align:center; padding:18px 0">Belum ada barang — mulai pindai.</p>';
+
+  $('#mart-n').textContent = mart.cart.length ? `— ${mart.cart.reduce((n, p) => n + p.qty, 0)} barang` : '';
+  $('#mart-total').textContent = rp(martTotal());
+  box.querySelectorAll('[data-kurang]').forEach((b) => {
+    b.onclick = () => { const p = mart.cart[Number(b.dataset.kurang)];
+      if (p.qty > 1) p.qty -= 1; else mart.cart.splice(Number(b.dataset.kurang), 1); martRender(); };
+  });
+  box.querySelectorAll('[data-tambah-qty]').forEach((b) => {
+    b.onclick = () => { mart.cart[Number(b.dataset.tambahQty)].qty += 1; martRender(); };
+  });
+  box.querySelectorAll('[data-hapus]').forEach((b) => {
+    b.onclick = () => { mart.cart.splice(Number(b.dataset.hapus), 1); martRender(); };
+  });
+  martRenderBayar();
+}
+
+function martPilihMetode(m) {
+  if (!mart.cart.length) { toast('Keranjang masih kosong', 'err'); return; }
+  mart.metode = mart.metode === m ? null : m;
+  mart.uang = 0;
+  martRender();
+}
+
+function martRenderBayar() {
+  const box = $('#mart-bayar');
+  if (!box) return;
+  $('#mart-m-kartu').classList.toggle('on', mart.metode === 'kartu');
+  $('#mart-m-tunai').classList.toggle('on', mart.metode === 'tunai');
+
+  if (!mart.cart.length || !mart.metode) {
+    box.innerHTML = `<button class="paybtn" disabled>${
+      mart.cart.length ? 'Pilih metode bayar dulu' : 'Keranjang kosong'}</button>`;
+    return;
+  }
+
+  if (mart.metode === 'kartu') {
+    const s = mart.siswa;
+    box.innerHTML = `
+      ${s ? `<div class="stucard">${avatarHtml(s)}
+          <div><b>${esc(s.nama)}</b><br><span class="muted">${esc(s.kelas)} · NIS ${esc(s.nis)}</span></div>
+          <div class="saldo"><span class="muted">Saldo</span><br><b class="rp">${rp(s.saldo)}</b>
+            <br><span class="muted" style="font-size:11px">sisa setelah bayar ${rp(s.saldo - martTotal())}</span></div>
+        </div>`
+        : `<div class="tapzone" style="margin-top:4px"><div class="big">💳</div>
+            <b>Tempelkan kartu</b><br><span class="muted">saldo dipotong otomatis</span></div>`}
+      <button class="paybtn" id="mart-bayar-kartu" ${s && mart.tapToken ? '' : 'disabled'}>
+        ${s ? `Bayar ${rp(martTotal())} dari saldo` : 'Menunggu kartu…'}</button>`;
+    if ($('#mart-bayar-kartu')) $('#mart-bayar-kartu').onclick = martBayarKartu;
+    return;
+  }
+
+  const total = martTotal();
+  const cepat = [total, 20000, 50000, 100000].filter((n, i, a) => n >= total && a.indexOf(n) === i);
+  const kembali = mart.uang - total;
+  box.innerHTML = `
+    <div class="k-chip-baris" style="display:flex; flex-wrap:wrap; gap:7px; margin:10px 0 8px">
+      ${cepat.map((n) => `<button class="linkbtn" data-uang="${n}"
+        style="border:1.5px solid ${mart.uang === n ? 'var(--ok)' : 'var(--line)'}; border-radius:99px; padding:7px 13px; font-weight:700">
+        ${n === total ? 'Uang pas' : rp(n)}</button>`).join('')}
+    </div>
+    <div class="field"><label>Uang diterima</label>${inputUang({ id: 'mart-uang', nilai: mart.uang || '' })}</div>
+    <div id="mart-kembalian" style="background:#e3f4ea; border:2px solid var(--ok); border-radius:12px;
+        padding:10px 14px; text-align:center; margin-bottom:8px; ${mart.uang >= total ? '' : 'display:none'}">
+      ${mart.uang >= total ? `<span class="muted" style="color:var(--ok); font-weight:700; font-size:12.5px">KEMBALIAN</span><br>
+        <b class="rp" style="font-size:30px; color:var(--ok)">${rp(kembali)}</b>` : ''}</div>
+    <button class="paybtn" id="mart-bayar-tunai" ${mart.uang >= total ? '' : 'disabled'}>
+      ${mart.uang >= total ? `Selesaikan — kembalian ${rp(kembali)}` : 'Masukkan uang diterima'}</button>`;
+
+  box.querySelectorAll('[data-uang]').forEach((b) => {
+    b.onclick = () => { mart.uang = Number(b.dataset.uang); martRenderBayar(); };
+  });
+  // Saat KASIR MENGETIK, kotak kembalian & tombol saja yang diperbarui —
+  // menggambar ulang seluruh panel akan membuat kursor melompat keluar dari
+  // kolom uang di tengah pengetikan.
+  const inp = $('#mart-uang');
+  if (inp) inp.addEventListener('input', () => {
+    mart.uang = nilaiUang('#mart-uang') || 0;
+    const sisa = mart.uang - total;
+    const kotak = $('#mart-kembalian');
+    const tombol = $('#mart-bayar-tunai');
+    if (kotak) kotak.innerHTML = mart.uang >= total
+      ? `<span class="muted" style="color:var(--ok); font-weight:700; font-size:12.5px">KEMBALIAN</span><br>
+         <b class="rp" style="font-size:30px; color:var(--ok)">${rp(sisa)}</b>` : '';
+    if (kotak) kotak.style.display = mart.uang >= total ? '' : 'none';
+    if (tombol) {
+      tombol.disabled = mart.uang < total;
+      tombol.textContent = mart.uang >= total
+        ? `Selesaikan — kembalian ${rp(sisa)}` : 'Masukkan uang diterima';
+    }
+  });
+  if ($('#mart-bayar-tunai')) $('#mart-bayar-tunai').onclick = martBayarTunai;
+}
+
+async function martTapKartu(uid) {
+  try {
+    const d = await api('/api/card-lookup', { method: 'POST', body: { uid } });
+    if (!d.siswa) { toast('Kartu belum terdaftar', 'err'); return; }
+    mart.siswa = d.siswa;
+    mart.tapToken = d.tap_token;
+    martRenderBayar();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function martBayarKartu() {
+  const btn = $('#mart-bayar-kartu');
+  btn.disabled = true;
+  try {
+    const d = await api('/api/beli', { method: 'POST', body: {
+      siswa_id: mart.siswa.id,
+      jumlah: martTotal(),
+      items: mart.cart.map((p) => ({ produk_id: p.produk_id, qty: p.qty })),
+      tap_token: mart.tapToken,
+      tx_id: 'mart-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+    }});
+    toast(`✔ Terbayar — sisa saldo ${rp(d.siswa.saldo)}`, 'ok');
+    martSelesai();
+  } catch (e) { toast(e.message, 'err'); btn.disabled = false; }
+}
+
+async function martBayarTunai() {
+  const btn = $('#mart-bayar-tunai');
+  btn.disabled = true;
+  try {
+    const d = await api('/api/mart/jual-tunai', { method: 'POST', body: {
+      items: mart.cart.map((p) => ({ produk_id: p.produk_id, qty: p.qty })),
+      uang_diterima: mart.uang,
+      tx_id: 'mrt-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+    }});
+    toast(`✔ Terbayar tunai — kembalian ${rp(d.jual.kembalian)}`, 'ok');
+    martSelesai();
+  } catch (e) { toast(e.message, 'err'); btn.disabled = false; }
+}
+
+function martSelesai() {
+  mart.cart = [];
+  mart.metode = null;
+  mart.siswa = null;
+  mart.tapToken = null;
+  mart.uang = 0;
+  martRender();
+  martMuatInfo();
+}
+
+async function martKasModal() {
+  const d = await api('/api/mart/info');
+  const h = d.hari_ini;
+  if (d.kas) {
+    openModal(`<h2>Kas ${esc(d.tanggal)} sudah ditutup</h2>
+      <p class="muted">Ditutup oleh <b>${esc(d.kas.operator)}</b>.</p>
+      <div class="cart">
+        <div class="cart-line"><span>Kas awal</span><span class="rp">${rp(d.kas.kas_awal)}</span></div>
+        <div class="cart-line"><span>Penjualan tunai</span><span class="rp">${rp(d.kas.tunai)}</span></div>
+        <div class="cart-line"><span>Hitungan fisik</span><span class="rp">${rp(d.kas.hitung_fisik)}</span></div>
+      </div>
+      <div class="total"><span>Selisih</span><span class="rp">${rp(d.kas.selisih)}</span></div>`);
+    return;
+  }
+  // Kas awal diusulkan dari hitungan fisik penutupan terakhir: uang itulah yang
+  // memang ditinggal di laci sebagai modal kembalian hari berikutnya.
+  const usul = d.kas_kemarin ? d.kas_kemarin.hitung_fisik : 0;
+  openModal(`
+    <h2>Tutup kas — ${esc(d.tanggal)}</h2>
+    <p class="muted">Penjualan <b>tunai</b> hari ini <b>${rp(h.tunai.total)}</b> dari ${h.tunai.n} transaksi.
+      Penjualan cashless (${rp(h.cashless.total)}) <b>tidak</b> masuk hitungan laci — uangnya ada di kas
+      sekolah dan disetorkan lewat mekanisme setoran tenant.</p>
+    <div class="field"><label>Kas awal / modal laci</label>
+      ${inputUang({ id: 'mk-awal', nilai: usul })}
+      <span class="muted set-hint">${d.kas_kemarin ? 'Diisi dari hitungan fisik penutupan terakhir.' : 'Isi modal kembalian yang ada di laci pagi tadi.'}</span></div>
+    <div class="field"><label>Hitungan fisik laci sekarang</label>
+      ${inputUang({ id: 'mk-fisik', nilai: '' })}
+      <span class="muted set-hint">Hitung uang yang benar-benar ada di laci, apa adanya —
+        selisih memang untuk dicatat, bukan untuk dicocok-cocokkan.</span></div>
+    <div class="field"><label>Catatan (opsional)</label>
+      <input id="mk-catatan" maxlength="300" placeholder="mis. ada pembelian galon Rp20.000"></div>
+    <div id="mk-hitung" class="muted"></div>`,
+    async () => {
+      const d2 = await api('/api/mart/tutup-kas', { method: 'POST', body: {
+        kas_awal: nilaiUang('#mk-awal') || 0,
+        hitung_fisik: nilaiUang('#mk-fisik') || 0,
+        catatan: $('#mk-catatan').value,
+      }});
+      toast(d2.kas.selisih === 0 ? '✔ Kas ditutup — cocok' : `Kas ditutup — selisih ${rp(d2.kas.selisih)}`,
+        d2.kas.selisih === 0 ? 'ok' : 'err');
+      martMuatInfo();
+    }, 'Tutup kas');
+
+  const hitung = () => {
+    const seharusnya = (nilaiUang('#mk-awal') || 0) + h.tunai.total;
+    const fisik = nilaiUang('#mk-fisik') || 0;
+    const selisih = fisik - seharusnya;
+    $('#mk-hitung').innerHTML = `Laci seharusnya <b>${rp(seharusnya)}</b>` +
+      (fisik ? ` · selisih <b style="color:${selisih === 0 ? 'var(--ok)' : 'var(--err)'}">${rp(selisih)}</b>` : '');
+  };
+  ['#mk-awal', '#mk-fisik'].forEach((sel) => $(sel).addEventListener('input', hitung));
+  hitung();
 }
 
 // ╔══════════════════════════════════════════════════════════╗
@@ -4001,12 +4368,17 @@ function tenantModal(t) {
         barang itu memakai jatah belanja harian tersendiri. Mengembalikan koperasi menjadi
         kantin akan menandai ulang semua barangnya sebagai makanan.</span></div>
     <div class="field"><label>Mode kasir</label><select id="m-mode">
-      <option value="menu" ${t?.mode_kasir !== 'bebas' ? 'selected' : ''}>Menu nyala — kasir memilih dari daftar menu</option>
+      <option value="menu" ${!['bebas', 'mart'].includes(t?.mode_kasir) ? 'selected' : ''}>Menu nyala — kasir memilih dari daftar menu</option>
       <option value="bebas" ${t?.mode_kasir === 'bebas' ? 'selected' : ''}>Menu mati — kasir mengetik deskripsi & harga</option>
+      <option value="mart" ${t?.mode_kasir === 'mart' ? 'selected' : ''}>Swalayan (IMBOS Mart) — pindai barcode, bisa bayar tunai</option>
     </select>
       <span class="muted set-hint">Pakai "menu mati" selama daftar barang belum selesai diinput.
         Di mode ini kasir yang memilih makanan/non-makanan, dan laporan menu terlaris
-        berisi teks bebas — nyalakan lagi begitu daftar barangnya lengkap.</span></div>
+        berisi teks bebas — nyalakan lagi begitu daftar barangnya lengkap.<br>
+        <b>Swalayan</b> memberi layar kasir tersendiri: barang dipindai barcode, ada kolom jumlah,
+        dan pembeli umum boleh bayar <b>tunai</b>. Uang tunai TIDAK masuk kas sekolah — ia
+        dibukukan terpisah dan dicocokkan lewat tutup kas harian. Pilih jenis
+        <b>Koperasi</b> supaya boleh menjual barang non-makanan.</span></div>
     ${t ? `
     <div class="field"><label>Status</label><select id="m-status">
       <option value="aktif" ${t.status === 'aktif' ? 'selected' : ''}>aktif</option>

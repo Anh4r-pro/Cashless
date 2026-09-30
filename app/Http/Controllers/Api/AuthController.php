@@ -75,6 +75,9 @@ class AuthController extends Controller
             'role' => $u->role,
             'tenant_id' => $u->tenant_id,
             'tenant_nama' => $u->tenant?->nama,
+            // Menentukan layar kasir mana yang digambar (menu / bebas / mart).
+            'tenant_mode' => $u->tenant?->mode_kasir ?? 'menu',
+            'tenant_jenis' => $u->tenant?->jenis,
             'kategori_id' => $u->kategori_id,
             'kategori_nama' => $u->kategori?->nama
                 ?? ($u->role === 'superadmin' ? 'Akses Penuh (bawaan)' : null),
