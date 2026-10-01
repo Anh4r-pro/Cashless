@@ -19,6 +19,9 @@ use App\Http\Controllers\Api\TransaksiController;
 use App\Http\Controllers\Api\DonasiController;
 use App\Http\Controllers\Api\KiosController;
 use App\Http\Controllers\Api\MartController;
+use App\Http\Controllers\Api\MartLaporanController;
+use App\Http\Controllers\Api\MartOpnameController;
+use App\Http\Controllers\Api\MartStokController;
 use App\Http\Controllers\Api\OrtuController;
 use App\Http\Controllers\Api\PengaturanController;
 use App\Http\Controllers\Api\NotifController;
@@ -59,6 +62,33 @@ Route::middleware('peran:tenant')->group(function () {
     Route::post('mart/jual-tunai', [MartController::class, 'jualTunai']);
     Route::post('mart/tutup-kas', [MartController::class, 'tutupKas']);
     Route::get('mart/riwayat', [MartController::class, 'riwayat']);
+
+    // Manajemen barang & stok — LANGSUNG, tanpa pengajuan (lihat MartStokController).
+    Route::get('mart/kategori', [MartStokController::class, 'kategori']);
+    Route::post('mart/kategori', [MartStokController::class, 'kategoriSimpan']);
+    Route::put('mart/kategori/{id}', [MartStokController::class, 'kategoriSimpan']);
+    Route::delete('mart/kategori/{id}', [MartStokController::class, 'kategoriHapus']);
+    Route::get('mart/barang', [MartStokController::class, 'index']);
+    Route::post('mart/barang', [MartStokController::class, 'simpan']);
+    Route::put('mart/barang/{id}', [MartStokController::class, 'simpan']);
+    Route::delete('mart/barang/{id}', [MartStokController::class, 'hapus']);
+    Route::post('mart/barang/{id}/stok', [MartStokController::class, 'stokMasuk']);
+    Route::get('mart/barang/{id}/mutasi', [MartStokController::class, 'mutasi']);
+
+    // Stok opname (audit) & rekonsiliasi.
+    Route::get('mart/opname', [MartOpnameController::class, 'index']);
+    Route::post('mart/opname', [MartOpnameController::class, 'mulai']);
+    Route::get('mart/opname/{id}', [MartOpnameController::class, 'detail']);
+    Route::put('mart/opname/{id}', [MartOpnameController::class, 'isiHitungan']);
+    Route::post('mart/opname/{id}/selesai', [MartOpnameController::class, 'selesaikan']);
+    Route::delete('mart/opname/{id}', [MartOpnameController::class, 'batal']);
+});
+
+// Laporan Mart: kasir Mart untuk tokonya sendiri, superadmin untuk Mart mana
+// pun lewat ?tenant_id= — supaya admin pusat tetap melihat seluruh dagangannya.
+Route::middleware('peran:tenant,superadmin')->group(function () {
+    Route::get('mart/dashboard', [MartLaporanController::class, 'dashboard']);
+    Route::get('mart/keuangan', [MartLaporanController::class, 'keuangan']);
 });
 
 // --- uang masuk & keluar di luar kasir (eksklusif superadmin) --------------

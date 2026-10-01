@@ -114,6 +114,14 @@ const VIEWS = {
     ['kasir', 'Kasir'], ['menu', 'Menu'], ['dashboard', 'Dashboard'],
     { grup: 'Laporan', anak: [['analitik', 'Analitik'], ['riwayat', 'Riwayat']] },
   ],
+  // IMBOS Mart memakai menu sendiri: ia menjual barang bersatuan dan berstok,
+  // bukan menu masakan, jadi "Menu" diganti "Barang & Stok" dan ditambah
+  // "Stok Opname". Pengajuan menu tidak ada di sini — Mart unit yayasan sendiri.
+  tenant_mart: [
+    ['kasir', 'Kasir'], ['mart-stok', 'Barang & Stok'], ['mart-opname', 'Stok Opname'],
+    ['dashboard', 'Dashboard'],
+    { grup: 'Laporan', anak: [['riwayat', 'Riwayat']] },
+  ],
 };
 
 /**
@@ -142,15 +150,27 @@ const IZIN_TAB = {
 /** Apakah akun yang sedang masuk memegang fitur ini? */
 const boleh = (kode) => !!USER?.izin?.includes(kode);
 
-/** Apakah tab ini boleh digambar? Tab tanpa aturan (milik kasir) selalu boleh. */
-const bolehTab = (id) => !IZIN_TAB[id] || IZIN_TAB[id].some(boleh);
+/**
+ * Apakah tab ini boleh digambar? Tab tanpa aturan (milik kasir) selalu boleh.
+ *
+ * Penyaringan izin HANYA berlaku untuk superadmin: kategori akses adalah alat
+ * membagi pekerjaan antar staf admin, dan `Izin::milik()` di server memang
+ * mengembalikan daftar kosong untuk peran lain. Tanpa pengecualian ini, daftar
+ * kosong itu terbaca sebagai "tidak berhak apa pun" dan kasir tenant kehilangan
+ * Dashboard serta Riwayat miliknya sendiri.
+ */
+const bolehTab = (id) => USER?.role !== 'superadmin'
+  || !IZIN_TAB[id] || IZIN_TAB[id].some(boleh);
+
+/** Kunci menu: Mart punya susunan tab sendiri walau perannya tetap `tenant`. */
+const kunciMenu = (role) => role === 'tenant' && USER?.tenant_mode === 'mart' ? 'tenant_mart' : role;
 
 /**
  * Menu bar setelah disaring izin. Grup yang seluruh anaknya tertutup ikut
  * hilang — induk kosong yang tetap tergambar hanya akan terbuka ke ruang hampa.
  */
 function tabTampil(role) {
-  return (VIEWS[role] || []).map((t) => {
+  return (VIEWS[kunciMenu(role)] || []).map((t) => {
     if (!t.grup) return bolehTab(t[0]) ? t : null;
     const anak = t.anak.filter(([id]) => bolehTab(id));
     return anak.length ? { grup: t.grup, anak } : null;
@@ -386,7 +406,9 @@ function renderView(name) {
   }
   const render = {
     kasir: USER?.tenant_mode === 'mart' ? martView : kasirView, menu: menuView, riwayat: riwayatView,
-    dashboard: USER?.role === 'tenant' ? dashTenantView : dashSAView,
+    'mart-stok': martStokView, 'mart-opname': martOpnameView,
+    dashboard: USER?.role !== 'tenant' ? dashSAView
+      : (USER?.tenant_mode === 'mart' ? martDashView : dashTenantView),
     saldo: saldoView, santri: siswaView, tenant: tenantView, analitik: analitikView,
     donasi: donasiView, topup: topupOrtuView, 'menu-ajuan': menuAjuanView, sdm: sdmView,
     massal: massalView, akun: akunView,
@@ -672,54 +694,94 @@ async function doBayar() {
 }
 
 // ╔══════════════════════════════════════════════════════════╗
-// ║ TENANT: IMBOS MART — kasir swalayan                       ║
+// ║ TENANT: IMBOS MART — kasir, stok, opname, laporan         ║
 // ╚══════════════════════════════════════════════════════════╝
 /*
- * Bedanya dengan kasir biasa ada tiga: barang masuk lewat PINDAI BARCODE
- * (bukan grid tombol), tiap baris punya JUMLAH, dan pembeli boleh bayar
- * TUNAI — bukan cuma kartu santri.
- *
  * Satu alat, dua makna: pemindai barcode dan reader RFID sama-sama "mengetik"
  * ke halaman lalu menekan Enter, jadi tidak bisa dibedakan dari bentuk
  * angkanya (UID kartu di sini pun angka semua). Yang membedakan KEADAAN
  * layar: selama keranjang diisi, pindaian dibaca sebagai barcode barang;
- * hanya setelah kasir memilih "Kartu (RFID)" pindaian berikutnya dibaca
- * sebagai kartu. Jadi salah baca tidak pernah menghanguskan keranjang.
+ * hanya setelah kasir memilih "Kartu", pindaian berikutnya dibaca sebagai
+ * kartu. Jadi salah baca tidak pernah menghanguskan keranjang.
  */
 let mart = null;
 
+/** Unduh tabel apa pun sebagai CSV — dibuka Excel tanpa perlu alat tambahan. */
+function unduhCsv(namaBerkas, judul, baris) {
+  const sel = (v) => {
+    const t = String(v ?? '');
+    return /[",;\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+  };
+  // BOM supaya Excel membaca huruf beraksen & rupiah dengan benar.
+  const isi = '﻿' + [judul, ...baris].map((b) => b.map(sel).join(';')).join('\r\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([isi], { type: 'text/csv;charset=utf-8' }));
+  a.download = namaBerkas;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+}
+
+/** Cetak sepotong HTML lewat jendela terpisah (struk 58mm & form opname). */
+function cetakLembar(judul, gaya, isi) {
+  const w = window.open('', '_blank', 'width=420,height=640');
+  if (!w) { toast('Izinkan pop-up untuk mencetak', 'err'); return; }
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(judul)}</title>
+    <style>${gaya}</style></head><body>${isi}</body></html>`);
+  w.document.close();
+  w.focus();
+  // Jeda kecil: sebagian peramban mencetak halaman kosong kalau print()
+  // dipanggil sebelum isinya selesai ditata.
+  setTimeout(() => { w.print(); }, 350);
+}
+
+// Hijau/kuning/merah: >ambang aman, ≤ambang menipis, 0 habis. Warna saja tidak
+// cukup bagi yang sulit membedakannya, jadi angka stoknya selalu ikut tertulis.
+const MART_STATUS = {
+  aman: ['aktif', 'aman'], menipis: ['menipis', 'menipis'],
+  habis: ['blokir', 'habis'], tak_dilacak: ['netral', 'tanpa stok'],
+};
+function martBadgeStok(p, angka) {
+  const [kelas, teks] = MART_STATUS[p.status] || ['netral', '—'];
+  // Di etalase kasir yang dibutuhkan ANGKANYA ("masih cukup untuk tiga lagi?");
+  // di tabel stok angka itu sudah punya kolom sendiri, jadi lencananya
+  // menyebutkan statusnya supaya tidak mengulang yang sudah terbaca.
+  return `<span class="badge ${kelas}">${angka && p.stok !== null ? `Stok: ${p.stok}` : teks}</span>`;
+}
+
+// ------------------------------------------------------------------ KASIR
+
 function martView(el) {
-  mart = { cart: [], metode: null, siswa: null, tapToken: null, uang: 0, info: null, barcodeBaru: null };
+  mart = { cart: [], metode: null, siswa: null, tapToken: null, uang: 0, diskon: 0,
+    info: null, barcodeBaru: null, katAktif: null, produk: [], kategori: [], struk: true };
   el.innerHTML = `
-  <div class="row">
+  <div class="row mart-pos">
     <div class="panel">
-      <div class="kat-head"><h2 style="margin:0">Barang</h2>
+      <div class="kat-head"><h2 style="margin:0">Etalase</h2>
         <button class="linkbtn" id="mart-kas">🧾 Tutup kas harian</button></div>
-      <div class="tapzone" id="mart-scan">
-        <div class="big">🔎</div>
-        <b>Pindai barcode barang</b><br>
-        <span class="muted">barang langsung masuk keranjang</span>
+      <div style="display:flex; gap:8px; margin-bottom:10px">
+        <input id="mart-q" placeholder="Cari nama barang, SKU, atau scan barcode…" autocomplete="off">
+        <button class="go" id="mart-cari" style="flex:none">Cari</button>
       </div>
-      <div style="display:flex; gap:8px; margin-top:10px">
-        <input id="mart-q" placeholder="atau ketik barcode / nama barang" autocomplete="off">
-        <button class="linkbtn" id="mart-cari" style="flex:none">Cari</button>
-      </div>
+      <div class="k-chip-baris" id="mart-kat"></div>
       <div id="mart-hasil"></div>
-      <div id="mart-ringkas" class="muted" style="margin-top:12px"></div>
+      <div class="grid mart-katalog" id="mart-katalog"><span class="muted">memuat barang…</span></div>
     </div>
     <div class="panel">
-      <h2>Keranjang <span class="muted" id="mart-n"></span></h2>
+      <div class="kat-head"><h2 style="margin:0">Keranjang <span class="muted" id="mart-n"></span></h2>
+        <button class="linkbtn danger" id="mart-kosong">Kosongkan</button></div>
       <div id="mart-cart"></div>
-      <div class="total"><span>Total</span><span class="rp" id="mart-total">Rp0</span></div>
-      <div class="modeswitch" style="margin-top:12px">
-        <button id="mart-m-kartu">💳 Kartu (RFID)<br><span class="muted" style="font-size:11px">santri & pegawai</span></button>
+      <div id="mart-hitung"></div>
+      <div class="modeswitch" style="margin-top:10px">
+        <button id="mart-m-kartu">💳 Kartu<br><span class="muted" style="font-size:11px">santri & pegawai</span></button>
         <button id="mart-m-tunai">💵 Tunai<br><span class="muted" style="font-size:11px">umum</span></button>
+        <button id="mart-m-transfer">🏦 Transfer<br><span class="muted" style="font-size:11px">bank / QRIS</span></button>
       </div>
       <div id="mart-bayar"></div>
+      <div id="mart-ringkas" class="muted" style="margin-top:12px"></div>
     </div>
   </div>`;
 
-  // Pindaian apa pun di layar ini lewat sini — lihat catatan di atas.
   // `tanpaRem`: memindai barang yang sama berkali-kali memang disengaja.
   martScan.tanpaRem = true;
   cardHandler = martScan;
@@ -728,12 +790,66 @@ function martView(el) {
   $('#mart-q').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); $('#mart-cari').click(); }
   });
+  $('#mart-q').addEventListener('input', debounce(() => martGambarKatalog(), 250));
+  $('#mart-kosong').onclick = () => { mart.cart = []; mart.metode = null; mart.uang = 0; mart.diskon = 0; martRender(); };
   $('#mart-m-kartu').onclick = () => martPilihMetode('kartu');
   $('#mart-m-tunai').onclick = () => martPilihMetode('tunai');
+  $('#mart-m-transfer').onclick = () => martPilihMetode('transfer');
   $('#mart-kas').onclick = martKasModal;
 
   martRender();
+  martMuatKatalog();
   martMuatInfo();
+}
+
+async function martMuatKatalog() {
+  try {
+    const d = await api('/api/mart/barang');
+    mart.produk = (d.produk || []).filter((p) => p.aktif);
+    mart.kategori = (d.kategori || []).filter((k) => k.aktif);
+    martGambarKategori();
+    martGambarKatalog();
+  } catch (e) { $('#mart-katalog').innerHTML = `<span class="minus">${esc(e.message)}</span>`; }
+}
+
+function martGambarKategori() {
+  const chip = (id, teks) => `<button class="k-chip ${mart.katAktif === id ? 'aktif' : ''}"
+    data-kat="${id === null ? '' : id}">${esc(teks)}</button>`;
+  $('#mart-kat').innerHTML = chip(null, 'Semua') + mart.kategori.map((k) => chip(k.id, k.nama)).join('');
+  document.querySelectorAll('#mart-kat [data-kat]').forEach((b) => {
+    b.onclick = () => {
+      mart.katAktif = b.dataset.kat === '' ? null : Number(b.dataset.kat);
+      martGambarKategori();
+      martGambarKatalog();
+    };
+  });
+}
+
+function martGambarKatalog() {
+  const q = ($('#mart-q')?.value || '').trim().toLowerCase();
+  const daftar = mart.produk.filter((p) =>
+    (mart.katAktif === null || p.kategori_id === mart.katAktif)
+    && (!q || p.nama.toLowerCase().includes(q) || String(p.barcode || '').includes(q)));
+
+  $('#mart-katalog').innerHTML = daftar.length
+    ? daftar.map((p) => `
+      <button class="mart-kartu" data-pilih="${p.id}" ${p.status === 'habis' ? 'disabled' : ''}>
+        <span class="mart-kartu-atas">
+          <span class="muted" style="font-size:11px">SKU: ${esc(p.barcode || '—')}</span>
+          ${martBadgeStok(p, true)}
+        </span>
+        <b>${esc(p.nama)}</b>
+        <span class="muted" style="font-size:11.5px">${esc(p.kategori_nama || 'Tanpa kategori')}</span>
+        <span class="mart-kartu-bawah"><span class="rp">${rp(p.harga)}</span><span class="mart-plus">+</span></span>
+      </button>`).join('')
+    : '<span class="muted">Tidak ada barang cocok.</span>';
+
+  document.querySelectorAll('#mart-katalog [data-pilih]').forEach((b) => {
+    b.onclick = () => {
+      const p = mart.produk.find((x) => x.id === Number(b.dataset.pilih));
+      if (p) martTambah(p);
+    };
+  });
 }
 
 async function martMuatInfo() {
@@ -742,14 +858,12 @@ async function martMuatInfo() {
     const h = mart.info.hari_ini;
     const box = $('#mart-ringkas');
     if (!box) return;
-    box.innerHTML = `Hari ini — tunai <b>${rp(h.tunai.total)}</b> (${h.tunai.n} transaksi) ·
-      cashless <b>${rp(h.cashless.total)}</b> (${h.cashless.n})
-      ${mart.info.kas ? '<br><span class="badge aktif">kas hari ini sudah ditutup</span>' : ''}
-      <br><span style="font-size:12px">${mart.info.n_barcode} dari ${mart.info.n_produk} barang sudah punya barcode</span>`;
-  } catch { /* ringkasan opsional — layar tetap bisa dipakai */ }
+    box.innerHTML = `Hari ini — tunai <b>${rp(h.tunai.total)}</b> ·
+      transfer <b>${rp(h.transfer.total)}</b> · kartu <b>${rp(h.cashless.total)}</b>
+      ${mart.info.kas ? '<br><span class="badge aktif">kas hari ini sudah ditutup</span>' : ''}`;
+  } catch { /* ringkasan opsional */ }
 }
 
-/** Pindaian: barcode barang, kecuali saat layar memang sedang menunggu kartu. */
 function martScan(kode) {
   if (!mart) return;
   if (mart.metode === 'kartu' && !mart.siswa) { martTapKartu(kode); return; }
@@ -760,80 +874,77 @@ async function martCari(q, dariPindai) {
   try {
     const d = await api('/api/mart/cari', { method: 'POST', body: { q } });
     mart.barcodeBaru = d.barcode_baru || null;
-    if (d.cocok) { martTambah(d.cocok); $('#mart-q').value = ''; $('#mart-hasil').innerHTML = ''; return; }
-    if (d.daftar.length === 1 && !dariPindai) { martTambah(d.daftar[0]); $('#mart-q').value = ''; $('#mart-hasil').innerHTML = ''; return; }
-    martRenderHasil(d, q);
+    if (d.cocok) {
+      martTambah(d.cocok);
+      $('#mart-q').value = '';
+      $('#mart-hasil').innerHTML = '';
+      martGambarKatalog();
+      return;
+    }
+    if (d.barcode_baru) {
+      $('#mart-hasil').innerHTML = `<div class="aju-unduh" style="margin:10px 0">
+        <b>Barcode <code>${esc(d.barcode_baru)}</code> belum terdaftar.</b>
+        <span class="muted set-hint">Ketik nama barangnya di kotak atas, lalu klik barang yang benar
+          untuk menempelkan barcode ini sekaligus memasukkannya ke keranjang.</span></div>`;
+      return;
+    }
+    $('#mart-hasil').innerHTML = '';
+    if (dariPindai) toast(`Barcode "${q}" tidak ditemukan`, 'err');
+    martGambarKatalog();
   } catch (e) { toast(e.message, 'err'); }
 }
 
-function martRenderHasil(d, q) {
-  const box = $('#mart-hasil');
-  if (d.barcode_baru) {
-    // Barcode tak dikenal: langsung tawarkan menempelkannya, supaya pendataan
-    // terjadi sambil melayani — bukan jadi proyek input data tersendiri.
-    box.innerHTML = `<div class="aju-unduh" style="margin-top:10px">
-      <b>Barcode <code>${esc(d.barcode_baru)}</code> belum terdaftar.</b>
-      <span class="muted set-hint">Ketik nama barangnya di kotak atas, lalu pilih
-        "tempelkan barcode" pada barang yang benar.</span></div>`;
-    return;
-  }
-  box.innerHTML = d.daftar.length
-    ? `<div class="grid" style="margin-top:10px">${d.daftar.map((p) => `
-        <button data-tambah="${p.id}"><b>${esc(p.nama)}</b>
-          <span class="muted rp">${rp(p.harga)}</span>
-          ${p.kategori === 'non_makanan' ? '<span class="katdot">non-makanan</span>' : ''}
-          ${mart.barcodeBaru ? '<span class="katdot" style="background:#e3f4ea;color:var(--ok)">tempelkan barcode</span>' : ''}
-        </button>`).join('')}</div>`
-    : `<p class="muted" style="margin-top:10px">Tidak ada barang cocok dengan "${esc(q)}".</p>`;
-  box.querySelectorAll('[data-tambah]').forEach((b) => {
-    b.onclick = async () => {
-      const p = d.daftar.find((x) => x.id === Number(b.dataset.tambah));
-      if (mart.barcodeBaru) {
-        try {
-          const h = await api(`/api/mart/produk/${p.id}/barcode`, { method: 'PUT', body: { barcode: mart.barcodeBaru } });
-          toast(`✔ Barcode ditempelkan ke ${h.produk.nama}`, 'ok');
-          mart.barcodeBaru = null;
-          martMuatInfo();
-        } catch (e) { toast(e.message, 'err'); return; }
-      }
-      martTambah(p);
-      $('#mart-q').value = '';
+async function martTambah(p) {
+  // Barcode hasil pindaian yang belum terdaftar ditempelkan ke barang yang
+  // dipilih kasir — pendataan terjadi sambil melayani, bukan proyek tersendiri.
+  if (mart.barcodeBaru && !p.barcode) {
+    try {
+      await api(`/api/mart/produk/${p.id}/barcode`, { method: 'PUT', body: { barcode: mart.barcodeBaru } });
+      toast(`✔ Barcode ditempel ke ${p.nama}`, 'ok');
+      p.barcode = mart.barcodeBaru;
+      mart.barcodeBaru = null;
       $('#mart-hasil').innerHTML = '';
-    };
-  });
-}
-
-/** Barang yang sama dipindai dua kali menambah JUMLAH, bukan menumpuk baris. */
-function martTambah(p) {
+      martGambarKatalog();
+    } catch (e) { toast(e.message, 'err'); }
+  }
   const ada = mart.cart.find((x) => x.produk_id === p.id);
   if (ada) ada.qty += 1;
   else mart.cart.push({ produk_id: p.id, nama: p.nama, harga: p.harga, kategori: p.kategori, qty: 1 });
   martRender();
 }
 
-function martTotal() { return mart.cart.reduce((n, p) => n + p.harga * p.qty, 0); }
+function martSubtotal() { return mart.cart.reduce((n, p) => n + p.harga * p.qty, 0); }
+function martTotal() { return Math.max(0, martSubtotal() - (mart.diskon || 0)); }
 
 function martRender() {
   const box = $('#mart-cart');
   if (!box) return;
   box.innerHTML = mart.cart.length
     ? `<div class="cart">${mart.cart.map((p, i) => `
-        <div class="cart-line" style="align-items:center; gap:8px">
-          <span style="flex:1; min-width:0"><b>${esc(p.nama)}</b>
+        <div class="cart-line mart-baris">
+          <span class="mart-baris-nama"><b>${esc(p.nama)}</b>
             ${p.kategori === 'non_makanan' ? '<span class="katdot">non-makanan</span>' : ''}
             <br><span class="muted" style="font-size:11.5px">${rp(p.harga)} / satuan</span></span>
-          <span style="display:flex; align-items:center; gap:5px; flex:none">
-            <button class="linkbtn" data-kurang="${i}" style="font-weight:800">−</button>
-            <b style="min-width:18px; text-align:center">${p.qty}</b>
-            <button class="linkbtn" data-tambah-qty="${i}" style="font-weight:800">+</button>
+          <span class="mart-qty">
+            <button class="linkbtn" data-kurang="${i}">−</button>
+            <b>${p.qty}</b>
+            <button class="linkbtn" data-tambah-qty="${i}">+</button>
           </span>
-          <span class="rp" style="width:86px; text-align:right; font-weight:700; flex:none">${rp(p.harga * p.qty)}</span>
+          <span class="rp mart-sub">${rp(p.harga * p.qty)}</span>
           <button data-hapus="${i}">✕</button>
         </div>`).join('')}</div>`
-    : '<p class="muted" style="text-align:center; padding:18px 0">Belum ada barang — mulai pindai.</p>';
+    : '<p class="muted" style="text-align:center; padding:22px 0">Keranjang masih kosong —<br>pindai atau pilih barang dari katalog.</p>';
 
   $('#mart-n').textContent = mart.cart.length ? `— ${mart.cart.reduce((n, p) => n + p.qty, 0)} barang` : '';
-  $('#mart-total').textContent = rp(martTotal());
+
+  $('#mart-hitung').innerHTML = mart.cart.length ? `
+    <div class="cart" style="border-top:1px solid var(--line)">
+      <div class="cart-line"><span class="muted">Subtotal</span><span class="rp">${rp(martSubtotal())}</span></div>
+      <div class="cart-line"><span class="muted">Diskon (Rp)</span>
+        <span style="width:130px">${inputUang({ id: 'mart-diskon', nilai: mart.diskon || '' })}</span></div>
+    </div>
+    <div class="total"><span>Total</span><span class="rp" id="mart-total">${rp(martTotal())}</span></div>` : '';
+
   box.querySelectorAll('[data-kurang]').forEach((b) => {
     b.onclick = () => { const p = mart.cart[Number(b.dataset.kurang)];
       if (p.qty > 1) p.qty -= 1; else mart.cart.splice(Number(b.dataset.kurang), 1); martRender(); };
@@ -844,6 +955,14 @@ function martRender() {
   box.querySelectorAll('[data-hapus]').forEach((b) => {
     b.onclick = () => { mart.cart.splice(Number(b.dataset.hapus), 1); martRender(); };
   });
+  // Diskon diketik langsung, jadi hanya angka total dan panel bayar yang
+  // diperbarui — menggambar ulang keranjang akan menendang kursor keluar.
+  const dk = $('#mart-diskon');
+  if (dk) dk.addEventListener('input', () => {
+    mart.diskon = Math.min(nilaiUang('#mart-diskon') || 0, martSubtotal());
+    $('#mart-total').textContent = rp(martTotal());
+    martRenderBayar();
+  });
   martRenderBayar();
 }
 
@@ -851,15 +970,16 @@ function martPilihMetode(m) {
   if (!mart.cart.length) { toast('Keranjang masih kosong', 'err'); return; }
   mart.metode = mart.metode === m ? null : m;
   mart.uang = 0;
-  martRender();
+  martRenderBayar();
 }
 
 function martRenderBayar() {
   const box = $('#mart-bayar');
   if (!box) return;
-  $('#mart-m-kartu').classList.toggle('on', mart.metode === 'kartu');
-  $('#mart-m-tunai').classList.toggle('on', mart.metode === 'tunai');
+  ['kartu', 'tunai', 'transfer'].forEach((m) =>
+    $(`#mart-m-${m}`).classList.toggle('on', mart.metode === m));
 
+  const total = martTotal();
   if (!mart.cart.length || !mart.metode) {
     box.innerHTML = `<button class="paybtn" disabled>${
       mart.cart.length ? 'Pilih metode bayar dulu' : 'Keranjang kosong'}</button>`;
@@ -872,56 +992,81 @@ function martRenderBayar() {
       ${s ? `<div class="stucard">${avatarHtml(s)}
           <div><b>${esc(s.nama)}</b><br><span class="muted">${esc(s.kelas)} · NIS ${esc(s.nis)}</span></div>
           <div class="saldo"><span class="muted">Saldo</span><br><b class="rp">${rp(s.saldo)}</b>
-            <br><span class="muted" style="font-size:11px">sisa setelah bayar ${rp(s.saldo - martTotal())}</span></div>
-        </div>`
+            <br><span class="muted" style="font-size:11px">sisa ${rp(s.saldo - total)}</span></div></div>`
         : `<div class="tapzone" style="margin-top:4px"><div class="big">💳</div>
             <b>Tempelkan kartu</b><br><span class="muted">saldo dipotong otomatis</span></div>`}
+      ${martStrukPilihan()}
       <button class="paybtn" id="mart-bayar-kartu" ${s && mart.tapToken ? '' : 'disabled'}>
-        ${s ? `Bayar ${rp(martTotal())} dari saldo` : 'Menunggu kartu…'}</button>`;
+        ${s ? `Bayar ${rp(total)} dari saldo` : 'Menunggu kartu…'}</button>`;
     if ($('#mart-bayar-kartu')) $('#mart-bayar-kartu').onclick = martBayarKartu;
+    martPasangStrukPilihan();
     return;
   }
 
-  const total = martTotal();
+  if (mart.metode === 'transfer') {
+    box.innerHTML = `
+      <div class="field"><label>Bank / kanal</label>
+        <input id="mart-bank" list="mart-bank-umum" placeholder="mis. BSI / BRI / QRIS" autocomplete="off">
+        <datalist id="mart-bank-umum">
+          ${['BSI', 'BRI', 'BNI', 'Mandiri', 'BCA', 'QRIS', 'DANA', 'GoPay', 'OVO', 'ShopeePay']
+            .map((b) => `<option value="${b}">`).join('')}
+        </datalist></div>
+      <div class="field"><label>Nama pengirim</label>
+        <input id="mart-pengirim" maxlength="80" placeholder="nama di bukti transfer" autocomplete="off">
+        <span class="muted set-hint">Sistem tidak terhubung ke bank — dua kolom ini yang dipakai
+          mencocokkan ke mutasi rekening saat tutup kas.</span></div>
+      ${martStrukPilihan()}
+      <button class="paybtn" id="mart-bayar-transfer">Selesaikan — ${rp(total)} via transfer</button>`;
+    $('#mart-bayar-transfer').onclick = martBayarTransfer;
+    martPasangStrukPilihan();
+    return;
+  }
+
   const cepat = [total, 20000, 50000, 100000].filter((n, i, a) => n >= total && a.indexOf(n) === i);
   const kembali = mart.uang - total;
   box.innerHTML = `
-    <div class="k-chip-baris" style="display:flex; flex-wrap:wrap; gap:7px; margin:10px 0 8px">
-      ${cepat.map((n) => `<button class="linkbtn" data-uang="${n}"
-        style="border:1.5px solid ${mart.uang === n ? 'var(--ok)' : 'var(--line)'}; border-radius:99px; padding:7px 13px; font-weight:700">
+    <div class="k-chip-baris" style="margin:10px 0 8px">
+      ${cepat.map((n) => `<button class="k-chip ${mart.uang === n ? 'aktif' : ''}" data-uang="${n}">
         ${n === total ? 'Uang pas' : rp(n)}</button>`).join('')}
     </div>
     <div class="field"><label>Uang diterima</label>${inputUang({ id: 'mart-uang', nilai: mart.uang || '' })}</div>
-    <div id="mart-kembalian" style="background:#e3f4ea; border:2px solid var(--ok); border-radius:12px;
-        padding:10px 14px; text-align:center; margin-bottom:8px; ${mart.uang >= total ? '' : 'display:none'}">
-      ${mart.uang >= total ? `<span class="muted" style="color:var(--ok); font-weight:700; font-size:12.5px">KEMBALIAN</span><br>
-        <b class="rp" style="font-size:30px; color:var(--ok)">${rp(kembali)}</b>` : ''}</div>
+    <div id="mart-kembalian" class="mart-kembalian" style="${mart.uang >= total ? '' : 'display:none'}">
+      ${mart.uang >= total ? `<span>KEMBALIAN</span><b class="rp">${rp(kembali)}</b>` : ''}</div>
+    ${martStrukPilihan()}
     <button class="paybtn" id="mart-bayar-tunai" ${mart.uang >= total ? '' : 'disabled'}>
       ${mart.uang >= total ? `Selesaikan — kembalian ${rp(kembali)}` : 'Masukkan uang diterima'}</button>`;
 
   box.querySelectorAll('[data-uang]').forEach((b) => {
     b.onclick = () => { mart.uang = Number(b.dataset.uang); martRenderBayar(); };
   });
-  // Saat KASIR MENGETIK, kotak kembalian & tombol saja yang diperbarui —
-  // menggambar ulang seluruh panel akan membuat kursor melompat keluar dari
-  // kolom uang di tengah pengetikan.
+  // Saat kasir MENGETIK, hanya kotak kembalian & tombol yang diperbarui —
+  // menggambar ulang seluruh panel membuat kursor melompat keluar.
   const inp = $('#mart-uang');
   if (inp) inp.addEventListener('input', () => {
     mart.uang = nilaiUang('#mart-uang') || 0;
     const sisa = mart.uang - total;
     const kotak = $('#mart-kembalian');
     const tombol = $('#mart-bayar-tunai');
-    if (kotak) kotak.innerHTML = mart.uang >= total
-      ? `<span class="muted" style="color:var(--ok); font-weight:700; font-size:12.5px">KEMBALIAN</span><br>
-         <b class="rp" style="font-size:30px; color:var(--ok)">${rp(sisa)}</b>` : '';
-    if (kotak) kotak.style.display = mart.uang >= total ? '' : 'none';
+    if (kotak) {
+      kotak.style.display = mart.uang >= total ? '' : 'none';
+      kotak.innerHTML = mart.uang >= total ? `<span>KEMBALIAN</span><b class="rp">${rp(sisa)}</b>` : '';
+    }
     if (tombol) {
       tombol.disabled = mart.uang < total;
-      tombol.textContent = mart.uang >= total
-        ? `Selesaikan — kembalian ${rp(sisa)}` : 'Masukkan uang diterima';
+      tombol.textContent = mart.uang >= total ? `Selesaikan — kembalian ${rp(sisa)}` : 'Masukkan uang diterima';
     }
   });
   if ($('#mart-bayar-tunai')) $('#mart-bayar-tunai').onclick = martBayarTunai;
+  martPasangStrukPilihan();
+}
+
+function martStrukPilihan() {
+  return `<label class="cek" style="margin:10px 0 2px"><input type="checkbox" id="mart-struk"
+    ${mart.struk ? 'checked' : ''}> cetak struk setelah bayar</label>`;
+}
+function martPasangStrukPilihan() {
+  const c = $('#mart-struk');
+  if (c) c.onchange = () => { mart.struk = c.checked; };
 }
 
 async function martTapKartu(uid) {
@@ -937,31 +1082,87 @@ async function martTapKartu(uid) {
 async function martBayarKartu() {
   const btn = $('#mart-bayar-kartu');
   btn.disabled = true;
+  const salinan = mart.cart.map((p) => ({ ...p }));
+  const total = martTotal();
   try {
+    // Diskon tidak berlaku untuk pembayaran kartu: jalur /api/beli menghitung
+    // harga dari basis data dan mencocokkannya dengan total di layar, jadi
+    // potongan hanya akan membuat keduanya berbeda dan transaksi ditolak.
+    if (mart.diskon > 0) throw new Error('Diskon hanya berlaku untuk tunai & transfer — kosongkan dulu diskonnya');
     const d = await api('/api/beli', { method: 'POST', body: {
-      siswa_id: mart.siswa.id,
-      jumlah: martTotal(),
+      siswa_id: mart.siswa.id, jumlah: total,
       items: mart.cart.map((p) => ({ produk_id: p.produk_id, qty: p.qty })),
       tap_token: mart.tapToken,
       tx_id: 'mart-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
     }});
     toast(`✔ Terbayar — sisa saldo ${rp(d.siswa.saldo)}`, 'ok');
+    if (mart.struk) martCetakStruk({ metode: 'Kartu (RFID)', item: salinan, subtotal: total,
+      diskon: 0, total, bayar: total, kembalian: 0, ket: `${d.siswa.nama} · sisa ${rp(d.siswa.saldo)}` });
     martSelesai();
   } catch (e) { toast(e.message, 'err'); btn.disabled = false; }
 }
 
-async function martBayarTunai() {
-  const btn = $('#mart-bayar-tunai');
+async function martBayarTunai() { martBayarMart('tunai'); }
+async function martBayarTransfer() { martBayarMart('transfer'); }
+
+async function martBayarMart(metode) {
+  const btn = $(metode === 'tunai' ? '#mart-bayar-tunai' : '#mart-bayar-transfer');
   btn.disabled = true;
+  const salinan = mart.cart.map((p) => ({ ...p }));
+  const sub = martSubtotal();
+  const diskon = mart.diskon || 0;
+  const total = martTotal();
+  const bank = $('#mart-bank')?.value.trim() || '';
+  const pengirim = $('#mart-pengirim')?.value.trim() || '';
   try {
     const d = await api('/api/mart/jual-tunai', { method: 'POST', body: {
+      metode,
       items: mart.cart.map((p) => ({ produk_id: p.produk_id, qty: p.qty })),
-      uang_diterima: mart.uang,
+      diskon, uang_diterima: metode === 'tunai' ? mart.uang : total,
+      bank, pengirim,
       tx_id: 'mrt-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
     }});
-    toast(`✔ Terbayar tunai — kembalian ${rp(d.jual.kembalian)}`, 'ok');
+    toast(metode === 'tunai'
+      ? `✔ Terbayar tunai — kembalian ${rp(d.jual.kembalian)}`
+      : `✔ Transfer tercatat — ${esc(bank)}`, 'ok');
+    if (mart.struk) martCetakStruk({
+      metode: metode === 'tunai' ? 'Tunai' : `Transfer ${bank}`,
+      item: salinan, subtotal: sub, diskon, total,
+      bayar: d.jual.uang_diterima, kembalian: d.jual.kembalian,
+      ket: metode === 'transfer' ? `Pengirim: ${pengirim}` : '',
+    });
     martSelesai();
   } catch (e) { toast(e.message, 'err'); btn.disabled = false; }
+}
+
+/** Struk 58mm. Tetap terbaca kalau terpaksa dicetak di kertas A4. */
+function martCetakStruk(x) {
+  const nama = USER?.tenant_nama || 'IMBOS Mart';
+  const wkt = new Date().toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
+  const gaya = `@page { size: 58mm auto; margin: 3mm; }
+    body { width: 52mm; margin: 0; font: 11px/1.45 'Courier New', monospace; color: #000; }
+    h1 { font-size: 13px; text-align: center; margin: 0 0 2px; }
+    .ket { text-align: center; font-size: 10px; margin-bottom: 6px; }
+    hr { border: 0; border-top: 1px dashed #000; margin: 5px 0; }
+    .b { display: flex; justify-content: space-between; gap: 6px; }
+    .b span:last-child { white-space: nowrap; }
+    .kecil { font-size: 10px; color: #333; }
+    .total { font-weight: bold; font-size: 12px; }
+    .kaki { text-align: center; font-size: 10px; margin-top: 8px; }`;
+  const baris = x.item.map((p) => `
+    <div class="b"><span>${esc(p.nama)}</span></div>
+    <div class="b kecil"><span>${p.qty} × ${rp(p.harga)}</span><span>${rp(p.qty * p.harga)}</span></div>`).join('');
+  cetakLembar('Struk', gaya, `
+    <h1>${esc(nama)}</h1>
+    <div class="ket">${esc(wkt)}<br>Kasir: ${esc(USER?.nama || '-')}</div>
+    <hr>${baris}<hr>
+    <div class="b"><span>Subtotal</span><span>${rp(x.subtotal)}</span></div>
+    ${x.diskon ? `<div class="b"><span>Diskon</span><span>-${rp(x.diskon)}</span></div>` : ''}
+    <div class="b total"><span>TOTAL</span><span>${rp(x.total)}</span></div>
+    <div class="b"><span>${esc(x.metode)}</span><span>${rp(x.bayar)}</span></div>
+    ${x.kembalian ? `<div class="b"><span>Kembalian</span><span>${rp(x.kembalian)}</span></div>` : ''}
+    ${x.ket ? `<div class="kecil" style="margin-top:4px">${esc(x.ket)}</div>` : ''}
+    <div class="kaki">Terima kasih 🙏<br>Barang yang sudah dibeli<br>tidak dapat ditukar.</div>`);
 }
 
 function martSelesai() {
@@ -970,8 +1171,28 @@ function martSelesai() {
   mart.siswa = null;
   mart.tapToken = null;
   mart.uang = 0;
+  mart.diskon = 0;
   martRender();
   martMuatInfo();
+  martMuatKatalog();          // stok di katalog ikut turun
+}
+
+// ------------------------------------------------------- TUTUP KAS HARIAN
+
+/**
+ * closeModal() mengosongkan cardHandler untuk semua pemakainya. Di layar kasir
+ * itu berarti pemindai barang mati diam-diam begitu satu modal ditutup, dan
+ * kasir baru menyadarinya ketika pindaian berikutnya tidak menghasilkan apa-apa.
+ * Jadi penangkapnya dipasang kembali saat modal benar-benar hilang.
+ */
+function martPulihkanScan() {
+  const akar = $('#modal-root');
+  const amati = new MutationObserver(() => {
+    if (akar.children.length) return;
+    amati.disconnect();
+    if (activeView === 'kasir') cardHandler = martScan;
+  });
+  amati.observe(akar, { childList: true });
 }
 
 async function martKasModal() {
@@ -983,26 +1204,34 @@ async function martKasModal() {
       <div class="cart">
         <div class="cart-line"><span>Kas awal</span><span class="rp">${rp(d.kas.kas_awal)}</span></div>
         <div class="cart-line"><span>Penjualan tunai</span><span class="rp">${rp(d.kas.tunai)}</span></div>
-        <div class="cart-line"><span>Hitungan fisik</span><span class="rp">${rp(d.kas.hitung_fisik)}</span></div>
-      </div>
-      <div class="total"><span>Selisih</span><span class="rp">${rp(d.kas.selisih)}</span></div>`);
+        <div class="cart-line"><span>Hitungan fisik laci</span><span class="rp">${rp(d.kas.hitung_fisik)}</span></div>
+        <div class="cart-line"><span>Selisih laci</span><span class="rp">${rp(d.kas.selisih)}</span></div>
+        <div class="cart-line"><span>Transfer tercatat</span><span class="rp">${rp(d.kas.transfer)}</span></div>
+        <div class="cart-line"><span>Transfer dicocokkan</span><span class="rp">${rp(d.kas.hitung_transfer)}</span></div>
+        <div class="cart-line"><span>Selisih transfer</span><span class="rp">${rp(d.kas.selisih_transfer)}</span></div>
+      </div>`);
+    martPulihkanScan();
     return;
   }
-  // Kas awal diusulkan dari hitungan fisik penutupan terakhir: uang itulah yang
-  // memang ditinggal di laci sebagai modal kembalian hari berikutnya.
   const usul = d.kas_kemarin ? d.kas_kemarin.hitung_fisik : 0;
+  martPulihkanScan();
   openModal(`
     <h2>Tutup kas — ${esc(d.tanggal)}</h2>
-    <p class="muted">Penjualan <b>tunai</b> hari ini <b>${rp(h.tunai.total)}</b> dari ${h.tunai.n} transaksi.
-      Penjualan cashless (${rp(h.cashless.total)}) <b>tidak</b> masuk hitungan laci — uangnya ada di kas
-      sekolah dan disetorkan lewat mekanisme setoran tenant.</p>
-    <div class="field"><label>Kas awal / modal laci</label>
-      ${inputUang({ id: 'mk-awal', nilai: usul })}
-      <span class="muted set-hint">${d.kas_kemarin ? 'Diisi dari hitungan fisik penutupan terakhir.' : 'Isi modal kembalian yang ada di laci pagi tadi.'}</span></div>
-    <div class="field"><label>Hitungan fisik laci sekarang</label>
-      ${inputUang({ id: 'mk-fisik', nilai: '' })}
-      <span class="muted set-hint">Hitung uang yang benar-benar ada di laci, apa adanya —
-        selisih memang untuk dicatat, bukan untuk dicocok-cocokkan.</span></div>
+    <p class="muted">Dua kantong uang dihitung terpisah supaya tidak saling menutupi selisih:
+      <b>laci</b> dihitung fisik, <b>transfer</b> dicocokkan ke mutasi rekening.
+      Penjualan kartu (${rp(h.cashless.total)}) tidak masuk keduanya — uangnya di kas sekolah.</p>
+    <fieldset class="ortu-set"><legend>Laci (tunai)</legend>
+      <div class="field"><label>Kas awal / modal laci</label>${inputUang({ id: 'mk-awal', nilai: usul })}
+        <span class="muted set-hint">${d.kas_kemarin ? 'Diisi dari hitungan penutupan terakhir.' : 'Modal kembalian yang ada di laci pagi tadi.'}</span></div>
+      <p class="muted" style="margin:0 0 8px">Penjualan tunai hari ini <b>${rp(h.tunai.total)}</b> (${h.tunai.n} transaksi).</p>
+      <div class="field"><label>Hitungan fisik laci sekarang</label>${inputUang({ id: 'mk-fisik', nilai: '' })}</div>
+    </fieldset>
+    <fieldset class="ortu-set"><legend>Transfer</legend>
+      <p class="muted" style="margin:0 0 8px">Tercatat sistem <b>${rp(h.transfer.total)}</b> (${h.transfer.n} transaksi).</p>
+      <div class="field"><label>Yang benar-benar masuk rekening</label>
+        ${inputUang({ id: 'mk-transfer', nilai: h.transfer.total })}
+        <span class="muted set-hint">Biarkan apa adanya kalau cocok dengan mutasi rekening.</span></div>
+    </fieldset>
     <div class="field"><label>Catatan (opsional)</label>
       <input id="mk-catatan" maxlength="300" placeholder="mis. ada pembelian galon Rp20.000"></div>
     <div id="mk-hitung" class="muted"></div>`,
@@ -1010,10 +1239,14 @@ async function martKasModal() {
       const d2 = await api('/api/mart/tutup-kas', { method: 'POST', body: {
         kas_awal: nilaiUang('#mk-awal') || 0,
         hitung_fisik: nilaiUang('#mk-fisik') || 0,
+        hitung_transfer: nilaiUang('#mk-transfer') || 0,
         catatan: $('#mk-catatan').value,
       }});
-      toast(d2.kas.selisih === 0 ? '✔ Kas ditutup — cocok' : `Kas ditutup — selisih ${rp(d2.kas.selisih)}`,
-        d2.kas.selisih === 0 ? 'ok' : 'err');
+      const k = d2.kas;
+      toast(k.selisih === 0 && k.selisih_transfer === 0
+        ? '✔ Kas ditutup — semuanya cocok'
+        : `Kas ditutup — selisih laci ${rp(k.selisih)}, transfer ${rp(k.selisih_transfer)}`,
+        k.selisih === 0 && k.selisih_transfer === 0 ? 'ok' : 'err');
       martMuatInfo();
     }, 'Tutup kas');
 
@@ -1021,11 +1254,797 @@ async function martKasModal() {
     const seharusnya = (nilaiUang('#mk-awal') || 0) + h.tunai.total;
     const fisik = nilaiUang('#mk-fisik') || 0;
     const selisih = fisik - seharusnya;
-    $('#mk-hitung').innerHTML = `Laci seharusnya <b>${rp(seharusnya)}</b>` +
-      (fisik ? ` · selisih <b style="color:${selisih === 0 ? 'var(--ok)' : 'var(--err)'}">${rp(selisih)}</b>` : '');
+    const st = (nilaiUang('#mk-transfer') || 0) - h.transfer.total;
+    $('#mk-hitung').innerHTML =
+      `Laci seharusnya <b>${rp(seharusnya)}</b>` +
+      (fisik ? ` · selisih <b style="color:${selisih === 0 ? 'var(--ok)' : 'var(--err)'}">${rp(selisih)}</b>` : '') +
+      `<br>Selisih transfer <b style="color:${st === 0 ? 'var(--ok)' : 'var(--err)'}">${rp(st)}</b>`;
   };
-  ['#mk-awal', '#mk-fisik'].forEach((sel) => $(sel).addEventListener('input', hitung));
+  ['#mk-awal', '#mk-fisik', '#mk-transfer'].forEach((sel) => $(sel).addEventListener('input', hitung));
   hitung();
+}
+
+// --------------------------------------------------- BARANG & STOK (menu)
+
+let martStok = { produk: [], kategori: [], ringkas: null };
+
+function martStokView(el) {
+  el.innerHTML = `<div class="panel">
+    <div class="kat-head">
+      <h2 style="margin:0">Barang &amp; Stok <span class="muted" id="ms-count"></span></h2>
+      <span>
+        <button class="linkbtn" id="ms-kategori">⚙ kelola kategori</button> ·
+        <button class="linkbtn" id="ms-unduh">⬇ unduh CSV</button> ·
+        <button class="linkbtn" id="ms-cetak">🖨 cetak</button> ·
+        <button class="linkbtn" id="ms-tambah">+ Tambah barang</button>
+      </span>
+    </div>
+    <p class="muted">Khusus IMBOS Mart, perubahan barang <b>berlaku langsung</b> tanpa menunggu
+      persetujuan admin — ini unit usaha yayasan sendiri. Seluruh barang &amp; mutasinya tetap
+      terbaca di laporan admin pusat. Stok tidak bisa diketik di formulir barang; ia hanya bergerak
+      lewat penjualan, barang masuk, koreksi, atau opname — supaya setiap angka punya jejak.</p>
+    <div id="ms-ringkas" class="cards"></div>
+    <div class="filterbar">
+      <div class="field"><label>Cari</label><input id="ms-cari" placeholder="nama / SKU"></div>
+      <div class="field"><label>Kategori</label><select id="ms-kat"><option value="">semua</option></select></div>
+      <div class="field"><label>Status stok</label><select id="ms-status">
+        <option value="">semua</option><option value="menipis">menipis</option>
+        <option value="habis">habis</option></select></div>
+    </div>
+    <div class="tblwrap"><table>
+      <thead><tr><th>Barang</th><th>SKU</th><th>Kategori</th><th class="num">Harga beli</th>
+        <th class="num">Harga jual</th><th class="num">Margin</th><th class="num">Stok</th>
+        <th>Status</th><th></th></tr></thead>
+      <tbody id="ms-body"></tbody>
+    </table></div>
+  </div>`;
+
+  $('#ms-tambah').onclick = () => martBarangModal(null);
+  $('#ms-kategori').onclick = martKategoriModal;
+  $('#ms-unduh').onclick = martUnduhBarang;
+  $('#ms-cetak').onclick = martCetakBarang;
+  const muat = debounce(martMuatStok, 250);
+  $('#ms-cari').addEventListener('input', muat);
+  $('#ms-kat').onchange = martMuatStok;
+  $('#ms-status').onchange = martMuatStok;
+  martMuatStok();
+}
+
+async function martMuatStok() {
+  const p = new URLSearchParams();
+  if ($('#ms-cari')?.value.trim()) p.set('cari', $('#ms-cari').value.trim());
+  if ($('#ms-kat')?.value) p.set('kategori_id', $('#ms-kat').value);
+  if ($('#ms-status')?.value) p.set('status', $('#ms-status').value);
+  const d = await api('/api/mart/barang?' + p);
+  martStok = d;
+
+  const sel = $('#ms-kat');
+  if (sel && !sel.dataset.terisi) {
+    sel.dataset.terisi = '1';
+    sel.innerHTML = '<option value="">semua</option>' +
+      d.kategori.map((k) => `<option value="${k.id}">${esc(k.nama)}</option>`).join('');
+  }
+  const r = d.ringkas;
+  $('#ms-ringkas').innerHTML = `
+    <div class="statcard"><span class="muted">Jenis barang</span><br><b>${r.n_barang}</b></div>
+    <div class="statcard"><span class="muted">Stok menipis</span><br><b style="color:var(--warn)">${r.n_menipis}</b></div>
+    <div class="statcard"><span class="muted">Stok habis</span><br><b class="minus">${r.n_habis}</b></div>
+    <div class="statcard"><span class="muted">Nilai stok (modal)</span><br><b class="rp">${rp(r.nilai_stok)}</b></div>`;
+  $('#ms-count').textContent = `— ${d.produk.length} barang`;
+
+  $('#ms-body').innerHTML = d.produk.map((p) => `
+    <tr>
+      <td><b>${esc(p.nama)}</b>${p.aktif ? '' : ' <span class="badge nonaktif">nonaktif</span>'}</td>
+      <td>${p.barcode ? `<code>${esc(p.barcode)}</code>` : '<span class="muted">—</span>'}</td>
+      <td>${esc(p.kategori_nama || '—')}${p.kategori === 'non_makanan' ? ' <span class="katdot">non-makanan</span>' : ''}</td>
+      <td class="num rp">${p.hpp ? rp(p.hpp) : '<span class="muted">—</span>'}</td>
+      <td class="num rp">${rp(p.harga)}</td>
+      <td class="num">${p.margin === null ? '<span class="muted">—</span>'
+        : `${p.margin}%<br><span class="muted" style="font-size:11px">${rp(p.untung)}</span>`}</td>
+      <td class="num">${p.stok === null ? '<span class="muted">—</span>' : p.stok}</td>
+      <td>${martBadgeStok(p)}</td>
+      <td style="white-space:nowrap">
+        <button class="linkbtn" data-stok="${p.id}">stok</button>
+        <button class="linkbtn" data-ubah="${p.id}">ubah</button>
+        <button class="linkbtn danger" data-hapus="${p.id}">hapus</button>
+      </td>
+    </tr>`).join('') || '<tr><td colspan="9" class="muted">Belum ada barang.</td></tr>';
+
+  document.querySelectorAll('#ms-body [data-ubah]').forEach((b) => {
+    b.onclick = () => martBarangModal(d.produk.find((x) => x.id === Number(b.dataset.ubah)));
+  });
+  document.querySelectorAll('#ms-body [data-stok]').forEach((b) => {
+    b.onclick = () => martStokModal(d.produk.find((x) => x.id === Number(b.dataset.stok)));
+  });
+  document.querySelectorAll('#ms-body [data-hapus]').forEach((b) => {
+    b.onclick = async () => {
+      const p = d.produk.find((x) => x.id === Number(b.dataset.hapus));
+      if (!confirm(`Hapus "${p.nama}" dari daftar barang?`)) return;
+      try {
+        const h = await api('/api/mart/barang/' + p.id, { method: 'DELETE' });
+        toast(h.dinonaktifkan ? h.pesan : '✔ Barang dihapus', 'ok');
+        martMuatStok();
+      } catch (e) { toast(e.message, 'err'); }
+    };
+  });
+}
+
+function martBarangModal(p) {
+  const kat = martStok.kategori || [];
+  openModal(`
+    <h2>${p ? 'Ubah' : 'Tambah'} Barang</h2>
+    <div class="field"><label>Nama barang</label>
+      <input id="mb-nama" value="${esc(p?.nama || '')}" maxlength="120" placeholder="mis. Aqua 600ml"></div>
+    <div class="field"><label>SKU / barcode <span class="muted">(opsional)</span></label>
+      <input id="mb-barcode" value="${esc(p?.barcode || '')}" maxlength="32" placeholder="pindai atau ketik">
+      <span class="muted set-hint">Boleh dikosongkan — barang tetap bisa dicari lewat nama di kasir.</span></div>
+    <div class="field"><label>Kategori</label><select id="mb-kat">
+      <option value="">— tanpa kategori —</option>
+      ${kat.map((k) => `<option value="${k.id}" ${p?.kategori_id === k.id ? 'selected' : ''}>${esc(k.nama)}</option>`).join('')}
+    </select></div>
+    <div class="field"><label>Jatah belanja santri</label><select id="mb-jatah">
+      <option value="makanan" ${p?.kategori !== 'non_makanan' ? 'selected' : ''}>Makanan</option>
+      <option value="non_makanan" ${p?.kategori === 'non_makanan' ? 'selected' : ''}>Non-makanan</option>
+    </select>
+      <span class="muted set-hint">Menentukan jatah harian mana yang terpakai saat santri membeli
+        pakai kartu — berbeda dari kategori etalase di atas.</span></div>
+    <div class="row" style="gap:10px">
+      <div class="field"><label>Harga beli (HPP)</label>${inputUang({ id: 'mb-hpp', nilai: p?.hpp || '' })}</div>
+      <div class="field"><label>Harga jual</label>${inputUang({ id: 'mb-harga', nilai: p?.harga || '' })}</div>
+    </div>
+    <p class="muted" id="mb-margin" style="margin:0 0 10px"></p>
+    <div class="row" style="gap:10px">
+      ${p ? '' : `<div class="field"><label>Stok awal</label>
+        <input type="number" id="mb-stok" min="0" value="0"></div>`}
+      <div class="field"><label>Ambang "menipis"</label>
+        <input type="number" id="mb-min" min="0" value="${p?.stok_min ?? 5}">
+        <span class="muted set-hint">Stok di bawah/sama dengan angka ini ditandai kuning.</span></div>
+    </div>
+    ${p ? `<label class="cek"><input type="checkbox" id="mb-aktif" ${p.aktif ? 'checked' : ''}>
+      ditampilkan di kasir</label>` : ''}`,
+    async () => {
+      const body = {
+        nama: $('#mb-nama').value, barcode: $('#mb-barcode').value,
+        kategori_id: $('#mb-kat').value || null, kategori: $('#mb-jatah').value,
+        hpp: $('#mb-hpp').value.trim() === '' ? null : nilaiUang('#mb-hpp'),
+        harga: nilaiUang('#mb-harga'), stok_min: Number($('#mb-min').value || 5),
+      };
+      if (!p) body.stok = Number($('#mb-stok').value || 0);
+      else body.aktif = $('#mb-aktif').checked ? 1 : 0;
+      if (p) await api('/api/mart/barang/' + p.id, { method: 'PUT', body });
+      else await api('/api/mart/barang', { method: 'POST', body });
+      toast('✔ Barang tersimpan', 'ok');
+      martMuatStok();
+    });
+
+  const hitungMargin = () => {
+    const h = nilaiUang('#mb-harga') || 0;
+    const m = nilaiUang('#mb-hpp') || 0;
+    $('#mb-margin').innerHTML = h > 0 && m > 0
+      ? `Untung <b>${rp(h - m)}</b> per satuan · margin <b>${(((h - m) / h) * 100).toFixed(1)}%</b>` +
+        (m >= h ? ' <b class="minus">— harga jual tidak di atas modal</b>' : '')
+      : 'Isi harga beli & jual untuk melihat margin.';
+  };
+  ['#mb-hpp', '#mb-harga'].forEach((s) => $(s).addEventListener('input', hitungMargin));
+  hitungMargin();
+  cardHandler = (uid) => { const f = $('#mb-barcode'); if (f) f.value = uid; };
+}
+
+function martStokModal(p) {
+  openModal(`
+    <h2>Stok — ${esc(p.nama)}</h2>
+    <p class="muted">Stok sekarang <b>${p.stok === null ? 'belum dilacak' : p.stok}</b>.
+      Semua pergerakan tercatat beserta alasannya.</p>
+    <div class="field"><label>Jenis</label><select id="mst-jenis">
+      <option value="masuk">Barang masuk (dari pemasok)</option>
+      <option value="koreksi">Koreksi manual (+/−)</option>
+    </select></div>
+    <div class="field"><label>Jumlah</label>
+      <input type="number" id="mst-qty" value="0">
+      <span class="muted set-hint">Untuk koreksi, boleh negatif (mis. −2 untuk barang rusak).</span></div>
+    <div class="field"><label>Keterangan</label>
+      <input id="mst-ket" maxlength="200" placeholder="mis. kiriman Pak Sopir 12 dus"></div>
+    <div id="mst-riwayat" class="muted">memuat riwayat…</div>`,
+    async () => {
+      await api(`/api/mart/barang/${p.id}/stok`, { method: 'POST', body: {
+        jenis: $('#mst-jenis').value, qty: Number($('#mst-qty').value || 0),
+        keterangan: $('#mst-ket').value,
+      }});
+      toast('✔ Stok diperbarui', 'ok');
+      martMuatStok();
+    }, 'Simpan');
+
+  api(`/api/mart/barang/${p.id}/mutasi`).then((d) => {
+    const box = $('#mst-riwayat');
+    if (!box) return;
+    box.innerHTML = d.mutasi.length ? `<div class="tblwrap" style="max-height:220px; overflow:auto"><table>
+      <thead><tr><th>Waktu</th><th>Jenis</th><th class="num">Qty</th><th class="num">Sisa</th><th>Ket</th></tr></thead>
+      <tbody>${d.mutasi.map((m) => `<tr>
+        <td>${new Date(m.created_at).toLocaleString('id-ID', { dateStyle: 'short', timeStyle: 'short' })}</td>
+        <td>${esc(m.jenis)}</td>
+        <td class="num" style="color:${m.qty > 0 ? 'var(--ok)' : 'var(--err)'}">${m.qty > 0 ? '+' : ''}${m.qty}</td>
+        <td class="num">${m.stok_sesudah}</td>
+        <td class="muted">${esc(m.keterangan || m.ref || '')}</td></tr>`).join('')}</tbody>
+    </table></div>` : '<span class="muted">Belum ada pergerakan.</span>';
+  }).catch(() => {});
+}
+
+async function martKategoriModal() {
+  const d = await api('/api/mart/kategori');
+  openModal(`
+    <h2>Kategori Barang</h2>
+    <p class="muted">Kategori etalase untuk menyaring barang di kasir (Sembako, ATK, …).
+      Menghapus kategori <b>tidak</b> menghapus barangnya — barang itu hanya kehilangan labelnya.</p>
+    <div class="gol-list">${d.kategori.map((k) => `
+      <div class="gol-baris"><div class="gol-kepala">
+        <b>${esc(k.nama)}</b><span class="muted">${k.jumlah} barang</span>
+        ${k.aktif ? '' : '<span class="badge">nonaktif</span>'}
+        <button class="linkbtn" data-ubah-kat="${k.id}">ubah</button>
+        <button class="linkbtn danger" data-hapus-kat="${k.id}">hapus</button>
+      </div></div>`).join('') || '<p class="muted">Belum ada kategori.</p>'}</div>
+    <button class="linkbtn" id="mk-tambah">+ Tambah kategori</button>`);
+
+  const segar = () => { closeModal(); martKategoriModal(); };
+  const form = (k) => openModal(`
+    <h2>${k ? 'Ubah' : 'Tambah'} Kategori</h2>
+    <div class="field"><label>Nama kategori</label>
+      <input id="mkf-nama" value="${esc(k?.nama || '')}" maxlength="40" placeholder="mis. Sembako"></div>`,
+    async () => {
+      const body = { nama: $('#mkf-nama').value };
+      if (k) await api('/api/mart/kategori/' + k.id, { method: 'PUT', body });
+      else await api('/api/mart/kategori', { method: 'POST', body });
+      toast('✔ Kategori tersimpan', 'ok');
+      segar();
+      martMuatStok();
+    });
+
+  $('#mk-tambah').onclick = () => form(null);
+  document.querySelectorAll('[data-ubah-kat]').forEach((b) => {
+    b.onclick = () => form(d.kategori.find((k) => k.id === Number(b.dataset.ubahKat)));
+  });
+  document.querySelectorAll('[data-hapus-kat]').forEach((b) => {
+    b.onclick = async () => {
+      try {
+        await api('/api/mart/kategori/' + b.dataset.hapusKat, { method: 'DELETE' });
+        toast('✔ Kategori dihapus', 'ok');
+        segar();
+        martMuatStok();
+      } catch (e) { toast(e.message, 'err'); }
+    };
+  });
+}
+
+function martUnduhBarang() {
+  const d = martStok.produk || [];
+  unduhCsv(`barang-mart-${new Date().toISOString().slice(0, 10)}.csv`,
+    ['Nama', 'SKU', 'Kategori', 'Jatah santri', 'Harga beli', 'Harga jual', 'Untung', 'Margin %', 'Stok', 'Status'],
+    d.map((p) => [p.nama, p.barcode || '', p.kategori_nama || '', p.kategori,
+      p.hpp || '', p.harga, p.untung ?? '', p.margin ?? '', p.stok ?? '', p.status]));
+}
+
+function martCetakBarang() {
+  const d = martStok.produk || [];
+  const gaya = `body{font:12px/1.45 system-ui;margin:16px} h1{font-size:16px;margin:0 0 2px}
+    table{width:100%;border-collapse:collapse;margin-top:10px} th,td{border:1px solid #bbb;padding:5px 7px;text-align:left}
+    th{background:#eee} .n{text-align:right}`;
+  cetakLembar('Daftar Barang', gaya, `
+    <h1>Daftar Barang &amp; Stok — ${esc(USER?.tenant_nama || 'IMBOS Mart')}</h1>
+    <div>${new Date().toLocaleString('id-ID')} · ${d.length} barang</div>
+    <table><thead><tr><th>Nama</th><th>SKU</th><th>Kategori</th><th class="n">Beli</th>
+      <th class="n">Jual</th><th class="n">Margin</th><th class="n">Stok</th></tr></thead>
+    <tbody>${d.map((p) => `<tr><td>${esc(p.nama)}</td><td>${esc(p.barcode || '-')}</td>
+      <td>${esc(p.kategori_nama || '-')}</td><td class="n">${p.hpp ? rp(p.hpp) : '-'}</td>
+      <td class="n">${rp(p.harga)}</td><td class="n">${p.margin ?? '-'}%</td>
+      <td class="n">${p.stok ?? '-'}</td></tr>`).join('')}</tbody></table>`);
+}
+
+// ------------------------------------------------- DASHBOARD & LAPORAN
+
+let martDash = null;
+
+function martDashView(el) {
+  el.innerHTML = `<div id="md-isi" class="muted">memuat laporan…</div>`;
+  martMuatDash();
+}
+
+async function martMuatDash() {
+  try {
+    martDash = await api('/api/mart/dashboard');
+  } catch (e) { $('#md-isi').innerHTML = `<div class="panel minus">${esc(e.message)}</div>`; return; }
+  const d = martDash;
+  const p = (x, label) => `
+    <div class="statcard"><span class="muted">${label}</span><br>
+      <b class="rp">${rp(x.penjualan_kotor)}</b>
+      <span class="muted" style="display:block; font-size:11.5px">${x.n_transaksi} transaksi ·
+        laba kotor ${rp(x.laba_kotor)}</span></div>`;
+
+  $('#md-isi').innerHTML = `
+  <div class="panel">
+    <div class="kat-head"><h2 style="margin:0">Omset</h2>
+      <span><button class="linkbtn" id="md-unduh-omset">⬇ unduh ringkasan</button></span></div>
+    <div class="cards">
+      ${p(d.hari, 'Omset hari ini')}
+      ${p(d.pekan, 'Omset 7 hari')}
+      ${p(d.bulan, 'Omset 30 hari')}
+      <div class="statcard" style="border-color:var(--brand)">
+        <span class="muted">Est. laba kotor 30 hari</span><br>
+        <b class="rp" style="color:var(--brand)">${rp(d.bulan.laba_kotor)}</b>
+        <span class="muted" style="display:block; font-size:11.5px">margin
+          ${d.bulan.margin_persen === null ? '—' : d.bulan.margin_persen + '%'}</span></div>
+      <div class="statcard"><span class="muted">Nilai stok di rak (modal)</span><br>
+        <b class="rp">${rp(d.stok.nilai_stok)}</b></div>
+    </div>
+    <p class="muted" style="margin-bottom:0">Angka di atas adalah <b>laba kotor</b> — penjualan
+      dikurangi modal barang (HPP). Biaya operasional (gaji penjaga, listrik, susut) belum
+      dikurangkan, jadi jangan dibawa ke rapat sebagai laba bersih.</p>
+  </div>
+
+  <div class="panel">
+    <div class="kat-head"><h2 style="margin:0">Laporan Keuangan Rinci</h2>
+      <span>
+        <select id="md-periode" class="k-chip-select" style="width:auto">
+          <option value="hari">Hari ini</option><option value="pekan">7 hari</option>
+          <option value="bulan" selected>30 hari</option><option value="semua">Semua</option>
+        </select>
+        <button class="linkbtn" id="md-unduh-keu">⬇ unduh CSV</button> ·
+        <button class="linkbtn" id="md-cetak-keu">🖨 cetak / PDF</button>
+      </span></div>
+    <div id="md-keu" class="muted">memuat…</div>
+  </div>
+
+  <div class="row">
+    <div class="panel">
+      <h2>Peringatan Stok</h2>
+      ${martDaftarStok('Habis — tidak bisa dijual', d.stok.habis, 'minus')}
+      ${martDaftarStok('Menipis — segera belanja', d.stok.menipis, 'warn')}
+      ${!d.stok.habis.length && !d.stok.menipis.length
+        ? '<p class="muted">Semua stok aman. 👍</p>' : ''}
+    </div>
+    <div class="panel">
+      <div class="kat-head"><h2 style="margin:0">Barang Terlaris <span class="muted">30 hari</span></h2>
+        <button class="linkbtn" id="md-unduh-laris">⬇ unduh</button></div>
+      <div class="tblwrap"><table>
+        <thead><tr><th>Barang</th><th class="num">Terjual</th><th class="num">Nilai</th></tr></thead>
+        <tbody>${d.terlaris.map((b) => `<tr><td>${esc(b.nama)}</td>
+          <td class="num"><b>${b.qty}</b></td><td class="num rp">${rp(b.nilai)}</td></tr>`).join('')
+          || '<tr><td colspan="3" class="muted">Belum ada penjualan.</td></tr>'}</tbody>
+      </table></div>
+      <h2 style="margin-top:16px">Tidak Laku <span class="muted">belum terjual 30 hari</span></h2>
+      <div class="tblwrap"><table>
+        <thead><tr><th>Barang</th><th class="num">Harga</th><th class="num">Stok</th></tr></thead>
+        <tbody>${d.tidak_laku.map((b) => `<tr><td>${esc(b.nama)}</td>
+          <td class="num rp">${rp(b.harga)}</td><td class="num">${b.stok ?? '—'}</td></tr>`).join('')
+          || '<tr><td colspan="3" class="muted">Semua barang laku. 👍</td></tr>'}</tbody>
+      </table></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="kat-head"><h2 style="margin:0">Riwayat Transaksi Terakhir</h2>
+      <button class="linkbtn" id="md-unduh-tx">⬇ unduh</button></div>
+    ${martTabelRiwayat(d.transaksi)}
+  </div>
+
+  <div class="panel">
+    <div class="kat-head"><h2 style="margin:0">Penutupan Kas Terakhir</h2>
+      <button class="linkbtn" id="md-unduh-kas">⬇ unduh</button></div>
+    <div class="tblwrap"><table>
+      <thead><tr><th>Tanggal</th><th class="num">Tunai</th><th class="num">Hitung laci</th>
+        <th class="num">Selisih laci</th><th class="num">Transfer</th><th class="num">Selisih transfer</th>
+        <th>Operator</th></tr></thead>
+      <tbody>${(d.kas_terakhir || []).map((k) => `<tr>
+        <td>${esc(k.tanggal)}</td><td class="num rp">${rp(k.tunai)}</td>
+        <td class="num rp">${rp(k.hitung_fisik)}</td>
+        <td class="num rp" style="color:${k.selisih ? 'var(--err)' : 'var(--ok)'}">${rp(k.selisih)}</td>
+        <td class="num rp">${rp(k.transfer)}</td>
+        <td class="num rp" style="color:${k.selisih_transfer ? 'var(--err)' : 'var(--ok)'}">${rp(k.selisih_transfer)}</td>
+        <td>${esc(k.operator)}</td></tr>`).join('')
+        || '<tr><td colspan="7" class="muted">Belum ada penutupan kas.</td></tr>'}</tbody>
+    </table></div>
+  </div>`;
+
+  $('#md-periode').onchange = martMuatKeuangan;
+  $('#md-unduh-omset').onclick = () => unduhCsv(`omset-mart-${martHariIni()}.csv`,
+    ['Periode', 'Penjualan kotor', 'Tunai', 'Transfer', 'Kartu (RFID)', 'Diskon', 'HPP',
+      'Laba kotor', 'Margin %', 'Transaksi', 'Rata keranjang'],
+    [d.hari, d.pekan, d.bulan].map((x) => [x.periode, x.penjualan_kotor, x.tunai, x.transfer,
+      x.cashless, x.diskon, x.hpp, x.laba_kotor, x.margin_persen ?? '', x.n_transaksi, x.rata_keranjang]));
+  $('#md-unduh-laris').onclick = () => unduhCsv(`terlaris-mart-${martHariIni()}.csv`,
+    ['Barang', 'Qty terjual', 'Nilai'], d.terlaris.map((b) => [b.nama, b.qty, b.nilai]));
+  $('#md-unduh-tx').onclick = () => martUnduhRiwayat(d.transaksi, 'riwayat-terakhir');
+  $('#md-unduh-kas').onclick = () => unduhCsv(`tutup-kas-mart-${martHariIni()}.csv`,
+    ['Tanggal', 'Kas awal', 'Tunai', 'Hitung laci', 'Selisih laci', 'Transfer',
+      'Transfer dicocokkan', 'Selisih transfer', 'Operator', 'Catatan'],
+    (d.kas_terakhir || []).map((k) => [k.tanggal, k.kas_awal, k.tunai, k.hitung_fisik, k.selisih,
+      k.transfer, k.hitung_transfer, k.selisih_transfer, k.operator, k.catatan || '']));
+  $('#md-unduh-keu').onclick = martUnduhKeuangan;
+  $('#md-cetak-keu').onclick = martCetakKeuangan;
+  martMuatKeuangan();
+}
+
+const martHariIni = () => new Date().toISOString().slice(0, 10);
+
+function martDaftarStok(judul, daftar, warna) {
+  if (!daftar.length) return '';
+  return `<h3 style="margin:12px 0 6px; font-size:13.5px; color:var(--${warna})">${judul}
+    <span class="muted">(${daftar.length})</span></h3>
+    <div class="tblwrap"><table>
+      <thead><tr><th>Barang</th><th>SKU</th><th class="num">Stok</th><th class="num">Ambang</th></tr></thead>
+      <tbody>${daftar.map((b) => `<tr><td>${esc(b.nama)}</td>
+        <td>${b.barcode ? `<code>${esc(b.barcode)}</code>` : '—'}</td>
+        <td class="num"><b style="color:var(--${warna})">${b.stok}</b></td>
+        <td class="num muted">${b.stok_min}</td></tr>`).join('')}</tbody>
+    </table></div>`;
+}
+
+const MART_METODE_LABEL = { tunai: '💵 Tunai', transfer: '🏦 Transfer', kartu: '💳 Kartu' };
+
+function martTabelRiwayat(tx) {
+  return `<div class="tblwrap"><table>
+    <thead><tr><th>Waktu</th><th>Metode</th><th class="num">Total</th><th class="num">Item</th>
+      <th>Keterangan</th><th>Operator</th></tr></thead>
+    <tbody>${tx.map((x) => `<tr>
+      <td>${waktuSingkat(x.waktu)}</td><td>${MART_METODE_LABEL[x.metode] || esc(x.metode)}</td>
+      <td class="num rp">${rp(x.total)}</td><td class="num">${x.n_item ?? '—'}</td>
+      <td class="muted">${esc(x.ket || '')}</td><td>${esc(x.operator || '')}</td></tr>`).join('')
+      || '<tr><td colspan="6" class="muted">Belum ada transaksi.</td></tr>'}</tbody>
+  </table></div>`;
+}
+
+function martUnduhRiwayat(tx, nama) {
+  unduhCsv(`${nama}-mart-${martHariIni()}.csv`,
+    ['Waktu', 'Metode', 'Total', 'Jumlah item', 'Keterangan', 'Operator'],
+    tx.map((x) => [x.waktu, x.metode, x.total, x.n_item ?? '', x.ket || '', x.operator || '']));
+}
+
+let martKeu = null;
+
+async function martMuatKeuangan() {
+  const periode = $('#md-periode').value;
+  $('#md-keu').innerHTML = '<span class="muted">memuat…</span>';
+  try {
+    martKeu = await api('/api/mart/keuangan?periode=' + periode);
+  } catch (e) { $('#md-keu').innerHTML = `<span class="minus">${esc(e.message)}</span>`; return; }
+  const r = martKeu.ringkas;
+  const baris = [
+    ['Total penjualan kotor', r.penjualan_kotor, 'seluruh penjualan sebelum dikurangi modal'],
+    ['Diskon diberikan', -r.diskon, 'potongan harga yang sudah diberikan ke pembeli'],
+    ['Total HPP / modal barang', -r.hpp, 'harga beli barang yang terjual'],
+    ['Laba kotor toko', r.laba_kotor, 'penjualan − modal; belum dikurangi biaya operasional'],
+    ['Rata-rata keranjang', r.rata_keranjang, `nilai rata-rata per transaksi dari ${r.n_transaksi} transaksi`],
+    ['Pemasukan tunai', r.tunai, 'uang di laci Mart'],
+    ['Pemasukan transfer / QRIS', r.transfer, 'masuk rekening — dicocokkan saat tutup kas'],
+    ['Pemasukan cashless (RFID)', r.cashless, 'dibayar saldo kartu; uangnya ada di kas sekolah'],
+  ];
+  $('#md-keu').innerHTML = `
+    <div class="tblwrap"><table>
+      <thead><tr><th>Pos</th><th class="num">Nilai</th><th>Keterangan</th></tr></thead>
+      <tbody>${baris.map(([l, v, ket], i) => `<tr${i === 3 ? ' style="font-weight:700"' : ''}>
+        <td>${esc(l)}</td>
+        <td class="num rp" style="${v < 0 ? 'color:var(--err)' : ''}">${v < 0 ? '−' : ''}${rp(Math.abs(v))}</td>
+        <td class="muted">${esc(ket)}</td></tr>`).join('')}</tbody>
+    </table></div>
+    <p class="muted">Margin ${r.margin_persen === null ? '—' : r.margin_persen + '%'} ·
+      ${r.n_transaksi} transaksi pada periode ini.</p>
+    <h3 style="font-size:13.5px">Transaksi periode ini <span class="muted">(${martKeu.transaksi.length} terakhir)</span></h3>
+    ${martTabelRiwayat(martKeu.transaksi)}`;
+}
+
+function martUnduhKeuangan() {
+  if (!martKeu) return;
+  const r = martKeu.ringkas;
+  unduhCsv(`keuangan-mart-${r.periode}-${martHariIni()}.csv`,
+    ['Pos', 'Nilai'],
+    [['Periode', r.periode],
+      ['Total penjualan kotor', r.penjualan_kotor], ['Diskon', r.diskon],
+      ['Total HPP / modal', r.hpp], ['Laba kotor', r.laba_kotor],
+      ['Margin %', r.margin_persen ?? ''], ['Jumlah transaksi', r.n_transaksi],
+      ['Rata-rata keranjang', r.rata_keranjang],
+      ['Pemasukan tunai', r.tunai], ['Pemasukan transfer/QRIS', r.transfer],
+      ['Pemasukan cashless (RFID)', r.cashless],
+      [], ['Barang terlaris', ''], ['Barang', 'Qty'],
+      ...martKeu.terlaris.map((b) => [b.nama, b.qty])]);
+}
+
+function martCetakKeuangan() {
+  if (!martKeu) return;
+  const r = martKeu.ringkas;
+  const LABEL = { hari: 'Hari ini', pekan: '7 hari terakhir', bulan: '30 hari terakhir', semua: 'Seluruh periode' };
+  const gaya = `body{font:12px/1.5 system-ui;margin:18px;color:#111} h1{font-size:17px;margin:0}
+    h2{font-size:13px;margin:18px 0 6px} table{width:100%;border-collapse:collapse}
+    th,td{border:1px solid #bbb;padding:5px 8px;text-align:left} th{background:#eee}
+    .n{text-align:right} .tebal td{font-weight:700;background:#f6f6f6}`;
+  const b = (l, v, tebal) => `<tr class="${tebal ? 'tebal' : ''}"><td>${esc(l)}</td><td class="n">${rp(v)}</td></tr>`;
+  cetakLembar('Laporan Keuangan Mart', gaya, `
+    <h1>Laporan Keuangan — ${esc(martKeu.tenant.nama)}</h1>
+    <div>${esc(LABEL[r.periode] || r.periode)} · dicetak ${new Date().toLocaleString('id-ID')}</div>
+    <h2>Ringkasan</h2>
+    <table>${b('Total penjualan kotor', r.penjualan_kotor)}${b('Diskon diberikan', r.diskon)}
+      ${b('Total HPP / modal barang', r.hpp)}${b('Laba kotor toko', r.laba_kotor, true)}
+      ${b('Rata-rata keranjang', r.rata_keranjang)}
+      <tr><td>Margin</td><td class="n">${r.margin_persen === null ? '—' : r.margin_persen + '%'}</td></tr>
+      <tr><td>Jumlah transaksi</td><td class="n">${r.n_transaksi}</td></tr></table>
+    <h2>Sumber pemasukan</h2>
+    <table>${b('Tunai (laci Mart)', r.tunai)}${b('Transfer / QRIS', r.transfer)}
+      ${b('Cashless RFID (kas sekolah)', r.cashless)}</table>
+    <h2>Barang terlaris</h2>
+    <table><thead><tr><th>Barang</th><th class="n">Qty</th><th class="n">Nilai</th></tr></thead>
+      <tbody>${martKeu.terlaris.map((x) => `<tr><td>${esc(x.nama)}</td>
+        <td class="n">${x.qty}</td><td class="n">${rp(x.nilai)}</td></tr>`).join('')}</tbody></table>
+    <p style="margin-top:16px;font-size:11px;color:#555">Catatan: angka laba di atas adalah LABA KOTOR
+      (penjualan − modal barang). Biaya operasional belum dikurangkan.</p>`);
+}
+
+// ----------------------------------------------------- STOK OPNAME (AUDIT)
+
+let opname = null;
+
+function martOpnameView(el) {
+  el.innerHTML = '<div id="mo-isi" class="muted">memuat…</div>';
+  martMuatOpname();
+}
+
+async function martMuatOpname() {
+  try {
+    opname = await api('/api/mart/opname');
+  } catch (e) { $('#mo-isi').innerHTML = `<div class="panel minus">${esc(e.message)}</div>`; return; }
+
+  $('#mo-isi').innerHTML = opname.berjalan ? martOpnameBerjalan() : martOpnameKosong();
+  if (opname.berjalan) martPasangOpname();
+  else $('#mo-mulai').onclick = martMulaiOpname;
+  const u = $('#mo-unduh-riwayat');
+  if (u) u.onclick = () => unduhCsv(`riwayat-opname-${martHariIni()}.csv`,
+    ['Mulai', 'Selesai', 'Item', 'Surplus', 'Defisit', 'Nilai surplus', 'Nilai defisit',
+      'Nilai bersih', 'Operator', 'Catatan'],
+    opname.riwayat.map((o) => [o.created_at, o.selesai_pada, o.n_item, o.n_surplus, o.n_defisit,
+      o.nilai_surplus, o.nilai_defisit, o.nilai_bersih, o.operator, o.catatan || '']));
+  document.querySelectorAll('#mo-isi [data-detail]').forEach((b) => {
+    b.onclick = () => martOpnameDetail(Number(b.dataset.detail));
+  });
+}
+
+function martRiwayatOpname() {
+  return `<div class="panel">
+    <div class="kat-head"><h2 style="margin:0">Riwayat Opname</h2>
+      <button class="linkbtn" id="mo-unduh-riwayat">⬇ unduh CSV</button></div>
+    <div class="tblwrap"><table>
+      <thead><tr><th>Selesai</th><th class="num">Item</th><th class="num">Surplus</th>
+        <th class="num">Defisit</th><th class="num">Nilai selisih</th><th>Operator</th><th></th></tr></thead>
+      <tbody>${opname.riwayat.map((o) => `<tr>
+        <td>${o.selesai_pada ? waktuSingkat(o.selesai_pada) : '—'}</td>
+        <td class="num">${o.n_item}</td>
+        <td class="num" style="color:var(--ok)">${o.n_surplus}</td>
+        <td class="num minus">${o.n_defisit}</td>
+        <td class="num rp" style="color:${o.nilai_bersih < 0 ? 'var(--err)' : 'var(--ok)'}">
+          ${o.nilai_bersih < 0 ? '−' : ''}${rp(Math.abs(o.nilai_bersih))}</td>
+        <td>${esc(o.operator)}</td>
+        <td><button class="linkbtn" data-detail="${o.id}">rincian</button></td></tr>`).join('')
+        || '<tr><td colspan="7" class="muted">Belum pernah opname.</td></tr>'}</tbody>
+    </table></div>
+  </div>`;
+}
+
+function martOpnameKosong() {
+  return `<div class="panel">
+    <h2>Stok Opname (Audit Fisik)</h2>
+    <p class="muted">Opname adalah menghitung barang yang <b>benar-benar ada di rak</b>, lalu
+      membandingkannya dengan angka di sistem. Selisihnya bukan kesalahan yang harus disembunyikan —
+      ia justru satu-satunya cara mengetahui adanya barang susut, rusak, atau salah catat.</p>
+    <ol class="muted" style="margin:0 0 14px; padding-left:20px; line-height:1.9">
+      <li><b>Mulai opname</b> — sistem memotret stok buku saat ini.</li>
+      <li><b>Hitung fisik</b> — isi jumlah nyata per barang (boleh bertahap, boleh dicetak dulu).</li>
+      <li><b>Selesaikan &amp; Rekonsiliasi Auto</b> — stok buku disamakan ke hitungan fisik dan
+        nilai selisihnya dicatat sebagai rugi/laba inventaris Mart.</li>
+    </ol>
+    <p class="muted"><b>Kerjakan saat toko tutup.</b> Stok buku dipotret di langkah 1 dan tidak
+      bergerak lagi setelahnya — penjualan yang terjadi di tengah opname akan terbaca sebagai
+      selisih, dan itu memang disengaja supaya tidak ada yang tertutupi diam-diam.</p>
+    <p class="muted">Selisih opname dicatat di <b>buku Mart sendiri</b> dan tidak pernah menyentuh
+      neraca kas sekolah — tidak ada uang yang berpindah, yang berubah hanya nilai barang di rak.</p>
+    <button class="go" id="mo-mulai">Mulai Opname Baru</button>
+  </div>
+  ${martRiwayatOpname()}`;
+}
+
+async function martMulaiOpname() {
+  if (!confirm('Mulai sesi opname baru? Stok buku akan dipotret sekarang.')) return;
+  try {
+    await api('/api/mart/opname', { method: 'POST' });
+    toast('✔ Opname dimulai — silakan hitung fisik', 'ok');
+    martMuatOpname();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+function martOpnameBerjalan() {
+  const o = opname.berjalan;
+  const belum = o.item.filter((i) => i.stok_fisik === null).length;
+  return `<div class="panel">
+    <div class="kat-head">
+      <h2 style="margin:0">Opname Berjalan <span class="muted">dimulai ${waktuSingkat(o.created_at)}</span></h2>
+      <span>
+        <button class="linkbtn" id="mo-cetak-form">🖨 Cetak Form Fisik</button> ·
+        <button class="linkbtn" id="mo-unduh">⬇ unduh CSV</button> ·
+        <button class="linkbtn danger" id="mo-batal">batalkan sesi</button>
+      </span></div>
+    <div class="cards">
+      <div class="statcard"><span class="muted">Barang diaudit</span><br><b>${o.n_item}</b></div>
+      <div class="statcard"><span class="muted">Belum dihitung</span><br>
+        <b style="color:${belum ? 'var(--warn)' : 'var(--ok)'}">${belum}</b></div>
+      <div class="statcard"><span class="muted">Lebih (surplus)</span><br>
+        <b style="color:var(--ok)">${o.n_surplus}</b>
+        <span class="muted" style="display:block; font-size:11.5px">${rp(o.nilai_surplus)}</span></div>
+      <div class="statcard"><span class="muted">Kurang (defisit)</span><br>
+        <b class="minus">${o.n_defisit}</b>
+        <span class="muted" style="display:block; font-size:11.5px">${rp(o.nilai_defisit)}</span></div>
+      <div class="statcard" style="border-color:var(--brand)">
+        <span class="muted">Nilai selisih bersih</span><br>
+        <b class="rp" style="color:${o.nilai_bersih < 0 ? 'var(--err)' : 'var(--ok)'}">
+          ${o.nilai_bersih < 0 ? '−' : ''}${rp(Math.abs(o.nilai_bersih))}</b></div>
+    </div>
+    <p class="muted">Isi kolom <b>Stok Fisik</b> apa adanya. Kosongkan kalau barangnya belum
+      dihitung — kosong berarti "belum dihitung", bukan nol, dan stoknya tidak akan diubah.</p>
+    <div class="tblwrap"><table>
+      <thead><tr><th>Barang</th><th>SKU</th><th class="num">Stok Sistem</th>
+        <th class="num" style="width:110px">Stok Fisik</th><th class="num">Selisih</th>
+        <th class="num">Nilai Selisih</th><th style="width:150px">Alasan</th></tr></thead>
+      <tbody>${o.item.map((i) => martOpnameBaris(i)).join('')}</tbody>
+    </table></div>
+    <div class="aju-unduh" style="margin-top:14px">
+      ${belum ? `<label class="cek"><input type="checkbox" id="mo-abaikan">
+        lanjutkan tanpa ${belum} barang yang belum dihitung — stoknya dibiarkan apa adanya,
+        bukan dianggap nol</label>` : ''}
+      <div class="field" style="margin-top:8px"><label>Catatan audit (opsional)</label>
+        <input id="mo-catatan" maxlength="300" placeholder="mis. gudang B belum sempat dicek"></div>
+      <button class="go" id="mo-selesai" style="margin-top:8px">✔ Selesaikan &amp; Rekonsiliasi Auto</button>
+      <span class="muted set-hint">Setelah ditekan, stok buku disamakan ke hitungan fisik dan
+        sesi ini tidak bisa diubah lagi.</span>
+    </div>
+  </div>
+  ${martRiwayatOpname()}`;
+}
+
+function martOpnameBaris(i) {
+  const warna = i.selisih > 0 ? 'var(--ok)' : i.selisih < 0 ? 'var(--err)' : 'var(--muted)';
+  const belum = i.stok_fisik === null;
+  return `<tr data-baris="${i.id}" style="${belum ? 'background:#fffdf5' : ''}">
+    <td><b>${esc(i.nama)}</b></td>
+    <td>${i.barcode ? `<code>${esc(i.barcode)}</code>` : '<span class="muted">—</span>'}</td>
+    <td class="num">${i.stok_sistem}</td>
+    <td class="num"><input type="number" min="0" style="width:90px; text-align:right"
+      data-fisik="${i.id}" value="${belum ? '' : i.stok_fisik}" placeholder="—"></td>
+    <td class="num"><b style="color:${warna}">${belum ? '—' : (i.selisih > 0 ? '+' : '') + i.selisih}</b></td>
+    <td class="num rp" style="color:${warna}">${belum ? '—'
+      : (i.nilai_selisih < 0 ? '−' : '') + rp(Math.abs(i.nilai_selisih))}</td>
+    <td><select data-alasan="${i.id}" ${i.selisih === 0 ? 'disabled' : ''}>
+      ${opname.alasan.map((a) => `<option value="${a}" ${i.alasan === a ? 'selected' : ''}>${esc(a)}</option>`).join('')}
+    </select></td></tr>`;
+}
+
+function martPasangOpname() {
+  const o = opname.berjalan;
+  const simpan = (id) => {
+    const f = document.querySelector(`[data-fisik="${id}"]`);
+    const a = document.querySelector(`[data-alasan="${id}"]`);
+    return api(`/api/mart/opname/${o.id}`, { method: 'PUT', body: { item: [{
+      id, stok_fisik: f.value === '' ? null : Number(f.value), alasan: a.value,
+    }] } }).then(martMuatOpname).catch((e) => toast(e.message, 'err'));
+  };
+  document.querySelectorAll('[data-fisik]').forEach((f) => {
+    f.addEventListener('change', () => simpan(Number(f.dataset.fisik)));
+    // Enter memindahkan kursor ke baris berikutnya — menghitung rak jadi satu
+    // alur tangan tanpa menyentuh tetikus.
+    f.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      const semua = [...document.querySelectorAll('[data-fisik]')];
+      const n = semua.indexOf(f);
+      opnameFokus = semua[n + 1] ? Number(semua[n + 1].dataset.fisik) : null;
+      f.blur();
+    });
+  });
+  document.querySelectorAll('[data-alasan]').forEach((a) => {
+    a.addEventListener('change', () => simpan(Number(a.dataset.alasan)));
+  });
+  $('#mo-cetak-form').onclick = martCetakFormOpname;
+  $('#mo-unduh').onclick = () => unduhCsv(`opname-berjalan-${martHariIni()}.csv`,
+    ['Barang', 'SKU', 'Stok sistem', 'Stok fisik', 'Selisih', 'HPP', 'Nilai selisih', 'Alasan'],
+    o.item.map((i) => [i.nama, i.barcode, i.stok_sistem, i.stok_fisik ?? '', i.selisih,
+      i.hpp, i.nilai_selisih, i.alasan]));
+  $('#mo-batal').onclick = async () => {
+    if (!confirm('Batalkan sesi opname ini? Semua hitungan yang sudah diisi akan hilang. '
+      + 'Stok barang tidak berubah.')) return;
+    try {
+      await api(`/api/mart/opname/${o.id}`, { method: 'DELETE' });
+      toast('Sesi opname dibatalkan', 'ok');
+      martMuatOpname();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  $('#mo-selesai').onclick = martSelesaikanOpname;
+
+  // Pulihkan fokus setelah tabel digambar ulang oleh penyimpanan.
+  if (opnameFokus !== null) {
+    const f = document.querySelector(`[data-fisik="${opnameFokus}"]`);
+    opnameFokus = null;
+    if (f) { f.focus(); f.select(); }
+  }
+}
+
+let opnameFokus = null;
+
+async function martSelesaikanOpname() {
+  const o = opname.berjalan;
+  const abaikan = !!$('#mo-abaikan')?.checked;
+  const pesan = `Selesaikan opname & rekonsiliasi otomatis?\n\n`
+    + `• ${o.n_surplus} barang lebih (${rp(o.nilai_surplus)})\n`
+    + `• ${o.n_defisit} barang kurang (${rp(o.nilai_defisit)})\n`
+    + `• Nilai selisih bersih ${o.nilai_bersih < 0 ? '−' : ''}${rp(Math.abs(o.nilai_bersih))}\n\n`
+    + `Stok buku akan disamakan ke hitungan fisik. Tidak bisa dibatalkan.`;
+  if (!confirm(pesan)) return;
+  try {
+    const d = await api(`/api/mart/opname/${o.id}/selesai`, { method: 'POST', body: {
+      abaikan_belum: abaikan, catatan: $('#mo-catatan').value,
+    }});
+    const n = d.opname.nilai_bersih;
+    toast(n === 0 ? '✔ Opname selesai — stok cocok seluruhnya'
+      : `✔ Opname selesai — penyesuaian nilai ${n < 0 ? '−' : '+'}${rp(Math.abs(n))}`, 'ok');
+    martMuatOpname();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+/** Form kosong untuk dibawa berkeliling rak dan diisi dengan pulpen. */
+function martCetakFormOpname() {
+  const o = opname.berjalan;
+  const gaya = `@page { size: A4; margin: 12mm; }
+    body{font:12px/1.5 system-ui;margin:0;color:#111} h1{font-size:16px;margin:0}
+    table{width:100%;border-collapse:collapse;margin-top:10px}
+    th,td{border:1px solid #999;padding:6px 8px} th{background:#eee;text-align:left}
+    .n{text-align:right} .isi{width:70px} .ttd{margin-top:26px;font-size:11px}`;
+  cetakLembar('Form Opname', gaya, `
+    <h1>Form Hitung Fisik — ${esc(USER?.tenant_nama || 'IMBOS Mart')}</h1>
+    <div>Sesi #${o.id} · dimulai ${new Date(o.created_at).toLocaleString('id-ID')} ·
+      petugas ${esc(o.operator)}</div>
+    <table><thead><tr><th>Barang</th><th>SKU</th><th class="n">Sistem</th>
+      <th class="n isi">Fisik</th><th>Catatan</th></tr></thead>
+      <tbody>${o.item.map((i) => `<tr><td>${esc(i.nama)}</td><td>${esc(i.barcode || '-')}</td>
+        <td class="n">${i.stok_sistem}</td><td></td><td></td></tr>`).join('')}</tbody></table>
+    <div class="ttd">Penghitung: ______________________ &nbsp;&nbsp;
+      Saksi: ______________________ &nbsp;&nbsp; Tanggal: ______________</div>`);
+}
+
+async function martOpnameDetail(id) {
+  const d = await api('/api/mart/opname/' + id);
+  const o = d.opname;
+  const beda = o.item.filter((i) => i.selisih !== 0);
+  openModal(`
+    <h2>Opname #${o.id}</h2>
+    <p class="muted">Dimulai ${waktuSingkat(o.created_at)} ·
+      selesai ${o.selesai_pada ? waktuSingkat(o.selesai_pada) : '—'} · petugas ${esc(o.operator)}
+      ${o.catatan ? `<br>Catatan: ${esc(o.catatan)}` : ''}</p>
+    <div class="cart">
+      <div class="cart-line"><span>Barang diaudit</span><span>${o.n_item}</span></div>
+      <div class="cart-line"><span>Lebih / kurang</span><span>${o.n_surplus} / ${o.n_defisit}</span></div>
+      <div class="cart-line"><span>Nilai surplus</span><span class="rp">${rp(o.nilai_surplus)}</span></div>
+      <div class="cart-line"><span>Nilai defisit</span><span class="rp">${rp(o.nilai_defisit)}</span></div>
+      <div class="cart-line"><span><b>Penyesuaian bersih</b></span>
+        <span class="rp"><b>${o.nilai_bersih < 0 ? '−' : ''}${rp(Math.abs(o.nilai_bersih))}</b></span></div>
+    </div>
+    <h3 style="font-size:13.5px">Barang yang selisih (${beda.length})</h3>
+    <div class="tblwrap" style="max-height:40vh; overflow:auto"><table>
+      <thead><tr><th>Barang</th><th class="num">Sistem</th><th class="num">Fisik</th>
+        <th class="num">Selisih</th><th class="num">Nilai</th><th>Alasan</th></tr></thead>
+      <tbody>${beda.map((i) => `<tr><td>${esc(i.nama)}</td>
+        <td class="num">${i.stok_sistem}</td><td class="num">${i.stok_fisik ?? '—'}</td>
+        <td class="num" style="color:${i.selisih < 0 ? 'var(--err)' : 'var(--ok)'}">
+          ${i.selisih > 0 ? '+' : ''}${i.selisih}</td>
+        <td class="num rp">${i.nilai_selisih < 0 ? '−' : ''}${rp(Math.abs(i.nilai_selisih))}</td>
+        <td>${esc(i.alasan)}</td></tr>`).join('')
+        || '<tr><td colspan="6" class="muted">Semua cocok.</td></tr>'}</tbody>
+    </table></div>
+    <button class="linkbtn" id="mo-unduh-detail">⬇ unduh rincian CSV</button>`);
+  $('#mo-unduh-detail').onclick = () => unduhCsv(`opname-${o.id}.csv`,
+    ['Barang', 'SKU', 'Stok sistem', 'Stok fisik', 'Selisih', 'HPP', 'Nilai selisih', 'Alasan'],
+    o.item.map((i) => [i.nama, i.barcode, i.stok_sistem, i.stok_fisik ?? '', i.selisih,
+      i.hpp, i.nilai_selisih, i.alasan]));
 }
 
 // ╔══════════════════════════════════════════════════════════╗

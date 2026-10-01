@@ -10,6 +10,7 @@ use App\Models\TransaksiItem;
 use App\Services\Kartu;
 use App\Services\Keranjang;
 use App\Services\Pengaturan;
+use App\Services\Stok;
 use App\Services\Rekap;
 use App\Services\Rupiah;
 use App\Services\SmartTopup;
@@ -267,6 +268,13 @@ class KasirController extends Controller
                 'siswa_id' => $trx->siswa_id, 'kelas' => $s->kelas,
                 'golongan' => $s->golongan, 'created_at' => $trx->created_at,
             ]);
+            // Stok ikut berkurang untuk barang yang MEMANG dilacak stoknya
+            // (lihat Services\Stok). Kantin yang tidak memakai stok sama
+            // sekali tidak tersentuh — barangnya berstok NULL.
+            if ($b['produk_id']) {
+                Stok::jual((int) $b['produk_id'], (int) $b['qty'],
+                    (string) ($trx->tx_id ?? ''), 'Kasir ' . $tenantNama);
+            }
         }
     }
 }

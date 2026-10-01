@@ -6,12 +6,14 @@ use App\Exceptions\ApiError;
 use App\Models\MartJual;
 use App\Models\MartJualItem;
 use App\Models\MartKas;
+use App\Models\MartKategori;
 use App\Models\Produk;
 use App\Models\Tenant;
 use App\Models\Transaksi;
 use App\Services\Kartu;
 use App\Services\Keranjang;
 use App\Services\Pengaturan;
+use App\Services\Stok;
 use App\Services\Rupiah;
 use App\Support\WaktuIso;
 use Illuminate\Http\Request;
@@ -83,6 +85,10 @@ class MartController extends Controller
     {
         [$mulai, $akhir] = [WaktuIso::awalHariIni(), null];
         $tunai = MartJual::where('tenant_id', $t->id)->where('created_at', '>=', $mulai)
+            ->where('metode', 'tunai')
+            ->selectRaw('COALESCE(SUM(total),0) total, COUNT(*) n')->first();
+        $transfer = MartJual::where('tenant_id', $t->id)->where('created_at', '>=', $mulai)
+            ->where('metode', 'transfer')
             ->selectRaw('COALESCE(SUM(total),0) total, COUNT(*) n')->first();
         $cashless = Transaksi::where('tenant_id', $t->id)->where('tipe', 'beli')
             ->where('created_at', '>=', $mulai)
@@ -90,6 +96,7 @@ class MartController extends Controller
 
         return [
             'tunai' => ['total' => (int) $tunai->total, 'n' => (int) $tunai->n],
+            'transfer' => ['total' => (int) $transfer->total, 'n' => (int) $transfer->n],
             'cashless' => ['total' => (int) $cashless->total, 'n' => (int) $cashless->n],
         ];
     }
@@ -198,19 +205,45 @@ class MartController extends Controller
         // saldo kartu santri, sedangkan pembeli tunai bisa siapa saja.
         $x = Keranjang::ringkas($items, $t, Pengaturan::sekolah());
 
-        $uang = (int) floor((float) $r->input('uang_diterima', 0));
-        if ($uang < $x['total']) {
-            throw new ApiError(400, 'Uang diterima (' . Rupiah::f($uang) . ') kurang dari total ' .
-                Rupiah::f($x['total']));
+        $metode = $r->input('metode') === 'transfer' ? 'transfer' : 'tunai';
+        $subtotal = $x['total'];
+        $diskon = max(0, (int) floor((float) $r->input('diskon', 0)));
+        if ($diskon > $subtotal) {
+            throw new ApiError(400, 'Diskon tidak boleh melebihi total belanja');
         }
-        $kembalian = $uang - $x['total'];
+        $total = $subtotal - $diskon;
 
-        $hasil = DB::transaction(function () use ($t, $x, $uang, $kembalian, $txId) {
+        $bank = '';
+        $pengirim = '';
+        if ($metode === 'transfer') {
+            // Sistem tidak terhubung ke bank mana pun: dua kolom ini semata
+            // catatan kasir supaya mutasi rekening bisa dicocokkan nanti.
+            $bank = mb_substr(trim((string) $r->input('bank', '')), 0, 40);
+            $pengirim = mb_substr(trim((string) $r->input('pengirim', '')), 0, 80);
+            if ($bank === '' || mb_strlen($pengirim) < 3) {
+                throw new ApiError(400, 'Transfer wajib menyebut bank dan nama pengirim (minimal 3 huruf)');
+            }
+            $uang = $total;          // transfer selalu pas, tidak ada kembalian
+            $kembalian = 0;
+        } else {
+            $uang = (int) floor((float) $r->input('uang_diterima', 0));
+            if ($uang < $total) {
+                throw new ApiError(400, 'Uang diterima (' . Rupiah::f($uang) . ') kurang dari total ' .
+                    Rupiah::f($total));
+            }
+            $kembalian = $uang - $total;
+        }
+
+        $op = $this->operator;
+        $hasil = DB::transaction(function () use ($t, $x, $uang, $kembalian, $txId, $metode,
+            $bank, $pengirim, $diskon, $subtotal, $total, $op) {
             $jual = MartJual::create([
-                'tenant_id' => $t->id, 'tx_id' => $txId, 'total' => $x['total'],
+                'tenant_id' => $t->id, 'tx_id' => $txId, 'metode' => $metode,
+                'subtotal' => $subtotal, 'diskon' => $diskon, 'total' => $total,
                 'uang_diterima' => $uang, 'kembalian' => $kembalian,
+                'bank' => $bank, 'pengirim' => $pengirim,
                 'n_item' => array_sum(array_map(fn ($b) => (int) ($b['qty'] ?? 1), $x['rincian'])),
-                'operator' => $this->operator,
+                'operator' => $op,
                 'created_at' => WaktuIso::sekarang(),
             ]);
             foreach ($x['rincian'] as $b) {
@@ -220,6 +253,9 @@ class MartController extends Controller
                     'harga' => (int) $b['harga'], 'qty' => (int) ($b['qty'] ?? 1),
                     'subtotal' => (int) $b['subtotal'],
                 ]);
+                if (! empty($b['produk_id'])) {
+                    Stok::jual((int) $b['produk_id'], (int) ($b['qty'] ?? 1), (string) $txId, $op);
+                }
             }
 
             return $jual;
@@ -253,13 +289,25 @@ class MartController extends Controller
             throw new ApiError(400, 'Nominal tidak boleh negatif');
         }
 
-        $tunai = (int) MartJual::where('tenant_id', $t->id)
-            ->where('created_at', '>=', WaktuIso::awalHariIni())->sum('total');
+        $hari = MartJual::where('tenant_id', $t->id)->where('created_at', '>=', WaktuIso::awalHariIni())
+            ->selectRaw("COALESCE(SUM(CASE WHEN metode='tunai' THEN total END),0) tunai")
+            ->selectRaw("COALESCE(SUM(CASE WHEN metode='transfer' THEN total END),0) transfer")
+            ->first();
+        $tunai = (int) $hari->tunai;
+        $transfer = (int) $hari->transfer;
         $seharusnya = $kasAwal + $tunai;
+
+        // Transfer dicocokkan ke mutasi rekening, bukan ke laci. Kalau kasir
+        // tidak mengisinya, dianggap sama dengan catatan sistem — bukan nol,
+        // sebab nol akan terbaca seolah seluruh transfer hilang.
+        $fisikTransfer = $r->input('hitung_transfer') === null
+            ? $transfer : (int) floor((float) $r->input('hitung_transfer'));
 
         $kas = MartKas::create([
             'tenant_id' => $t->id, 'tanggal' => $tgl, 'kas_awal' => $kasAwal,
-            'tunai' => $tunai, 'hitung_fisik' => $fisik, 'selisih' => $fisik - $seharusnya,
+            'tunai' => $tunai, 'transfer' => $transfer,
+            'hitung_fisik' => $fisik, 'hitung_transfer' => $fisikTransfer,
+            'selisih' => $fisik - $seharusnya, 'selisih_transfer' => $fisikTransfer - $transfer,
             'catatan' => mb_substr(trim((string) $r->input('catatan', '')), 0, 300),
             'operator' => $this->operator,
             'created_at' => WaktuIso::sekarang(),

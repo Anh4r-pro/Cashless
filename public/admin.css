@@ -211,6 +211,12 @@ body.admin .modeswitch button { border: 0; border-radius: 10px; background: tran
 body.admin .modeswitch button.sel { box-shadow: 0 1px 3px rgba(0,0,0,.1); }
 body.admin .modeswitch button.plus-mode.sel { background: var(--ok); }
 body.admin .modeswitch button.minus-mode.sel { background: var(--err); }
+/* Pilihan metode bayar Mart. Ditulis juga di sini karena aturan `body.admin`
+   di atas menghapus latar tombolnya, dan tanpa ini metode terpilih hanya
+   berbeda warna huruf — terlalu samar untuk sesuatu yang salahnya baru
+   ketahuan saat tutup laci. */
+body.admin .modeswitch button.on { background: var(--navy); color: #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,.18); }
 
 /* tabel */
 body.admin table { font-size: 13.5px; }
