@@ -1276,8 +1276,17 @@ function martStokView(el) {
         <button class="linkbtn" id="ms-kategori">⚙ kelola kategori</button> ·
         <button class="linkbtn" id="ms-unduh">⬇ unduh CSV</button> ·
         <button class="linkbtn" id="ms-cetak">🖨 cetak</button> ·
+        <button class="linkbtn" id="ms-impor">⬆ Tambah kolektif (Excel)</button> ·
         <button class="linkbtn" id="ms-tambah">+ Tambah barang</button>
       </span>
+    </div>
+    <div class="aju-unduh hidden" id="ms-impor-box">
+      <span class="muted">Untuk puluhan sampai ratusan barang sekaligus:</span>
+      <button class="linkbtn" id="ms-impor-tpl">⬇ Unduh template Excel</button>
+      <label class="linkbtn" style="cursor:pointer">📂 Pilih berkas yang sudah diisi
+        <input type="file" id="ms-impor-berkas" accept=".xlsx,.csv" class="hidden"></label>
+      <span class="muted set-hint">Templatenya sudah memuat daftar kategori Anda sebagai pilihan.
+        Berkas dipratinjau dulu; barang yang namanya sudah ada <b>dilewati, tidak ditimpa</b>.</span>
     </div>
     <p class="muted">Khusus IMBOS Mart, perubahan barang <b>berlaku langsung</b> tanpa menunggu
       persetujuan admin — ini unit usaha yayasan sendiri. Seluruh barang &amp; mutasinya tetap
@@ -1303,6 +1312,18 @@ function martStokView(el) {
   $('#ms-kategori').onclick = martKategoriModal;
   $('#ms-unduh').onclick = martUnduhBarang;
   $('#ms-cetak').onclick = martCetakBarang;
+  $('#ms-impor').onclick = () => $('#ms-impor-box').classList.toggle('hidden');
+  $('#ms-impor-tpl').onclick = () => {
+    // Berkas biner: lewat <a>, bukan fetch+JSON.
+    const a = document.createElement('a');
+    a.href = '/api/mart/barang/impor/template';
+    document.body.appendChild(a); a.click(); a.remove();
+  };
+  $('#ms-impor-berkas').onchange = (e) => {
+    const f = e.target.files[0];
+    e.target.value = '';   // berkas yang sama boleh dipilih lagi sesudah diperbaiki
+    if (f) martImporPratinjau(f);
+  };
   const muat = debounce(martMuatStok, 250);
   $('#ms-cari').addEventListener('input', muat);
   $('#ms-kat').onchange = martMuatStok;
@@ -1318,11 +1339,15 @@ async function martMuatStok() {
   const d = await api('/api/mart/barang?' + p);
   martStok = d;
 
+  // Digambar ulang setiap muat, bukan sekali saja: impor kolektif bisa
+  // melahirkan kategori baru, dan saringan yang tidak memuatnya membuat
+  // barang yang baru masuk terlihat seperti tidak ada.
   const sel = $('#ms-kat');
-  if (sel && !sel.dataset.terisi) {
-    sel.dataset.terisi = '1';
+  if (sel) {
+    const dipilih = sel.value;
     sel.innerHTML = '<option value="">semua</option>' +
       d.kategori.map((k) => `<option value="${k.id}">${esc(k.nama)}</option>`).join('');
+    sel.value = dipilih;
   }
   const r = d.ringkas;
   $('#ms-ringkas').innerHTML = `
@@ -1367,6 +1392,63 @@ async function martMuatStok() {
       } catch (e) { toast(e.message, 'err'); }
     };
   });
+}
+
+/**
+ * Pratinjau berkas tambah barang kolektif, lalu simpan.
+ *
+ * Berkasnya dikirim DUA KALI — sekali untuk dipratinjau, sekali lagi saat
+ * disimpan — dan server mengurainya ulang dari nol. Mengirim balik baris hasil
+ * pratinjau akan lebih hemat, tetapi artinya harga & stok yang tersimpan
+ * datang dari layar, bukan dari berkas yang dilihat orangnya.
+ */
+async function martImporPratinjau(file) {
+  let data, d;
+  try {
+    data = await fileToDataUrl(file);
+    d = await api('/api/mart/barang/impor/pratinjau', { method: 'POST',
+      body: { data, nama_berkas: file.name } });
+  } catch (e) { toast(e.message, 'err'); return; }
+
+  const r = d.ringkas;
+  const baris = d.baris.map((b) => `
+    <tr class="${b.status === 'siap' ? '' : 'tp-menunggu'}">
+      <td class="num muted">${b.baris}</td>
+      <td>${esc(b.nama || '—')}</td>
+      <td>${b.barcode ? `<code>${esc(b.barcode)}</code>` : '<span class="muted">—</span>'}</td>
+      <td>${b.kategori ? esc(b.kategori) : '<span class="muted">—</span>'}
+        ${b.kategori_baru ? '<span class="badge tp-pending">baru</span>' : ''}</td>
+      <td class="num rp">${b.hpp === null ? '<span class="muted">—</span>' : rp(b.hpp)}</td>
+      <td class="num rp">${b.harga ? rp(b.harga) : '—'}</td>
+      <td class="num">${b.stok}</td>
+      <td>${b.status === 'siap' ? '<span class="badge aktif">siap</span>'
+        : `<span class="minus">${esc(b.pesan)}</span>`}</td>
+    </tr>`).join('');
+
+  openModal(`
+    <h2>Pratinjau tambah barang</h2>
+    <p><b>${esc(d.nama_berkas)}</b> — ${r.n_baris} baris:
+      <b>${r.n_siap} siap disimpan</b>${r.n_gagal ? `, <span class="minus">${r.n_gagal} dilewati</span>` : ''}.</p>
+    ${r.n_berstok ? `<p class="muted">${r.n_berstok} barang datang dengan stok awal, bernilai modal
+      <b>${rp(r.nilai_stok)}</b>. Stok awal itu dicatat sebagai barang masuk, jadi ada jejaknya.</p>` : ''}
+    ${d.kategori_baru.length ? `<p class="muted">Kategori baru yang akan dibuatkan:
+      <b>${d.kategori_baru.map(esc).join(', ')}</b>. Periksa dulu kalau-kalau itu hanya salah ketik
+      dari kategori yang sudah ada.</p>` : ''}
+    ${r.n_gagal ? `<p class="muted">Baris yang dilewati tidak ikut disimpan. Perbaiki di Excel lalu
+      unggah lagi — barang yang sudah tersimpan tidak akan kembar.</p>` : ''}
+    <div class="tblwrap" style="max-height:50vh; overflow:auto"><table>
+      <thead><tr><th class="num">Baris</th><th>Barang</th><th>SKU</th><th>Kategori</th>
+        <th class="num">Beli</th><th class="num">Jual</th><th class="num">Stok</th>
+        <th>Status</th></tr></thead>
+      <tbody>${baris}</tbody>
+    </table></div>`,
+    r.n_siap ? async () => {
+      const h = await api('/api/mart/barang/impor/terapkan', { method: 'POST',
+        body: { data, nama_berkas: d.nama_berkas, sidik: d.sidik } });
+      toast(`✔ ${h.n} barang ditambahkan — langsung tampil di kasir`, 'ok');
+      martMuatStok();
+    } : null, `Simpan ${r.n_siap} barang`);
+  $('#modal-root .modal').classList.add('modal-lebar', 'modal-impor');
 }
 
 function martBarangModal(p) {

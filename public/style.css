@@ -768,6 +768,11 @@ label.cek input { width: auto; margin: 0; }
 .kk-jenjang { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin: 8px 0 10px; background: var(--bg); }
 .kk-jenjang .settings-grid { margin-top: 8px; }
 .modal.modal-lebar { max-width: 760px; }
+/* Pratinjau impor barang: delapan kolom + kolom pesan yang berkalimat. Di 760px
+   pesannya terlipat jadi satu huruf per baris dan tabelnya jadi lebih tinggi
+   dari layar. */
+.modal.modal-impor { max-width: 1000px; }
+.modal.modal-impor td:last-child { min-width: 150px; }
 .aju-paket { border: 1px solid var(--gold); border-radius: 8px; padding: 10px 12px; margin: 10px 0; background: #fffaf0; }
 .aju-paket-baris { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
 .aju-paket-baris:first-of-type { border-top: 0; }

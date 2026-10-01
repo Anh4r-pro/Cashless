@@ -7,6 +7,8 @@ use App\Models\MartKategori;
 use App\Models\MartStokMutasi;
 use App\Models\Produk;
 use App\Models\Tenant;
+use App\Services\ImporBarangMart;
+use App\Services\ImporTopup;
 use App\Services\Stok;
 use App\Support\WaktuIso;
 use Illuminate\Http\Request;
@@ -309,6 +311,50 @@ class MartStokController extends Controller
         $kat = MartKategori::where('tenant_id', $t->id)->pluck('nama', 'id');
 
         return response()->json(['ok' => true, 'produk' => $this->baris($p->fresh(), $kat)]);
+    }
+
+    // ------------------------------------------------------- impor kolektif
+
+    /** Template Excel, lengkap dengan daftar kategori tenant ini sebagai dropdown. */
+    public function imporTemplate(Request $r)
+    {
+        $t = $this->martKu($r);
+        $stamp = date('Y-m-d');
+
+        return response(ImporBarangMart::template($t), 200, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition' => "attachment; filename=\"template-barang-mart-{$stamp}.xlsx\"",
+        ]);
+    }
+
+    /** Langkah 1: pratinjau — belum ada satu pun barang yang tersimpan. */
+    public function imporPratinjau(Request $r)
+    {
+        $t = $this->martKu($r);
+        ['isi' => $isi, 'nama' => $nama] = ImporTopup::berkasDariBody($r->all());
+
+        return response()->json(array_merge(
+            ['ok' => true, 'nama_berkas' => $nama, 'sidik' => ImporTopup::sidik($isi)],
+            ImporBarangMart::urai($isi, $nama, $t),
+        ));
+    }
+
+    /**
+     * Langkah 2: simpan. Berkasnya diurai ULANG dari nol di sini — yang dipakai
+     * hasil uraian kedua, bukan baris yang dikirim balik oleh layar.
+     */
+    public function imporTerapkan(Request $r)
+    {
+        $t = $this->martKu($r);
+        ['isi' => $isi, 'nama' => $nama] = ImporTopup::berkasDariBody($r->all());
+        if ($r->input('sidik') && (string) $r->input('sidik') !== ImporTopup::sidik($isi)) {
+            throw new ApiError(409, 'Berkas berubah sejak dipratinjau — ulangi pratinjau dulu');
+        }
+
+        $urai = ImporBarangMart::urai($isi, $nama, $t);
+        $n = ImporBarangMart::terapkan($urai, $t, $this->operator);
+
+        return response()->json(['ok' => true, 'n' => $n, 'ringkas' => $urai['ringkas']]);
     }
 
     /** Riwayat pergerakan stok satu barang. */

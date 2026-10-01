@@ -70,6 +70,11 @@ Route::middleware('peran:tenant')->group(function () {
     Route::delete('mart/kategori/{id}', [MartStokController::class, 'kategoriHapus']);
     Route::get('mart/barang', [MartStokController::class, 'index']);
     Route::post('mart/barang', [MartStokController::class, 'simpan']);
+    // Didaftarkan sebelum rute ber-{id} supaya "impor" tidak pernah terbaca
+    // sebagai nomor barang.
+    Route::get('mart/barang/impor/template', [MartStokController::class, 'imporTemplate']);
+    Route::post('mart/barang/impor/pratinjau', [MartStokController::class, 'imporPratinjau']);
+    Route::post('mart/barang/impor/terapkan', [MartStokController::class, 'imporTerapkan']);
     Route::put('mart/barang/{id}', [MartStokController::class, 'simpan']);
     Route::delete('mart/barang/{id}', [MartStokController::class, 'hapus']);
     Route::post('mart/barang/{id}/stok', [MartStokController::class, 'stokMasuk']);
