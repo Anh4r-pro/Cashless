@@ -43,7 +43,7 @@ class ProdukController extends Controller
         // Halaman kasir perlu tahu jenis tenantnya untuk memutuskan apakah
         // pilihan kategori pada input manual boleh ditampilkan, dan mode
         // kasirnya untuk memutuskan apakah daftar menu ditampilkan sama sekali.
-        $tenant = $tid ? Tenant::select('id', 'nama', 'jenis', 'status', 'mode_kasir')->find($tid) : null;
+        $tenant = $tid ? Tenant::select('id', 'nama', 'jenis', 'status', 'mode_kasir', 'input_manual')->find($tid) : null;
 
         return response()->json(['produk' => $rows, 'tenant' => $tenant]);
     }

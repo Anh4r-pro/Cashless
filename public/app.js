@@ -507,15 +507,17 @@ function kasirView(el) {
       <div class="grid" id="produk-grid"><span class="muted">memuat menu…</span></div>
       <p class="muted hidden" id="mode-bebas-info" style="margin:0 0 4px">
         🛒 Mode tanpa menu — ketik barang yang dibeli beserta harganya.</p>
-      <input id="manual-desk" maxlength="60" autocomplete="off" style="margin-top:12px"
-        placeholder="Deskripsi barang (opsional), mis. Sabun mandi">
-      <div style="display:flex; gap:8px; margin-top:8px">
-        ${inputUang({ id: 'manual-harga', placeholder: 'Input manual (Rp)' })}
-        <select id="manual-kat" class="hidden" style="flex:none; width:auto">
-          <option value="makanan">Makanan</option>
-          <option value="non_makanan">Non-makanan</option>
-        </select>
-        <button class="linkbtn" id="btn-add-manual" style="flex:none">+ Tambah</button>
+      <div id="manual-box">
+        <input id="manual-desk" maxlength="60" autocomplete="off" style="margin-top:12px"
+          placeholder="Deskripsi barang (opsional), mis. Sabun mandi">
+        <div style="display:flex; gap:8px; margin-top:8px">
+          ${inputUang({ id: 'manual-harga', placeholder: 'Input manual (Rp)' })}
+          <select id="manual-kat" class="hidden" style="flex:none; width:auto">
+            <option value="makanan">Makanan</option>
+            <option value="non_makanan">Non-makanan</option>
+          </select>
+          <button class="linkbtn" id="btn-add-manual" style="flex:none">+ Tambah</button>
+        </div>
       </div>
       <div class="cart" id="cart-box"></div>
       <div class="total"><span>Total</span><span class="rp" id="cart-total">Rp0</span></div>
@@ -538,6 +540,10 @@ function kasirView(el) {
       ? 'Barang yang dibeli (wajib), mis. Sabun mandi + sikat gigi'
       : 'Deskripsi barang (opsional), mis. Sabun mandi';
     $('#manual-harga').placeholder = bebas ? 'Harga (Rp)' : 'Input manual (Rp)';
+    // Sakelar admin: tanpa input manual, kasir hanya bisa menjual menu yang
+    // sudah disetujui. Yang menolaknya tetap server — ini semata supaya kasir
+    // tidak mengetik nominal yang akan ditolak sedetik kemudian.
+    $('#manual-box').classList.toggle('hidden', !bebas && kasir.tenant?.input_manual === false);
     $('#produk-grid').innerHTML = kasir.produk.map((p) =>
       `<button data-id="${p.id}"><b>${esc(p.nama)}</b><span class="muted rp">${rp(p.harga)}</span>` +
       (p.kategori === 'non_makanan' ? '<span class="katdot" title="non-makanan">non-makanan</span>' : '') +
@@ -638,7 +644,9 @@ function renderCart() {
         `<div class="cart-line"><span>${esc(p.nama)}${p.kategori === 'non_makanan'
           ? ' <span class="katdot">non-makanan</span>' : ''}</span>
          <span><span class="rp">${rp(p.harga)}</span> <button data-i="${i}">✕</button></span></div>`).join('')
-    : '<div class="muted">Keranjang kosong — klik menu atau input manual</div>';
+    : `<div class="muted">Keranjang kosong — klik ${
+        kasir.tenant?.mode_kasir !== 'bebas' && kasir.tenant?.input_manual === false
+          ? 'menu di atas' : 'menu atau input manual'}</div>`;
   box.querySelectorAll('button').forEach((b) => {
     b.onclick = () => { kasir.cart.splice(Number(b.dataset.i), 1); renderCart(); };
   });
@@ -5433,7 +5441,9 @@ async function loadTenants() {
       <td><b>${esc(t.nama)}</b></td>
       <td>${t.jenis === 'koperasi'
         ? '<span class="badge kat-nm">koperasi</span>' : '<span class="muted">kantin</span>'}
-        ${t.mode_kasir === 'bebas' ? '<br><span class="badge" title="kasir mengetik deskripsi barang sendiri">tanpa menu</span>' : ''}</td>
+        ${t.mode_kasir === 'bebas' ? '<br><span class="badge" title="kasir mengetik deskripsi barang sendiri">tanpa menu</span>' : ''}
+        ${t.mode_kasir !== 'bebas' && !t.input_manual
+          ? '<br><span class="badge nonaktif" title="kasir hanya boleh menjual menu yang sudah disetujui">tanpa input manual</span>' : ''}</td>
       <td>${esc(t.pemilik)}</td>
       <td>${t.usernames ? `<code>${esc(t.usernames)}</code>` : '<span class="muted">—</span>'}</td>
       <td><span class="badge ${t.status}">${t.status}</span></td>
@@ -5480,6 +5490,13 @@ function tenantModal(t) {
         dan pembeli umum boleh bayar <b>tunai</b>. Uang tunai TIDAK masuk kas sekolah — ia
         dibukukan terpisah dan dicocokkan lewat tutup kas harian. Pilih jenis
         <b>Koperasi</b> supaya boleh menjual barang non-makanan.</span></div>
+    <label class="cek" id="m-manual-baris"><input type="checkbox" id="m-manual"
+      ${t && t.input_manual === false ? '' : 'checked'}> izinkan input manual di kasir</label>
+    <span class="muted set-hint" id="m-manual-hint">Kotak <b>nominal manual</b> dan
+      <b>deskripsi barang</b> di layar kasir. Matikan supaya tenant hanya bisa melayani penjualan
+      sesuai menu yang sudah disetujui admin — nyalakan lagi sewaktu-waktu kalau ada yang harus
+      dilayani manual. Pagarnya ada di server, bukan sekadar menyembunyikan kotaknya.</span>
+
     ${t ? `
     <div class="field"><label>Status</label><select id="m-status">
       <option value="aktif" ${t.status === 'aktif' ? 'selected' : ''}>aktif</option>
@@ -5492,19 +5509,38 @@ function tenantModal(t) {
       if (t) {
         const d = await api('/api/tenants/' + t.id, { method: 'PUT', body: {
           nama: $('#m-nama').value, pemilik: $('#m-pemilik').value, jenis: $('#m-jenis').value, mode_kasir: $('#m-mode').value,
-          status: $('#m-status').value, password_baru: $('#m-pass').value || undefined,
+          input_manual: $('#m-manual').checked, status: $('#m-status').value,
+          password_baru: $('#m-pass').value || undefined,
         }});
         if (d.kategori_direset > 0)
           toast(`${d.kategori_direset} barang non-makanan ditandai ulang sebagai makanan`, 'ok');
       } else {
         await api('/api/tenants', { method: 'POST', body: {
           nama: $('#m-nama').value, pemilik: $('#m-pemilik').value, jenis: $('#m-jenis').value, mode_kasir: $('#m-mode').value,
+          input_manual: $('#m-manual').checked,
           username: $('#m-user').value, password: $('#m-pass').value,
         }});
       }
       toast('✔ Tenant disimpan', 'ok');
       loadTenants();
     });
+
+  // Di mode "menu mati" seluruh penjualan justru lewat input manual, jadi
+  // sakelarnya tidak berlaku — dikunci menyala supaya tidak ada yang mematikan
+  // kasirnya sendiri lewat dua pengaturan yang bersebelahan.
+  const selarasManual = () => {
+    const bebas = $('#m-mode').value === 'bebas';
+    $('#m-manual').disabled = bebas;
+    if (bebas) $('#m-manual').checked = true;
+    $('#m-manual-hint').innerHTML = bebas
+      ? 'Mode "menu mati" memang berjualan lewat input manual, jadi sakelar ini selalu menyala.'
+      : 'Kotak <b>nominal manual</b> dan <b>deskripsi barang</b> di layar kasir. Matikan supaya '
+        + 'tenant hanya bisa melayani penjualan sesuai menu yang sudah disetujui admin — nyalakan '
+        + 'lagi sewaktu-waktu kalau ada yang harus dilayani manual. Pagarnya ada di server, bukan '
+        + 'sekadar menyembunyikan kotaknya.';
+  };
+  $('#m-mode').addEventListener('change', selarasManual);
+  selarasManual();
 }
 
 // ╔══════════════════════════════════════════════════════════╗

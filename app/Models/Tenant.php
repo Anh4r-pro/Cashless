@@ -22,8 +22,11 @@ class Tenant extends Model
         'status',
         'jenis',
         'mode_kasir',
+        'input_manual',
         'created_at',
     ];
+
+    protected $casts = ['input_manual' => 'bool'];
 
     public function produk(): \Illuminate\Database\Eloquent\Relations\HasMany
     {

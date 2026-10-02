@@ -33,6 +33,19 @@ class Keranjang
     /** Deskripsi terpendek yang masih bermakna di riwayat santri ("Pulpen" lolos, "a" tidak). */
     public const MIN_DESKRIPSI = 3;
 
+    /**
+     * Bolehkah tenant ini menjual lewat nominal ketik-sendiri?
+     *
+     * Mode 'bebas' selalu boleh, apa pun isi sakelarnya: di mode itu SELURUH
+     * penjualan lewat jalur manual, jadi mematikannya sama dengan mematikan
+     * kasirnya — kesalahan yang mudah terjadi karena kedua pengaturan ini
+     * bersebelahan di layar admin.
+     */
+    public static function bolehManual(Tenant $t): bool
+    {
+        return ($t->mode_kasir ?? 'menu') === 'bebas' || (bool) ($t->input_manual ?? true);
+    }
+
     public static function ringkas(array $items, Tenant $tenant, array $cfg): array
     {
         if (! $items) {
@@ -67,6 +80,16 @@ class Keranjang
             } else {
                 // Input manual: kasir menyebut kategorinya sendiri, dan
                 // non-makanan hanya boleh di tenant koperasi.
+                //
+                // Pagarnya ADA DI SINI, bukan sekadar menyembunyikan kotaknya
+                // di layar: menyembunyikan tombol tidak pernah menjadi
+                // pengamanan, dan kiriman /api/beli bisa disusun siapa saja
+                // yang memegang sesi kasir.
+                if (! self::bolehManual($tenant)) {
+                    throw new ApiError(403,
+                        'Tenant ini hanya boleh menjual menu yang sudah disetujui admin. ' .
+                        'Mintalah admin menyalakan "input manual" bila memang diperlukan.');
+                }
                 $harga = (int) floor((float) ($it['harga'] ?? 0));
                 if ($harga <= 0) {
                     throw new ApiError(400, 'Nominal input manual tidak valid');

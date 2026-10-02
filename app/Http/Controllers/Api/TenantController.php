@@ -65,6 +65,7 @@ class TenantController extends Controller
                 'pemilik' => trim((string) $r->input('pemilik', '')),
                 'jenis' => in_array($r->input('jenis'), ['kantin', 'koperasi'], true) ? $r->input('jenis') : 'kantin',
                 'mode_kasir' => in_array($r->input('mode_kasir'), Keranjang::MODE_KASIR, true) ? $r->input('mode_kasir') : 'menu',
+                'input_manual' => $r->input('input_manual') === null ? true : (bool) $r->input('input_manual'),
             ]);
             User::create([
                 'username' => $username, 'password' => $password,
@@ -97,6 +98,11 @@ class TenantController extends Controller
                 'jenis' => $jenis,
                 'mode_kasir' => in_array($r->input('mode_kasir'), Keranjang::MODE_KASIR, true)
                     ? $r->input('mode_kasir') : ($t->mode_kasir ?? 'menu'),
+                // Tidak disebut = tidak diubah. Layar lain ikut memanggil
+                // endpoint ini (mis. menonaktifkan tenant), dan sakelar yang
+                // sudah dimatikan tidak boleh menyala lagi karena itu.
+                'input_manual' => $r->input('input_manual') === null
+                    ? $t->input_manual : (bool) $r->input('input_manual'),
             ]);
             // Koperasi → kantin: barang non-makanan miliknya dikembalikan ke
             // 'makanan'. Kalau tidak, tenant ini punya barang berkategori
