@@ -20,6 +20,7 @@ use App\Http\Controllers\Api\DonasiController;
 use App\Http\Controllers\Api\KiosController;
 use App\Http\Controllers\Api\MartController;
 use App\Http\Controllers\Api\MartKoreksiController;
+use App\Http\Controllers\Api\MartMemberController;
 use App\Http\Controllers\Api\MartLaporanController;
 use App\Http\Controllers\Api\MartOpnameController;
 use App\Http\Controllers\Api\MartStokController;
@@ -70,6 +71,15 @@ Route::middleware('peran:tenant')->group(function () {
     // hanya selama kas hari itu belum ditutup (lihat MartKoreksiController).
     Route::put('mart/riwayat/jual/{id}', [MartKoreksiController::class, 'ubah']);
     Route::post('mart/riwayat/jual/{id}/batal', [MartKoreksiController::class, 'batal']);
+
+    // Member & piutang — hutang hanya boleh atas nama member terdaftar.
+    Route::get('mart/member', [MartMemberController::class, 'index']);
+    Route::post('mart/member', [MartMemberController::class, 'simpan']);
+    Route::put('mart/member/{id}', [MartMemberController::class, 'simpan']);
+    Route::delete('mart/member/{id}', [MartMemberController::class, 'hapus']);
+    Route::get('mart/piutang', [MartMemberController::class, 'piutang']);
+    Route::post('mart/piutang/{id}/bayar', [MartMemberController::class, 'bayar']);
+    Route::get('mart/piutang/bayar', [MartMemberController::class, 'riwayatBayar']);
 
     // Transaksi tertahan.
     Route::get('mart/tahan', [MartKoreksiController::class, 'tahanDaftar']);

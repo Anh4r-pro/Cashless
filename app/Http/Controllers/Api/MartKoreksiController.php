@@ -7,6 +7,7 @@ use App\Models\MartJual;
 use App\Models\MartJualItem;
 use App\Models\MartJualUbah;
 use App\Models\MartKas;
+use App\Models\MartPiutangBayar;
 use App\Models\MartTahan;
 use App\Models\MartTahanItem;
 use App\Models\Produk;
@@ -64,6 +65,14 @@ class MartKoreksiController extends Controller
         }
         if ($j->status !== 'sah') {
             throw new ApiError(409, 'Transaksi ini sudah dibatalkan');
+        }
+        // Piutang yang sudah dicicil tidak boleh diutak-atik: cicilannya sudah
+        // masuk laci dan mungkin sudah ikut terhitung di tutup kas hari lain.
+        if ($j->metode === 'hutang'
+            && MartPiutangBayar::where('jual_id', $j->id)->exists()) {
+            throw new ApiError(409, 'Piutang ini sudah pernah dicicil — ' .
+                'uangnya sudah masuk dan tidak bisa ditarik kembali dari sini. ' .
+                'Selesaikan sisanya, lalu betulkan lewat transaksi baru.');
         }
         $tgl = WaktuIso::tanggalLokal((string) $j->created_at);
         if (MartKas::where('tenant_id', $t->id)->where('tanggal', $tgl)->exists()) {
@@ -167,6 +176,9 @@ class MartKoreksiController extends Controller
                     ') kurang dari total baru ' . Rupiah::f($total));
             }
             $kembalian = $uang - $total;
+        } elseif ($j->metode === 'hutang') {
+            $uang = 0;               // belum ada uang yang berpindah
+            $kembalian = 0;
         } else {
             $uang = $total;          // transfer selalu pas
             $kembalian = 0;

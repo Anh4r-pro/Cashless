@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Exceptions\ApiError;
 use App\Models\MartJual;
 use App\Models\MartKas;
+use App\Models\MartPiutangBayar;
 use App\Models\Produk;
 use App\Models\Tenant;
 use App\Models\Transaksi;
@@ -91,7 +92,17 @@ class MartLaporanController extends Controller
             ->when($sejak, fn ($q) => $q->where('created_at', '>=', $sejak))
             ->selectRaw("COALESCE(SUM(CASE WHEN metode='tunai' THEN total END),0) tunai")
             ->selectRaw("COALESCE(SUM(CASE WHEN metode='transfer' THEN total END),0) transfer")
+            ->selectRaw("COALESCE(SUM(CASE WHEN metode='hutang' THEN total END),0) hutang")
             ->selectRaw('COALESCE(SUM(diskon),0) diskon, COUNT(*) n')->first();
+
+        // Cicilan piutang yang MASUK pada periode ini. Ia bukan omzet — omzetnya
+        // sudah dihitung pada hari barangnya keluar — melainkan uang yang baru
+        // sampai sekarang. Dua hal berbeda yang mudah tertukar kalau disatukan.
+        $cicil = MartPiutangBayar::where('tenant_id', $t->id)
+            ->when($sejak, fn ($q) => $q->where('created_at', '>=', $sejak))
+            ->selectRaw("COALESCE(SUM(CASE WHEN metode='tunai' THEN jumlah END),0) tunai")
+            ->selectRaw("COALESCE(SUM(CASE WHEN metode='transfer' THEN jumlah END),0) transfer")
+            ->selectRaw('COALESCE(SUM(jumlah),0) total')->first();
 
         $kartu = Transaksi::where('tenant_id', $t->id)->where('tipe', 'beli')
             ->when($sejak, fn ($q) => $q->where('created_at', '>=', $sejak))
@@ -99,8 +110,9 @@ class MartLaporanController extends Controller
 
         $tunai = (int) $mart->tunai;
         $transfer = (int) $mart->transfer;
+        $hutang = (int) $mart->hutang;
         $cashless = (int) $kartu->total;
-        $kotor = $tunai + $transfer + $cashless;
+        $kotor = $tunai + $transfer + $hutang + $cashless;
         $nTx = (int) $mart->n + (int) $kartu->n;
 
         $hpp = $this->hpp($t, $sejak);
@@ -108,7 +120,15 @@ class MartLaporanController extends Controller
         return [
             'periode' => $periode,
             'penjualan_kotor' => $kotor,
-            'tunai' => $tunai, 'transfer' => $transfer, 'cashless' => $cashless,
+            // Penjualan menurut jalurnya (kapan BARANG keluar).
+            'tunai' => $tunai, 'transfer' => $transfer, 'hutang' => $hutang,
+            'cashless' => $cashless,
+            // Uang yang benar-benar diterima pada periode ini (kapan UANG masuk):
+            // penjualan tunai/transfer ditambah cicilan piutang yang dibayar.
+            'masuk_tunai' => $tunai + (int) $cicil->tunai,
+            'masuk_transfer' => $transfer + (int) $cicil->transfer,
+            'piutang_tertagih' => (int) $cicil->total,
+            'piutang_sisa' => $this->sisaPiutang($t),
             'diskon' => (int) $mart->diskon,
             'hpp' => $hpp,
             'laba_kotor' => $kotor - $hpp,
@@ -116,6 +136,22 @@ class MartLaporanController extends Controller
             'n_transaksi' => $nTx,
             'rata_keranjang' => $nTx > 0 ? (int) round($kotor / $nTx) : 0,
         ];
+    }
+
+    /**
+     * Seluruh piutang yang belum tertagih, apa pun periodenya.
+     *
+     * Sengaja TIDAK mengikuti saringan periode: "sisa piutang" adalah keadaan
+     * hari ini, bukan kejadian dalam rentang waktu. Piutang bulan lalu yang
+     * belum dibayar tetap piutang hari ini.
+     */
+    private function sisaPiutang(Tenant $t): int
+    {
+        $hutang = (int) MartJual::sah()->where('tenant_id', $t->id)
+            ->where('metode', 'hutang')->sum('total');
+        $bayar = (int) MartPiutangBayar::where('tenant_id', $t->id)->sum('jumlah');
+
+        return max(0, $hutang - $bayar);
     }
 
     /** Modal barang yang terjual pada periode — dari dua buku penjualan sekaligus. */

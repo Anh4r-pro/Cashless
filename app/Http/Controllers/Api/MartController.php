@@ -8,6 +8,8 @@ use App\Models\MartJualItem;
 use App\Models\MartJualUbah;
 use App\Models\MartKas;
 use App\Models\MartKategori;
+use App\Models\MartMember;
+use App\Models\MartPiutangBayar;
 use App\Models\Produk;
 use App\Models\Tenant;
 use App\Models\Transaksi;
@@ -78,27 +80,47 @@ class MartController extends Controller
     }
 
     /**
-     * Omzet hari berjalan, dipecah menurut jalur uangnya — angka tunai dan
-     * cashless sengaja TIDAK dijumlahkan jadi satu di sini, karena keduanya
-     * berada di tempat yang berbeda: satu di laci, satu di kas sekolah.
+     * UANG YANG MASUK hari berjalan, dipecah menurut tempat uangnya berada.
+     *
+     * Perhatikan: ini bukan omzet. Angka tunai & transfer di sini adalah
+     * penjualan tunai/transfer hari ini DITAMBAH cicilan piutang yang dibayar
+     * hari ini — karena yang dicari tutup kas adalah uang di laci, bukan
+     * barang yang keluar dari rak. Sebaliknya penjualan HUTANG tidak masuk
+     * ke sini sama sekali: barangnya memang keluar, tetapi uangnya belum ada.
+     *
+     * Tunai dan cashless sengaja TIDAK dijumlahkan jadi satu: keduanya berada
+     * di tempat yang berbeda — satu di laci Mart, satu di kas sekolah.
      */
     private function ringkasHari(Tenant $t, string $tgl): array
     {
-        [$mulai, $akhir] = [WaktuIso::awalHariIni(), null];
-        $tunai = MartJual::sah()->where('tenant_id', $t->id)->where('created_at', '>=', $mulai)
-            ->where('metode', 'tunai')
+        $mulai = WaktuIso::awalHariIni();
+        $jual = fn (string $metode) => MartJual::sah()->where('tenant_id', $t->id)
+            ->where('created_at', '>=', $mulai)->where('metode', $metode)
             ->selectRaw('COALESCE(SUM(total),0) total, COUNT(*) n')->first();
-        $transfer = MartJual::sah()->where('tenant_id', $t->id)->where('created_at', '>=', $mulai)
-            ->where('metode', 'transfer')
-            ->selectRaw('COALESCE(SUM(total),0) total, COUNT(*) n')->first();
+        $cicil = fn (string $metode) => MartPiutangBayar::where('tenant_id', $t->id)
+            ->where('created_at', '>=', $mulai)->where('metode', $metode)
+            ->selectRaw('COALESCE(SUM(jumlah),0) total, COUNT(*) n')->first();
+
+        $tunai = $jual('tunai');
+        $transfer = $jual('transfer');
+        $hutang = $jual('hutang');
+        $cicilTunai = $cicil('tunai');
+        $cicilTransfer = $cicil('transfer');
         $cashless = Transaksi::where('tenant_id', $t->id)->where('tipe', 'beli')
             ->where('created_at', '>=', $mulai)
             ->selectRaw('COALESCE(SUM(-jumlah),0) total, COUNT(*) n')->first();
 
         return [
-            'tunai' => ['total' => (int) $tunai->total, 'n' => (int) $tunai->n],
-            'transfer' => ['total' => (int) $transfer->total, 'n' => (int) $transfer->n],
+            'tunai' => ['total' => (int) $tunai->total + (int) $cicilTunai->total,
+                'n' => (int) $tunai->n + (int) $cicilTunai->n,
+                'penjualan' => (int) $tunai->total, 'cicilan' => (int) $cicilTunai->total],
+            'transfer' => ['total' => (int) $transfer->total + (int) $cicilTransfer->total,
+                'n' => (int) $transfer->n + (int) $cicilTransfer->n,
+                'penjualan' => (int) $transfer->total, 'cicilan' => (int) $cicilTransfer->total],
             'cashless' => ['total' => (int) $cashless->total, 'n' => (int) $cashless->n],
+            // Barang keluar hari ini tanpa uang: bukan pemasukan, melainkan
+            // piutang baru. Ditampilkan supaya kasir tidak mencarinya di laci.
+            'hutang' => ['total' => (int) $hutang->total, 'n' => (int) $hutang->n],
         ];
     }
 
@@ -206,7 +228,8 @@ class MartController extends Controller
         // saldo kartu santri, sedangkan pembeli tunai bisa siapa saja.
         $x = Keranjang::ringkas($items, $t, Pengaturan::sekolah());
 
-        $metode = $r->input('metode') === 'transfer' ? 'transfer' : 'tunai';
+        $metode = in_array($r->input('metode'), ['transfer', 'hutang'], true)
+            ? $r->input('metode') : 'tunai';
         $subtotal = $x['total'];
         $diskon = max(0, (int) floor((float) $r->input('diskon', 0)));
         if ($diskon > $subtotal) {
@@ -216,7 +239,32 @@ class MartController extends Controller
 
         $bank = '';
         $pengirim = '';
-        if ($metode === 'transfer') {
+        $member = null;
+        if ($metode === 'hutang') {
+            // Hutang hanya atas nama member terdaftar: piutang tanpa identitas
+            // yang pasti adalah piutang yang tidak bisa ditagih.
+            $member = MartMember::where('id', (int) $r->input('member_id'))
+                ->where('tenant_id', $t->id)->first();
+            if (! $member) {
+                throw new ApiError(400, 'Pilih dulu membernya — hutang hanya boleh atas nama member terdaftar');
+            }
+            if (! $member->aktif) {
+                throw new ApiError(409, "Member \"{$member->nama}\" sedang nonaktif");
+            }
+            if ($member->batas_hutang <= 0) {
+                throw new ApiError(409, "Member \"{$member->nama}\" belum diberi plafon hutang — " .
+                    'atur dulu batas hutangnya di layar Member & Piutang');
+            }
+            $sisa = $this->sisaPiutang($t, $member->id);
+            if ($sisa + $total > $member->batas_hutang) {
+                throw new ApiError(409, "Melebihi plafon hutang {$member->nama}: sisa piutang " .
+                    Rupiah::f($sisa) . ' + belanja ' . Rupiah::f($total) . ' > batas ' .
+                    Rupiah::f($member->batas_hutang));
+            }
+            // Tidak ada uang yang berpindah hari ini; yang lahir adalah piutang.
+            $uang = 0;
+            $kembalian = 0;
+        } elseif ($metode === 'transfer') {
             // Sistem tidak terhubung ke bank mana pun: dua kolom ini semata
             // catatan kasir supaya mutasi rekening bisa dicocokkan nanti.
             $bank = mb_substr(trim((string) $r->input('bank', '')), 0, 40);
@@ -236,10 +284,12 @@ class MartController extends Controller
         }
 
         $op = $this->operator;
+        $memberId = $member?->id;
         $hasil = DB::transaction(function () use ($t, $x, $uang, $kembalian, $txId, $metode,
-            $bank, $pengirim, $diskon, $subtotal, $total, $op) {
+            $bank, $pengirim, $diskon, $subtotal, $total, $op, $memberId) {
             $jual = MartJual::create([
-                'tenant_id' => $t->id, 'tx_id' => $txId, 'metode' => $metode,
+                'tenant_id' => $t->id, 'member_id' => $memberId,
+                'tx_id' => $txId, 'metode' => $metode,
                 'subtotal' => $subtotal, 'diskon' => $diskon, 'total' => $total,
                 'uang_diterima' => $uang, 'kembalian' => $kembalian,
                 'bank' => $bank, 'pengirim' => $pengirim,
@@ -265,6 +315,9 @@ class MartController extends Controller
         return response()->json([
             'ok' => true, 'jual' => $hasil->fresh(),
             'item' => MartJualItem::where('jual_id', $hasil->id)->get(),
+            'member' => $member ? ['nama' => $member->nama, 'kode' => $member->kode,
+                'sisa_piutang' => $this->sisaPiutang($t, $member->id),
+                'batas_hutang' => (int) $member->batas_hutang] : null,
             'hari_ini' => $this->ringkasHari($t, $this->hariIni()),
         ]);
     }
@@ -290,12 +343,13 @@ class MartController extends Controller
             throw new ApiError(400, 'Nominal tidak boleh negatif');
         }
 
-        $hari = MartJual::sah()->where('tenant_id', $t->id)->where('created_at', '>=', WaktuIso::awalHariIni())
-            ->selectRaw("COALESCE(SUM(CASE WHEN metode='tunai' THEN total END),0) tunai")
-            ->selectRaw("COALESCE(SUM(CASE WHEN metode='transfer' THEN total END),0) transfer")
-            ->first();
-        $tunai = (int) $hari->tunai;
-        $transfer = (int) $hari->transfer;
+        // Dibaca dari ringkasHari(), bukan dari tabel penjualan langsung: yang
+        // dicari tutup kas adalah UANG YANG MASUK, dan itu termasuk cicilan
+        // piutang yang dibayar hari ini — sekaligus TIDAK termasuk penjualan
+        // hutang hari ini, yang barangnya keluar tanpa uangnya ikut.
+        $hari = $this->ringkasHari($t, $tgl);
+        $tunai = (int) $hari['tunai']['total'];
+        $transfer = (int) $hari['transfer']['total'];
         $seharusnya = $kasAwal + $tunai;
 
         // Transfer dicocokkan ke mutasi rekening, bukan ke laci. Kalau kasir
@@ -339,7 +393,7 @@ class MartController extends Controller
         $t = $this->martKu($r);
         $hal = max(1, (int) $r->query('hal', 1));
         $per = min(100, max(10, (int) $r->query('per', 25)));
-        $metode = in_array($r->query('metode'), ['tunai', 'transfer', 'kartu'], true)
+        $metode = in_array($r->query('metode'), ['tunai', 'transfer', 'hutang', 'kartu'], true)
             ? $r->query('metode') : null;
         $cari = mb_substr(trim((string) $r->query('cari', '')), 0, 60);
         $dari = $r->query('dari');
@@ -347,7 +401,8 @@ class MartController extends Controller
         $like = '%' . $cari . '%';
 
         $baris = [];
-        $ringkas = ['tunai' => 0, 'transfer' => 0, 'kartu' => 0, 'diskon' => 0, 'n' => 0];
+        $ringkas = ['tunai' => 0, 'transfer' => 0, 'hutang' => 0, 'kartu' => 0,
+            'diskon' => 0, 'n' => 0];
 
         if ($metode !== 'kartu') {
             // Yang dibatalkan TETAP tampil di riwayat — justru di sinilah ia
@@ -367,9 +422,11 @@ class MartController extends Controller
             $agg = (clone $q)->where('status', 'sah')
                 ->selectRaw("COALESCE(SUM(CASE WHEN metode='tunai' THEN total END),0) tunai")
                 ->selectRaw("COALESCE(SUM(CASE WHEN metode='transfer' THEN total END),0) transfer")
+                ->selectRaw("COALESCE(SUM(CASE WHEN metode='hutang' THEN total END),0) hutang")
                 ->selectRaw('COALESCE(SUM(diskon),0) diskon, COUNT(*) n')->first();
             $ringkas['tunai'] = (int) $agg->tunai;
             $ringkas['transfer'] = (int) $agg->transfer;
+            $ringkas['hutang'] = (int) $agg->hutang;
             $ringkas['diskon'] = (int) $agg->diskon;
             $ringkas['n'] += (int) $agg->n;
 
@@ -379,7 +436,7 @@ class MartController extends Controller
                     'waktu' => $j->created_at, 'metode' => $j->metode, 'total' => (int) $j->total,
                     'diskon' => (int) $j->diskon, 'n_item' => (int) $j->n_item,
                     'operator' => $j->operator, 'status' => $j->status, 'n_ubah' => (int) $j->n_ubah,
-                    'ket' => $j->metode === 'transfer' ? trim($j->bank . ' · ' . $j->pengirim) : '',
+                    'ket' => $this->ketJual($j),
                     'terkunci' => $this->kasSudahDitutup($t, (string) $j->created_at),
                 ];
             }
@@ -415,8 +472,10 @@ class MartController extends Controller
 
         return response()->json([
             'baris' => array_slice($baris, ($hal - 1) * $per, $per),
-            'ringkas' => array_merge($ringkas, ['omzet' =>
-                $ringkas['tunai'] + $ringkas['transfer'] + $ringkas['kartu']]),
+            // Omzet menghitung penjualan hutang juga: barangnya memang sudah
+            // keluar dari rak. Yang belum datang hanya uangnya.
+            'ringkas' => array_merge($ringkas, ['omzet' => $ringkas['tunai']
+                + $ringkas['transfer'] + $ringkas['hutang'] + $ringkas['kartu']]),
             'hal' => $hal, 'per' => $per, 'n_halaman' => (int) max(1, ceil($ringkas['n'] / $per)),
         ]);
     }
@@ -431,6 +490,35 @@ class MartController extends Controller
     {
         return MartKas::where('tenant_id', $t->id)
             ->where('tanggal', WaktuIso::tanggalLokal($waktu))->exists();
+    }
+
+    /**
+     * Sisa piutang satu member: seluruh penjualan hutang yang masih sah,
+     * dikurangi cicilan yang sudah masuk. Dipakai menegakkan plafon.
+     */
+    private function sisaPiutang(Tenant $t, int $memberId): int
+    {
+        $hutang = (int) MartJual::sah()->where('tenant_id', $t->id)
+            ->where('member_id', $memberId)->where('metode', 'hutang')->sum('total');
+        $bayar = (int) MartPiutangBayar::where('tenant_id', $t->id)
+            ->where('member_id', $memberId)->sum('jumlah');
+
+        return max(0, $hutang - $bayar);
+    }
+
+    /** Keterangan satu baris penjualan: lawan bicaranya, siapa pun ia. */
+    private function ketJual(MartJual $j): string
+    {
+        if ($j->metode === 'transfer') {
+            return trim($j->bank . ' · ' . $j->pengirim);
+        }
+        if ($j->metode === 'hutang') {
+            $m = $j->member_id ? MartMember::find($j->member_id) : null;
+
+            return 'Hutang · ' . ($m ? $m->nama : 'member terhapus');
+        }
+
+        return '';
     }
 
     /** Nomor struk yang dilihat manusia. Dua buku, dua awalan, tidak pernah bentrok. */
@@ -458,7 +546,7 @@ class MartController extends Controller
             return response()->json([
                 'transaksi' => array_merge($j->toArray(), [
                     'jenis' => 'jual', 'no' => self::noStruk('jual', $j->id),
-                    'ket' => $j->metode === 'transfer' ? trim($j->bank . ' · ' . $j->pengirim) : '',
+                    'ket' => $this->ketJual($j),
                     'terkunci' => $this->kasSudahDitutup($t, (string) $j->created_at),
                 ]),
                 'item' => MartJualItem::where('jual_id', $j->id)->get(),
