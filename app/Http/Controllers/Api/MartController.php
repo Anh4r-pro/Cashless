@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Exceptions\ApiError;
 use App\Models\MartJual;
 use App\Models\MartJualItem;
+use App\Models\MartJualUbah;
 use App\Models\MartKas;
 use App\Models\MartKategori;
 use App\Models\Produk;
@@ -84,10 +85,10 @@ class MartController extends Controller
     private function ringkasHari(Tenant $t, string $tgl): array
     {
         [$mulai, $akhir] = [WaktuIso::awalHariIni(), null];
-        $tunai = MartJual::where('tenant_id', $t->id)->where('created_at', '>=', $mulai)
+        $tunai = MartJual::sah()->where('tenant_id', $t->id)->where('created_at', '>=', $mulai)
             ->where('metode', 'tunai')
             ->selectRaw('COALESCE(SUM(total),0) total, COUNT(*) n')->first();
-        $transfer = MartJual::where('tenant_id', $t->id)->where('created_at', '>=', $mulai)
+        $transfer = MartJual::sah()->where('tenant_id', $t->id)->where('created_at', '>=', $mulai)
             ->where('metode', 'transfer')
             ->selectRaw('COALESCE(SUM(total),0) total, COUNT(*) n')->first();
         $cashless = Transaksi::where('tenant_id', $t->id)->where('tipe', 'beli')
@@ -289,7 +290,7 @@ class MartController extends Controller
             throw new ApiError(400, 'Nominal tidak boleh negatif');
         }
 
-        $hari = MartJual::where('tenant_id', $t->id)->where('created_at', '>=', WaktuIso::awalHariIni())
+        $hari = MartJual::sah()->where('tenant_id', $t->id)->where('created_at', '>=', WaktuIso::awalHariIni())
             ->selectRaw("COALESCE(SUM(CASE WHEN metode='tunai' THEN total END),0) tunai")
             ->selectRaw("COALESCE(SUM(CASE WHEN metode='transfer' THEN total END),0) transfer")
             ->first();
@@ -349,6 +350,8 @@ class MartController extends Controller
         $ringkas = ['tunai' => 0, 'transfer' => 0, 'kartu' => 0, 'diskon' => 0, 'n' => 0];
 
         if ($metode !== 'kartu') {
+            // Yang dibatalkan TETAP tampil di riwayat — justru di sinilah ia
+            // harus terlihat — tetapi tidak pernah ikut dijumlahkan.
             $q = MartJual::where('tenant_id', $t->id)
                 ->when($metode, fn ($w) => $w->where('metode', $metode))
                 ->when($dari, fn ($w) => $w->where('created_at', '>=', $dari))
@@ -361,7 +364,7 @@ class MartController extends Controller
                         ->whereColumn('mart_jual_item.jual_id', 'mart_jual.id')
                         ->where('mart_jual_item.nama', 'like', $like))));
 
-            $agg = (clone $q)
+            $agg = (clone $q)->where('status', 'sah')
                 ->selectRaw("COALESCE(SUM(CASE WHEN metode='tunai' THEN total END),0) tunai")
                 ->selectRaw("COALESCE(SUM(CASE WHEN metode='transfer' THEN total END),0) transfer")
                 ->selectRaw('COALESCE(SUM(diskon),0) diskon, COUNT(*) n')->first();
@@ -375,8 +378,9 @@ class MartController extends Controller
                     'jenis' => 'jual', 'id' => (int) $j->id, 'no' => self::noStruk('jual', $j->id),
                     'waktu' => $j->created_at, 'metode' => $j->metode, 'total' => (int) $j->total,
                     'diskon' => (int) $j->diskon, 'n_item' => (int) $j->n_item,
-                    'operator' => $j->operator,
+                    'operator' => $j->operator, 'status' => $j->status, 'n_ubah' => (int) $j->n_ubah,
                     'ket' => $j->metode === 'transfer' ? trim($j->bank . ' · ' . $j->pengirim) : '',
+                    'terkunci' => $this->kasSudahDitutup($t, (string) $j->created_at),
                 ];
             }
         }
@@ -400,6 +404,7 @@ class MartController extends Controller
                     'jenis' => 'kartu', 'id' => (int) $x->id, 'no' => self::noStruk('kartu', $x->id),
                     'waktu' => $x->created_at, 'metode' => 'kartu', 'total' => (int) -$x->jumlah,
                     'diskon' => 0, 'n_item' => null, 'operator' => $x->operator,
+                    'status' => 'sah', 'n_ubah' => 0, 'terkunci' => true,
                     'ket' => trim($x->siswa_nama . ($x->kelas ? ' · ' . $x->kelas : '')),
                 ];
             }
@@ -414,6 +419,18 @@ class MartController extends Controller
                 $ringkas['tunai'] + $ringkas['transfer'] + $ringkas['kartu']]),
             'hal' => $hal, 'per' => $per, 'n_halaman' => (int) max(1, ceil($ringkas['n'] / $per)),
         ]);
+    }
+
+    /**
+     * Sudahkah kas hari transaksi itu ditutup?
+     *
+     * Jawabannya menentukan boleh-tidaknya transaksi dibetulkan: setelah uang
+     * laci dihitung, angkanya tidak boleh bergerak lagi di belakang.
+     */
+    private function kasSudahDitutup(Tenant $t, string $waktu): bool
+    {
+        return MartKas::where('tenant_id', $t->id)
+            ->where('tanggal', WaktuIso::tanggalLokal($waktu))->exists();
     }
 
     /** Nomor struk yang dilihat manusia. Dua buku, dua awalan, tidak pernah bentrok. */
@@ -438,10 +455,15 @@ class MartController extends Controller
                 throw new ApiError(404, 'Transaksi tidak ditemukan');
             }
 
-            return response()->json(['transaksi' => array_merge($j->toArray(), [
-                'jenis' => 'jual', 'no' => self::noStruk('jual', $j->id),
-                'ket' => $j->metode === 'transfer' ? trim($j->bank . ' · ' . $j->pengirim) : '',
-            ]), 'item' => MartJualItem::where('jual_id', $j->id)->get()]);
+            return response()->json([
+                'transaksi' => array_merge($j->toArray(), [
+                    'jenis' => 'jual', 'no' => self::noStruk('jual', $j->id),
+                    'ket' => $j->metode === 'transfer' ? trim($j->bank . ' · ' . $j->pengirim) : '',
+                    'terkunci' => $this->kasSudahDitutup($t, (string) $j->created_at),
+                ]),
+                'item' => MartJualItem::where('jual_id', $j->id)->get(),
+                'ubah' => MartJualUbah::where('jual_id', $j->id)->orderByDesc('id')->get(),
+            ]);
         }
 
         $x = Transaksi::where('id', $id)->where('tenant_id', $t->id)->where('tipe', 'beli')->first();

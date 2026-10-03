@@ -3,6 +3,8 @@
 namespace Database\Seeders;
 
 use App\Models\KategoriAkses;
+use App\Models\MartJual;
+use App\Models\MartJualItem;
 use App\Models\MartKategori;
 use App\Models\MartStokMutasi;
 use App\Models\Produk;
@@ -10,6 +12,7 @@ use App\Models\Siswa;
 use App\Models\Tenant;
 use App\Models\Transaksi;
 use App\Models\User;
+use App\Services\Stok;
 use App\Support\WaktuIso;
 use Illuminate\Database\Seeder;
 
@@ -109,6 +112,48 @@ class ContohSeeder extends Seeder
                     'ref' => '', 'keterangan' => 'stok awal data contoh',
                     'operator' => 'Kasir Mart', 'created_at' => WaktuIso::sekarang(),
                 ]);
+            }
+        }
+
+        // Beberapa penjualan contoh IMBOS Mart hari ini, supaya layar Riwayat
+        // Penjualan tidak kosong pada pemasangan baru — dan supaya ketiga jalur
+        // uangnya (tunai, transfer, kartu) terlihat berdampingan sejak awal.
+        // Jumlahnya sengaja kecil dan diambil dari barang berstok banyak, agar
+        // tiga keadaan stok yang dibuat di atas tidak ikut berubah.
+        $jualMart = [
+            ['tunai', ['Aqua 600ml' => 2, 'Indomie Goreng' => 3], 25000, 0, '', ''],
+            ['tunai', ['Chitato Sapi 68g' => 1, 'Teh Pucuk 350ml' => 2], 25000, 1000, '', ''],
+            ['transfer', ['Buku Tulis 38 lbr' => 3, 'Pulpen Standard AE7' => 2], 0, 0,
+                'BSI', 'Ibu Aminah'],
+        ];
+        foreach ($jualMart as $i => [$metode, $isi, $uang, $diskon, $bank, $pengirim]) {
+            $rincian = [];
+            $subtotal = 0;
+            foreach ($isi as $nama => $qty) {
+                $p = Produk::where('tenant_id', $t4->id)->where('nama', $nama)->first();
+                if (! $p) {
+                    continue;
+                }
+                $rincian[] = [$p, $qty];
+                $subtotal += (int) $p->harga * $qty;
+            }
+            $total = $subtotal - $diskon;
+            $bayar = $metode === 'transfer' ? $total : max($uang, $total);
+            $jual = MartJual::create([
+                'tenant_id' => $t4->id, 'tx_id' => 'contoh-mart-' . ($i + 1), 'metode' => $metode,
+                'status' => 'sah', 'subtotal' => $subtotal, 'diskon' => $diskon, 'total' => $total,
+                'uang_diterima' => $bayar, 'kembalian' => $bayar - $total,
+                'bank' => $bank, 'pengirim' => $pengirim,
+                'n_item' => array_sum(array_map(fn ($r) => $r[1], $rincian)),
+                'operator' => 'Kasir Mart', 'created_at' => WaktuIso::sekarang(),
+            ]);
+            foreach ($rincian as [$p, $qty]) {
+                MartJualItem::create([
+                    'jual_id' => $jual->id, 'produk_id' => $p->id, 'nama' => $p->nama,
+                    'kategori' => $p->kategori, 'harga' => (int) $p->harga, 'qty' => $qty,
+                    'subtotal' => (int) $p->harga * $qty,
+                ]);
+                Stok::jual($p->id, $qty, (string) $jual->tx_id, 'Kasir Mart');
             }
         }
 

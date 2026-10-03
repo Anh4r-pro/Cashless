@@ -810,7 +810,11 @@ function martView(el) {
     </div>
     <div class="panel">
       <div class="kat-head"><h2 style="margin:0">Keranjang <span class="muted" id="mart-n"></span></h2>
-        <button class="linkbtn danger" id="mart-kosong">Kosongkan</button></div>
+        <span style="display:flex; gap:10px; align-items:baseline">
+          <button class="linkbtn" id="mart-tahan" title="tahan transaksi (F8)">⏸ Tahan</button>
+          <button class="linkbtn" id="mart-tertahan"></button>
+          <button class="linkbtn danger" id="mart-kosong">Kosongkan</button>
+        </span></div>
       <div id="mart-cart"></div>
       <div id="mart-qty-ketik" class="muted hidden"
         style="margin-top:6px; font-size:12.5px"></div>
@@ -841,12 +845,39 @@ function martView(el) {
   $('#mart-m-transfer').onclick = () => martPilihMetode('transfer');
   $('#mart-kas').onclick = martKasModal;
   $('#mart-bantuan').onclick = martBantuanModal;
+  $('#mart-tahan').onclick = martTahanSimpan;
+  $('#mart-tertahan').onclick = martTahanModal;
+  martMuatTertahan();
   cetakGambarStatus();
   cetakPeriksaAgen().then(cetakGambarStatus);
 
   martRender();
-  martMuatKatalog();
+  martMuatKatalog().then(martTerapkanMuatan);
   martMuatInfo();
+}
+
+/*
+ * Keranjang yang "dilanjutkan" dari layar Riwayat dititipkan di sini lebih
+ * dulu, lalu dipasang setelah katalog selesai dimuat — kalau dipasang
+ * langsung, martMuatKatalog() yang datang belakangan akan menggambar ulang
+ * layar di atasnya dan keranjangnya terlihat kosong.
+ */
+let martMuatan = null;
+
+function martTerapkanMuatan() {
+  if (!martMuatan) return;
+  const m = martMuatan;
+  martMuatan = null;
+  mart.cart = m.items.map((i) => ({ produk_id: i.produk_id, nama: i.nama,
+    harga: i.harga, kategori: i.kategori, qty: i.qty }));
+  mart.diskon = m.diskon || 0;
+  martRender();
+  if (m.hilang?.length) {
+    toast(`${m.hilang.length} barang sudah tidak dijual dan tidak ikut dilanjutkan: `
+      + m.hilang.join(', '), 'err');
+  } else {
+    toast(`✔ Transaksi dilanjutkan${m.catatan ? ' — ' + m.catatan : ''}`, 'ok');
+  }
 }
 
 async function martMuatKatalog() {
@@ -1424,6 +1455,125 @@ function martSelesai() {
   if (q) q.focus();
   martMuatInfo();
   martMuatKatalog();          // stok di katalog ikut turun
+  martMuatTertahan();
+}
+
+// ------------------------------------------------- TRANSAKSI TERTAHAN
+
+/*
+ * Keranjang yang diparkir sebentar: pembeli lupa membawa uang, atau menyuruh
+ * temannya mengambil satu barang lagi, sementara antrean memanjang. Disimpan
+ * di server supaya tetap ada walau peramban kasir tertutup — dan supaya
+ * transaksi yang ditahan di satu meja bisa dilanjutkan di meja sebelahnya.
+ */
+let martNTertahan = 0;
+
+async function martMuatTertahan() {
+  try {
+    const d = await api('/api/mart/tahan');
+    martNTertahan = d.tahan.length;
+  } catch { martNTertahan = 0; }
+  const b = $('#mart-tertahan');
+  if (!b) return;
+  b.textContent = martNTertahan ? `⏵ ${martNTertahan} tertahan` : '';
+  b.classList.toggle('hidden', !martNTertahan);
+}
+
+async function martTahanSimpan() {
+  if (!mart.cart.length) { toast('Keranjang masih kosong', 'err'); return; }
+  openModal(`
+    <h2>Tahan Transaksi</h2>
+    <p class="muted">Keranjang ini diparkir di server dan bisa dilanjutkan dari meja kasir mana
+      pun. Stok <b>tidak</b> dipotong — barangnya belum terjual.</p>
+    <div class="cart">
+      ${mart.cart.map((p) => `<div class="cart-line"><span>${esc(p.nama)} ×${p.qty}</span>
+        <span class="rp">${rp(p.harga * p.qty)}</span></div>`).join('')}
+      <div class="cart-line"><span><b>Total</b></span>
+        <span class="rp"><b>${rp(martTotal())}</b></span></div>
+    </div>
+    <div class="field"><label>Catatan (opsional)</label>
+      <input id="th-catatan" maxlength="80" placeholder="mis. Bu Siti ambil uang dulu">
+      <span class="muted set-hint">Supaya mudah dikenali saat dilanjutkan nanti.</span></div>`,
+    async () => {
+      await api('/api/mart/tahan', { method: 'POST', body: {
+        items: mart.cart.map((p) => ({ produk_id: p.produk_id, qty: p.qty })),
+        diskon: mart.diskon || 0, catatan: $('#th-catatan').value,
+      }});
+      toast('✔ Transaksi ditahan', 'ok');
+      mart.cart = []; mart.metode = null; mart.uang = 0; mart.diskon = 0; mart.pilih = null;
+      martRender();
+      martMuatTertahan();
+      const q = $('#mart-q');
+      if (q) q.focus();
+    }, 'Tahan');
+  const c = $('#th-catatan');
+  if (c) c.focus();
+}
+
+/** Daftar transaksi tertahan, dari layar kasir. */
+async function martTahanModal() {
+  let d;
+  try { d = await api('/api/mart/tahan'); } catch (e) { toast(e.message, 'err'); return; }
+  if (!d.tahan.length) { toast('Tidak ada transaksi tertahan', 'ok'); martMuatTertahan(); return; }
+  openModal(`
+    <h2>Transaksi Tertahan <span class="muted">${d.tahan.length}</span></h2>
+    <p class="muted">Dilanjutkan = keranjangnya kembali ke layar kasir, dan catatan tertahannya
+      dihapus supaya tidak ada yang menjualnya dua kali.</p>
+    <div class="tblwrap" style="max-height:50vh; overflow:auto"><table>
+      <thead><tr><th>Waktu</th><th>Catatan</th><th>Isi</th><th class="num">Item</th>
+        <th class="num">Total</th><th></th></tr></thead>
+      <tbody>${d.tahan.map((x) => `<tr>
+        <td>${waktuSingkat(x.created_at)}</td>
+        <td><b>${esc(x.catatan || '—')}</b></td>
+        <td class="muted">${esc(x.ringkas || '')}</td>
+        <td class="num">${x.n_item}</td>
+        <td class="num rp">${rp(x.total)}</td>
+        <td style="white-space:nowrap">
+          <button class="linkbtn" data-lanjut="${x.id}">lanjutkan</button> ·
+          <button class="linkbtn danger" data-buang="${x.id}">buang</button></td>
+      </tr>`).join('')}</tbody>
+    </table></div>`);
+  document.querySelectorAll('[data-lanjut]').forEach((b) => {
+    b.onclick = () => martTahanLanjut(Number(b.dataset.lanjut));
+  });
+  document.querySelectorAll('[data-buang]').forEach((b) => {
+    b.onclick = async () => {
+      const x = d.tahan.find((y) => y.id === Number(b.dataset.buang));
+      if (!confirm(`Buang transaksi tertahan ${x.catatan || waktuSingkat(x.created_at)}?`)) return;
+      try {
+        await api('/api/mart/tahan/' + x.id, { method: 'DELETE' });
+        toast('Transaksi tertahan dibuang', 'ok');
+        closeModal();
+        martMuatTertahan();
+        if (activeView === 'mart-riwayat') martMuatRiwayat();
+      } catch (e) { toast(e.message, 'err'); }
+    };
+  });
+}
+
+/**
+ * Lanjutkan satu transaksi tertahan.
+ *
+ * Kalau keranjang di layar sedang berisi, isinya akan tertimpa — jadi
+ * ditanyakan lebih dulu. Kehilangan keranjang yang sudah dipindai satu per
+ * satu lebih menyakitkan daripada satu pertanyaan.
+ */
+async function martTahanLanjut(id) {
+  if (activeView === 'kasir' && mart?.cart.length
+      && !confirm('Keranjang yang sedang terbuka akan diganti. Lanjutkan?')) return;
+  let d;
+  try { d = await api(`/api/mart/tahan/${id}/ambil`, { method: 'POST' }); }
+  catch (e) { toast(e.message, 'err'); return; }
+
+  closeModal();
+  martMuatan = { items: d.items, diskon: d.diskon, catatan: d.catatan, hilang: d.hilang };
+  if (activeView === 'kasir') {
+    martTerapkanMuatan();
+    martMuatTertahan();
+  } else {
+    // Pindah ke layar kasir; muatannya dipasang martView setelah katalog siap.
+    $('#nav button[data-v="kasir"]')?.click();
+  }
 }
 
 // --------------------------------------------------- PINTASAN PAPAN KETIK
@@ -1457,6 +1607,8 @@ const MART_PINTASAN = [
   ['F4', 'bayar Tunai'],
   ['F6', 'bayar Transfer'],
   ['F7', 'isi diskon'],
+  ['F8', 'tahan transaksi'],
+  ['Shift + F8', 'daftar transaksi tertahan'],
   ['F9', 'selesaikan pembayaran'],
   ['Enter', 'di kotak uang: langsung selesaikan'],
   ['Esc', 'kosongkan keranjang'],
@@ -1535,6 +1687,7 @@ document.addEventListener('keydown', (e) => {
     F6: () => martPilihMetode('transfer'),
     F7: () => { const d = $('#mart-diskon'); if (d) { d.focus(); d.select(); }
       else toast('Keranjang masih kosong', 'err'); },
+    F8: () => (e.shiftKey ? martTahanModal() : martTahanSimpan()),
     F9: () => {
       const tombol = $('#mart-bayar-kartu') || $('#mart-bayar-tunai') || $('#mart-bayar-transfer');
       if (tombol && !tombol.disabled) tombol.click();
@@ -2571,7 +2724,18 @@ let martRw = { baris: [], hal: 1, nHalaman: 1, ringkas: null };
 
 function martRiwayatView(el) {
   const hariIni = martHariIni();
-  el.innerHTML = `<div class="panel">
+  el.innerHTML = `<div class="panel hidden" id="rwm-tahan-panel">
+    <div class="kat-head"><h2 style="margin:0">Transaksi Tertahan
+      <span class="muted" id="rwm-tahan-n"></span></h2></div>
+    <p class="muted">Keranjang yang diparkir dan belum dibayar — stoknya belum berkurang.
+      Klik <b>lanjutkan</b> untuk mengembalikannya ke layar kasir.</p>
+    <div class="tblwrap"><table>
+      <thead><tr><th>Waktu</th><th>Catatan</th><th>Isi</th><th class="num">Item</th>
+        <th class="num">Total</th><th>Kasir</th><th></th></tr></thead>
+      <tbody id="rwm-tahan-body"></tbody>
+    </table></div>
+  </div>
+  <div class="panel">
     <div class="kat-head"><h2 style="margin:0">Riwayat Penjualan</h2>
       <span>
         <button class="linkbtn" id="rwm-unduh">⬇ unduh CSV</button> ·
@@ -2612,6 +2776,7 @@ function martRiwayatView(el) {
     martMuatRiwayat();
   };
   $('#rwm-metode').onchange = () => { martRw.hal = 1; martMuatRiwayat(); };
+  martMuatTahanPanel();
   $('#rwm-cari').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); $('#rwm-go').click(); }
   });
@@ -2653,10 +2818,19 @@ async function martMuatRiwayat() {
     ${r.diskon ? `<div class="statcard"><span class="muted">Diskon diberikan</span><br>
       <b class="rp">${rp(r.diskon)}</b></div>` : ''}`;
 
-  $('#rwm-body').innerHTML = d.baris.map((b, i) => `
-    <tr>
+  $('#rwm-body').innerHTML = d.baris.map((b, i) => {
+    const batal = b.status === 'batal';
+    // Yang bisa dibetulkan hanya penjualan tunai/transfer yang masih sah dan
+    // kasnya belum ditutup. Penjualan kartu tidak pernah: uangnya sudah masuk
+    // kas sekolah dan menyentuh neraca.
+    const bisa = b.jenis === 'jual' && !batal && !b.terkunci;
+    return `
+    <tr${batal ? ' class="rwm-batal"' : ''}>
       <td>${waktuSingkat(b.waktu)}</td>
-      <td><code>${esc(b.no)}</code></td>
+      <td><code>${esc(b.no)}</code>
+        ${batal ? '<br><span class="badge blokir">batal</span>' : ''}
+        ${!batal && b.n_ubah ? `<br><span class="badge" title="pernah dibetulkan"
+          style="background:#fff3d6;color:var(--warn)">diubah ${b.n_ubah}×</span>` : ''}</td>
       <td>${MART_METODE_LABEL[b.metode] || esc(b.metode)}</td>
       <td class="num">${b.n_item ?? '<span class="muted">—</span>'}</td>
       <td class="num rp"><b>${rp(b.total)}</b>${b.diskon
@@ -2665,9 +2839,12 @@ async function martMuatRiwayat() {
       <td>${esc(b.operator || '')}</td>
       <td style="white-space:nowrap">
         <button class="linkbtn" data-rinci="${i}">rincian</button> ·
-        <button class="linkbtn" data-cetak="${i}">🖨 cetak ulang</button>
+        <button class="linkbtn" data-cetak="${i}">🖨</button>
+        ${bisa ? ` · <button class="linkbtn" data-betul="${i}">✏ betulkan</button>
+          · <button class="linkbtn danger" data-batal="${i}">✕ batalkan</button>` : ''}
       </td>
-    </tr>`).join('') || '<tr><td colspan="8" class="muted">Tidak ada penjualan pada rentang ini.</td></tr>';
+    </tr>`;
+  }).join('') || '<tr><td colspan="8" class="muted">Tidak ada penjualan pada rentang ini.</td></tr>';
 
   document.querySelectorAll('#rwm-body [data-rinci]').forEach((b) => {
     b.onclick = () => martRiwayatDetail(martRw.baris[Number(b.dataset.rinci)], false);
@@ -2675,6 +2852,14 @@ async function martMuatRiwayat() {
   document.querySelectorAll('#rwm-body [data-cetak]').forEach((b) => {
     b.onclick = () => martRiwayatDetail(martRw.baris[Number(b.dataset.cetak)], true);
   });
+  document.querySelectorAll('#rwm-body [data-betul]').forEach((b) => {
+    b.onclick = () => martBetulkanModal(martRw.baris[Number(b.dataset.betul)]);
+  });
+  document.querySelectorAll('#rwm-body [data-batal]').forEach((b) => {
+    b.onclick = () => martBatalModal(martRw.baris[Number(b.dataset.batal)]);
+  });
+
+  martMuatTahanPanel();
 
   $('#rwm-nav').innerHTML = d.n_halaman > 1 ? `
     <button id="rwm-prev" ${d.hal <= 1 ? 'disabled' : ''}>← sebelumnya</button>
@@ -2716,8 +2901,12 @@ async function martRiwayatDetail(b, cetak) {
 
   openModal(`
     <h2>Struk ${esc(t.no)}</h2>
+    ${t.status === 'batal' ? `<p class="preview" style="border-color:var(--err); color:var(--err)">
+      <b>Transaksi ini dibatalkan.</b> Stoknya sudah dikembalikan dan nilainya tidak lagi
+      dihitung sebagai penjualan. Barisnya sengaja tetap ada supaya bisa ditelusuri.</p>` : ''}
     <p class="muted">${esc(waktuSingkat(t.created_at))} · ${MART_METODE_LABEL[t.metode] || esc(t.metode)}
-      · kasir ${esc(t.operator || '-')}${t.ket ? `<br>${esc(t.ket)}` : ''}</p>
+      · kasir ${esc(t.operator || '-')}${t.ket ? `<br>${esc(t.ket)}` : ''}
+      ${t.terkunci ? '<br>🔒 terkunci — kas hari itu sudah ditutup' : ''}</p>
     ${d.item.length ? `<div class="tblwrap"><table>
       <thead><tr><th>Barang</th><th class="num">Harga</th><th class="num">Qty</th>
         <th class="num">Subtotal</th></tr></thead>
@@ -2734,8 +2923,180 @@ async function martRiwayatDetail(b, cetak) {
       ${t.kembalian ? `<div class="cart-line"><span>Dibayar / kembalian</span>
         <span class="rp">${rp(t.uang_diterima)} / ${rp(t.kembalian)}</span></div>` : ''}
     </div>
+    ${(d.ubah || []).length ? `<h3 style="font-size:13.5px">Riwayat perubahan ${d.ubah.length}×</h3>
+      ${martJejakHtml(d.ubah)}` : ''}
     <button class="linkbtn" id="rwm-cetak-detail" ${d.item.length ? '' : 'disabled'}>🖨 cetak ulang struk</button>`);
   if ($('#rwm-cetak-detail')) $('#rwm-cetak-detail').onclick = () => martRiwayatDetail(b, true);
+}
+
+// ------------------------------- BETULKAN / BATALKAN TRANSAKSI (riwayat)
+
+/** Panel transaksi tertahan di layar Riwayat. */
+async function martMuatTahanPanel() {
+  let d;
+  try { d = await api('/api/mart/tahan'); } catch { return; }
+  const panel = $('#rwm-tahan-panel');
+  if (!panel) return;
+  panel.classList.toggle('hidden', !d.tahan.length);
+  $('#rwm-tahan-n').textContent = d.tahan.length ? `— ${d.tahan.length}` : '';
+  $('#rwm-tahan-body').innerHTML = d.tahan.map((x) => `
+    <tr>
+      <td>${waktuSingkat(x.created_at)}</td>
+      <td><b>${esc(x.catatan || '—')}</b></td>
+      <td class="muted">${esc(x.ringkas || '')}</td>
+      <td class="num">${x.n_item}</td>
+      <td class="num rp">${rp(x.total)}</td>
+      <td>${esc(x.operator || '')}</td>
+      <td style="white-space:nowrap">
+        <button class="linkbtn" data-lanjut-rw="${x.id}">▶ lanjutkan</button> ·
+        <button class="linkbtn danger" data-buang-rw="${x.id}">buang</button></td>
+    </tr>`).join('');
+  document.querySelectorAll('[data-lanjut-rw]').forEach((b) => {
+    b.onclick = () => martTahanLanjut(Number(b.dataset.lanjutRw));
+  });
+  document.querySelectorAll('[data-buang-rw]').forEach((b) => {
+    b.onclick = async () => {
+      if (!confirm('Buang transaksi tertahan ini?')) return;
+      try {
+        await api('/api/mart/tahan/' + b.dataset.buangRw, { method: 'DELETE' });
+        toast('Transaksi tertahan dibuang', 'ok');
+        martMuatTahanPanel();
+      } catch (e) { toast(e.message, 'err'); }
+    };
+  });
+}
+
+/**
+ * Betulkan transaksi.
+ *
+ * Di layar ini terasa seperti menyunting biasa — jumlah, harga, diskon. Yang
+ * tidak terlihat: server menyimpan nilai lamanya utuh beserta alasan, pelaku,
+ * dan waktunya, lalu menggeser stok sebanyak selisihnya. Jadi kasir dapat
+ * kemudahan penuh, dan angka yang sudah dihitung tetap bisa dipertanggung-
+ * jawabkan.
+ *
+ * Baris tidak bisa DITAMBAH dari sini: barang yang terlewat dijual sebagai
+ * transaksi baru, persis seperti yang terjadi di dunia nyata.
+ */
+async function martBetulkanModal(b) {
+  let d;
+  try { d = await api(`/api/mart/riwayat/${b.jenis}/${b.id}`); }
+  catch (e) { toast(e.message, 'err'); return; }
+  const t = d.transaksi;
+
+  openModal(`
+    <h2>Betulkan ${esc(t.no)}</h2>
+    <p class="muted">${esc(waktuSingkat(t.created_at))} ·
+      ${MART_METODE_LABEL[t.metode] || esc(t.metode)} · kasir ${esc(t.operator || '-')}</p>
+    <div class="tblwrap"><table>
+      <thead><tr><th>Barang</th><th class="num" style="width:110px">Harga</th>
+        <th class="num" style="width:90px">Jumlah</th><th class="num">Subtotal</th></tr></thead>
+      <tbody>${d.item.map((i) => `<tr data-baris="${i.id}">
+        <td>${esc(i.nama)}</td>
+        <td class="num">${inputUang({ id: 'bt-h-' + i.id, nilai: i.harga, kelas: 'bt-kecil' })}</td>
+        <td class="num"><input type="number" min="0" max="99" id="bt-q-${i.id}"
+          value="${i.qty}" style="width:70px; text-align:right"></td>
+        <td class="num rp" id="bt-s-${i.id}">${rp(i.subtotal)}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+    <span class="muted set-hint">Jumlah 0 berarti barang itu dikeluarkan dari transaksi.
+      Barang baru tidak bisa ditambahkan di sini — jual sebagai transaksi tersendiri.</span>
+    <div class="row" style="gap:10px; margin-top:10px">
+      <div class="field"><label>Diskon</label>${inputUang({ id: 'bt-diskon', nilai: t.diskon || '' })}</div>
+      ${t.metode === 'tunai' ? `<div class="field"><label>Uang diterima</label>
+        ${inputUang({ id: 'bt-uang', nilai: t.uang_diterima })}</div>` : ''}
+    </div>
+    <div id="bt-hitung" class="cart"></div>
+    <div class="field"><label>Alasan pembetulan <b class="minus">wajib</b></label>
+      <input id="bt-alasan" maxlength="200" placeholder="mis. terpindai dua kali">
+      <span class="muted set-hint">Alasan ini tersimpan permanen bersama nilai lamanya, dan
+        bisa dibaca admin pusat. Transaksi terkunci begitu kas hari ini ditutup.</span></div>
+    ${d.ubah.length ? `<h3 style="font-size:13.5px">Pernah dibetulkan ${d.ubah.length}×</h3>
+      ${martJejakHtml(d.ubah)}` : ''}`,
+    async () => {
+      await api(`/api/mart/riwayat/jual/${t.id}`, { method: 'PUT', body: {
+        alasan: $('#bt-alasan').value,
+        diskon: nilaiUang('#bt-diskon') || 0,
+        uang_diterima: $('#bt-uang') ? (nilaiUang('#bt-uang') || 0) : undefined,
+        item: d.item.map((i) => ({ id: i.id,
+          qty: Number($('#bt-q-' + i.id).value || 0),
+          harga: nilaiUang('#bt-h-' + i.id) || 0 })),
+      }});
+      toast('✔ Transaksi dibetulkan — perubahannya tercatat', 'ok');
+      martMuatRiwayat();
+    }, 'Simpan pembetulan');
+  // Modal lebar: tabel barang berkolom empat dan dua isian berdampingan tidak
+  // muat di lebar bawaan, dan keduanya jadi menumpuk ke bawah.
+  $('#modal-root .modal').classList.add('modal-lebar');
+
+  const hitung = () => {
+    let sub = 0;
+    d.item.forEach((i) => {
+      const q = Number($('#bt-q-' + i.id).value || 0);
+      const h = nilaiUang('#bt-h-' + i.id) || 0;
+      sub += q * h;
+      $('#bt-s-' + i.id).textContent = rp(q * h);
+    });
+    const dis = Math.min(nilaiUang('#bt-diskon') || 0, sub);
+    const total = sub - dis;
+    const uang = $('#bt-uang') ? (nilaiUang('#bt-uang') || 0) : total;
+    $('#bt-hitung').innerHTML = `
+      <div class="cart-line"><span>Subtotal</span><span class="rp">${rp(sub)}</span></div>
+      <div class="cart-line"><span>Diskon</span><span class="rp">−${rp(dis)}</span></div>
+      <div class="cart-line"><span><b>Total baru</b></span>
+        <span class="rp"><b>${rp(total)}</b></span>
+        </div>
+      <div class="cart-line"><span class="muted">Total semula</span>
+        <span class="rp muted">${rp(t.total)}</span></div>
+      ${$('#bt-uang') ? `<div class="cart-line"><span>Kembalian</span>
+        <span class="rp" style="color:${uang < total ? 'var(--err)' : ''}">
+          ${uang < total ? 'uang kurang ' + rp(total - uang) : rp(uang - total)}</span></div>` : ''}`;
+  };
+  d.item.forEach((i) => {
+    $('#bt-q-' + i.id).addEventListener('input', hitung);
+    $('#bt-h-' + i.id).addEventListener('input', hitung);
+  });
+  $('#bt-diskon').addEventListener('input', hitung);
+  if ($('#bt-uang')) $('#bt-uang').addEventListener('input', hitung);
+  hitung();
+}
+
+/** Daftar jejak perubahan, dipakai layar betulkan & layar rincian. */
+function martJejakHtml(ubah) {
+  return `<div class="tblwrap" style="max-height:30vh; overflow:auto"><table>
+    <thead><tr><th>Waktu</th><th>Jenis</th><th>Yang berubah</th>
+      <th class="num">Total</th><th>Alasan</th><th>Oleh</th></tr></thead>
+    <tbody>${ubah.map((u) => `<tr>
+      <td>${waktuSingkat(u.created_at)}</td>
+      <td>${u.jenis === 'batal' ? '<span class="badge blokir">batal</span>' : 'koreksi'}</td>
+      <td class="muted">${esc(u.ringkas)}</td>
+      <td class="num rp">${rp(u.total_lama)} → <b>${rp(u.total_baru)}</b></td>
+      <td>${esc(u.alasan)}</td>
+      <td>${esc(u.operator)}</td></tr>`).join('')}</tbody>
+  </table></div>`;
+}
+
+/** Batalkan transaksi — barisnya tinggal, angkanya tidak. */
+function martBatalModal(b) {
+  openModal(`
+    <h2>Batalkan ${esc(b.no)}?</h2>
+    <p>Transaksi senilai <b class="rp">${rp(b.total)}</b> akan ditandai <b>batal</b>:</p>
+    <ul class="muted" style="line-height:1.9">
+      <li>Stok barangnya <b>dikembalikan</b> ke rak.</li>
+      <li>Nilainya <b>tidak lagi dihitung</b> sebagai omzet, laba, maupun isi laci.</li>
+      <li>Barisnya <b>tetap ada</b> di riwayat bertanda batal — penjualan yang pernah terjadi
+        tidak boleh hilang tanpa bekas dari catatan.</li>
+    </ul>
+    <div class="field"><label>Alasan pembatalan <b class="minus">wajib</b></label>
+      <input id="bb-alasan" maxlength="200" placeholder="mis. pembeli berubah pikiran"></div>`,
+    async () => {
+      await api(`/api/mart/riwayat/jual/${b.id}/batal`, { method: 'POST',
+        body: { alasan: $('#bb-alasan').value } });
+      toast('✔ Transaksi dibatalkan, stok dikembalikan', 'ok');
+      martMuatRiwayat();
+    }, 'Batalkan transaksi');
+  const a = $('#bb-alasan');
+  if (a) a.focus();
 }
 
 function martUnduhRiwayatMart() {

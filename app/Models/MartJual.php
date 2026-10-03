@@ -29,15 +29,26 @@ class MartJual extends Model
     // create(): penjualan tetap tersimpan, hanya metode & diskonnya hilang.
     // Setiap kolom baru di mart_jual harus ikut ditambahkan ke daftar ini.
     protected $fillable = [
-        'tenant_id', 'tx_id', 'metode', 'subtotal', 'diskon', 'total',
+        'tenant_id', 'tx_id', 'metode', 'status', 'subtotal', 'diskon', 'total',
         'uang_diterima', 'kembalian', 'bank', 'pengirim',
-        'n_item', 'operator', 'created_at',
+        'n_item', 'operator', 'n_ubah', 'diubah_oleh', 'diubah_pada', 'created_at',
     ];
 
     protected $casts = [
         'subtotal' => 'int', 'diskon' => 'int', 'total' => 'int',
         'uang_diterima' => 'int', 'kembalian' => 'int', 'n_item' => 'int',
+        'n_ubah' => 'int',
     ];
+
+    /**
+     * Hanya penjualan yang SAH. Dipakai setiap kali angka dijumlahkan —
+     * omzet, laba, tutup kas, barang terlaris. Transaksi yang dibatalkan tetap
+     * ada barisnya supaya bisa ditelusuri, tetapi ia bukan lagi penjualan.
+     */
+    public function scopeSah($q)
+    {
+        return $q->where('status', 'sah');
+    }
 
     public function item(): \Illuminate\Database\Eloquent\Relations\HasMany
     {

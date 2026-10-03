@@ -87,7 +87,7 @@ class MartLaporanController extends Controller
     {
         $sejak = $this->sejak($periode);
 
-        $mart = MartJual::where('tenant_id', $t->id)
+        $mart = MartJual::sah()->where('tenant_id', $t->id)
             ->when($sejak, fn ($q) => $q->where('created_at', '>=', $sejak))
             ->selectRaw("COALESCE(SUM(CASE WHEN metode='tunai' THEN total END),0) tunai")
             ->selectRaw("COALESCE(SUM(CASE WHEN metode='transfer' THEN total END),0) transfer")
@@ -123,7 +123,7 @@ class MartLaporanController extends Controller
     {
         $a = DB::table('mart_jual_item as i')->join('mart_jual as j', 'j.id', '=', 'i.jual_id')
             ->join('produk as p', 'p.id', '=', 'i.produk_id')
-            ->where('j.tenant_id', $t->id)
+            ->where('j.tenant_id', $t->id)->where('j.status', 'sah')
             ->when($sejak, fn ($q) => $q->where('j.created_at', '>=', $sejak))
             ->selectRaw('COALESCE(SUM(i.qty * COALESCE(p.hpp,0)),0) n')->value('n');
 
@@ -154,7 +154,7 @@ class MartLaporanController extends Controller
         $sejak = $this->sejak($periode);
 
         $mart = DB::table('mart_jual_item as i')->join('mart_jual as j', 'j.id', '=', 'i.jual_id')
-            ->where('j.tenant_id', $t->id)->whereNotNull('i.produk_id')
+            ->where('j.tenant_id', $t->id)->where('j.status', 'sah')->whereNotNull('i.produk_id')
             ->when($sejak, fn ($q) => $q->where('j.created_at', '>=', $sejak))
             ->selectRaw('i.produk_id, SUM(i.qty) qty, SUM(i.subtotal) nilai')
             ->groupBy('i.produk_id')->get();
@@ -196,7 +196,7 @@ class MartLaporanController extends Controller
     /** Riwayat transaksi dua buku, diurut waktu — untuk layar dan unduhan. */
     private function riwayatGabungan(Tenant $t, int $limit, ?string $sejak = null): array
     {
-        $mart = MartJual::where('tenant_id', $t->id)
+        $mart = MartJual::sah()->where('tenant_id', $t->id)
             ->when($sejak, fn ($q) => $q->where('created_at', '>=', $sejak))
             ->orderByDesc('id')->limit($limit)->get()
             ->map(fn ($j) => [

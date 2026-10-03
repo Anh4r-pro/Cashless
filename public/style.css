@@ -815,6 +815,14 @@ label.cek input { width: auto; margin: 0; }
 .mart-baris.terpilih { background: #fffaf0; box-shadow: inset 3px 0 0 var(--gold); }
 .mart-baris.terpilih .mart-baris-nama b { color: var(--navy); }
 
+/* Transaksi yang dibatalkan: tetap terbaca, tetapi jelas bukan penjualan lagi.
+   Angkanya dicoret, bukan barisnya disembunyikan — penjualan yang pernah
+   terjadi tidak boleh hilang tanpa bekas dari layar. */
+tr.rwm-batal > td { color: var(--muted); }
+tr.rwm-batal .rp b { text-decoration: line-through; font-weight: 600; }
+
+.modal input.bt-kecil { width: 100px; text-align: right; }
+
 .mart-kembalian { border: 2px solid var(--ok); border-radius: 10px; background: #f0faf4;
   padding: 10px 14px; text-align: center; margin-bottom: 8px; }
 .mart-kembalian span { color: var(--ok); font-weight: 700; font-size: 12.5px; display: block; }

@@ -36,6 +36,26 @@ trait WaktuIso
         return self::awalHari(0);
     }
 
+    /**
+     * Tanggal lokal (YYYY-MM-DD) dari satu cap waktu ISO UTC.
+     *
+     * Dipakai untuk menjawab "penjualan ini milik hari yang mana?" — dan
+     * jawabannya harus menurut zona sekolah, bukan UTC. Penjualan pukul 06.30
+     * WIB tercatat sebagai 23.30 UTC hari sebelumnya; dibaca mentah-mentah, ia
+     * akan dicocokkan dengan kas hari yang salah.
+     */
+    public static function tanggalLokal(string $iso): string
+    {
+        try {
+            $d = new \DateTime($iso);
+        } catch (\Throwable) {
+            return self::awalHari(0);
+        }
+        $d->setTimezone(new \DateTimeZone(config('app.timezone', 'Asia/Jakarta')));
+
+        return $d->format('Y-m-d');
+    }
+
     /** Awal hari ke-$mundur hari yang lalu, dalam ISO UTC. */
     public static function awalHari(int $mundur = 0): string
     {

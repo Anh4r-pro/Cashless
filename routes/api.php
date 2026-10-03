@@ -19,6 +19,7 @@ use App\Http\Controllers\Api\TransaksiController;
 use App\Http\Controllers\Api\DonasiController;
 use App\Http\Controllers\Api\KiosController;
 use App\Http\Controllers\Api\MartController;
+use App\Http\Controllers\Api\MartKoreksiController;
 use App\Http\Controllers\Api\MartLaporanController;
 use App\Http\Controllers\Api\MartOpnameController;
 use App\Http\Controllers\Api\MartStokController;
@@ -64,6 +65,17 @@ Route::middleware('peran:tenant')->group(function () {
     Route::get('mart/riwayat', [MartController::class, 'riwayat']);
     Route::get('mart/riwayat/{jenis}/{id}', [MartController::class, 'riwayatDetail'])
         ->whereIn('jenis', ['jual', 'kartu']);
+
+    // Pembetulan & pembatalan transaksi — hanya penjualan tunai/transfer, dan
+    // hanya selama kas hari itu belum ditutup (lihat MartKoreksiController).
+    Route::put('mart/riwayat/jual/{id}', [MartKoreksiController::class, 'ubah']);
+    Route::post('mart/riwayat/jual/{id}/batal', [MartKoreksiController::class, 'batal']);
+
+    // Transaksi tertahan.
+    Route::get('mart/tahan', [MartKoreksiController::class, 'tahanDaftar']);
+    Route::post('mart/tahan', [MartKoreksiController::class, 'tahanSimpan']);
+    Route::post('mart/tahan/{id}/ambil', [MartKoreksiController::class, 'tahanAmbil']);
+    Route::delete('mart/tahan/{id}', [MartKoreksiController::class, 'tahanBuang']);
 
     // Manajemen barang & stok — LANGSUNG, tanpa pengajuan (lihat MartStokController).
     Route::get('mart/kategori', [MartStokController::class, 'kategori']);
