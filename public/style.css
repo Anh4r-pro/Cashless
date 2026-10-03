@@ -809,6 +809,12 @@ label.cek input { width: auto; margin: 0; }
 .mart-qty b { min-width: 24px; text-align: center; }
 .mart-sub { font-weight: 700; min-width: 76px; text-align: right; flex: none; }
 
+/* Baris keranjang yang sedang dipilih papan ketik. Penandanya garis tebal di
+   kiri, bukan sekadar warna latar: kasir melihatnya dari sudut mata sambil
+   matanya tetap di barang yang sedang dipindai. */
+.mart-baris.terpilih { background: #fffaf0; box-shadow: inset 3px 0 0 var(--gold); }
+.mart-baris.terpilih .mart-baris-nama b { color: var(--navy); }
+
 .mart-kembalian { border: 2px solid var(--ok); border-radius: 10px; background: #f0faf4;
   padding: 10px 14px; text-align: center; margin-bottom: 8px; }
 .mart-kembalian span { color: var(--ok); font-weight: 700; font-size: 12.5px; display: block; }

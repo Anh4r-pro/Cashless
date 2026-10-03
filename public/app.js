@@ -789,12 +789,17 @@ function martBadgeStok(p, angka) {
 
 function martView(el) {
   mart = { cart: [], metode: null, siswa: null, tapToken: null, uang: 0, diskon: 0,
-    info: null, barcodeBaru: null, katAktif: null, produk: [], kategori: [], struk: true };
+    info: null, barcodeBaru: null, katAktif: null, produk: [], kategori: [], struk: true,
+    pilih: null };
   el.innerHTML = `
   <div class="row mart-pos">
     <div class="panel">
       <div class="kat-head"><h2 style="margin:0">Etalase</h2>
-        <button class="linkbtn" id="mart-kas">🧾 Tutup kas harian</button></div>
+        <span style="display:flex; gap:10px; align-items:baseline">
+          <span id="mart-printer"></span>
+          <button class="linkbtn" id="mart-bantuan" title="pintasan papan ketik (F1)">⌨ F1</button>
+          <button class="linkbtn" id="mart-kas">🧾 Tutup kas harian</button>
+        </span></div>
       <div style="display:flex; gap:8px; margin-bottom:10px">
         <input id="mart-q" placeholder="Cari nama barang, SKU, atau scan barcode…" autocomplete="off">
         <button class="go" id="mart-cari" style="flex:none">Cari</button>
@@ -807,6 +812,8 @@ function martView(el) {
       <div class="kat-head"><h2 style="margin:0">Keranjang <span class="muted" id="mart-n"></span></h2>
         <button class="linkbtn danger" id="mart-kosong">Kosongkan</button></div>
       <div id="mart-cart"></div>
+      <div id="mart-qty-ketik" class="muted hidden"
+        style="margin-top:6px; font-size:12.5px"></div>
       <div id="mart-hitung"></div>
       <div class="modeswitch" style="margin-top:10px">
         <button id="mart-m-kartu">💳 Kartu<br><span class="muted" style="font-size:11px">santri & pegawai</span></button>
@@ -833,6 +840,9 @@ function martView(el) {
   $('#mart-m-tunai').onclick = () => martPilihMetode('tunai');
   $('#mart-m-transfer').onclick = () => martPilihMetode('transfer');
   $('#mart-kas').onclick = martKasModal;
+  $('#mart-bantuan').onclick = martBantuanModal;
+  cetakGambarStatus();
+  cetakPeriksaAgen().then(cetakGambarStatus);
 
   martRender();
   martMuatKatalog();
@@ -994,6 +1004,11 @@ function martRender() {
   });
   // Diskon diketik langsung, jadi hanya angka total dan panel bayar yang
   // diperbarui — menggambar ulang keranjang akan menendang kursor keluar.
+  box.querySelectorAll('.mart-baris').forEach((el, i) => {
+    el.addEventListener('mousedown', () => { mart.pilih = i; martSorotBaris(); });
+  });
+  martSorotBaris();
+
   const dk = $('#mart-diskon');
   if (dk) dk.addEventListener('input', () => {
     mart.diskon = Math.min(nilaiUang('#mart-diskon') || 0, martSubtotal());
@@ -1133,7 +1148,7 @@ async function martBayarKartu() {
       tx_id: 'mart-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
     }});
     toast(`✔ Terbayar — sisa saldo ${rp(d.siswa.saldo)}`, 'ok');
-    if (mart.struk) martCetakStruk({ metode: 'Kartu (RFID)', item: salinan, subtotal: total,
+    if (mart.struk) martCetak({ metode: 'Kartu (RFID)', item: salinan, subtotal: total,
       diskon: 0, total, bayar: total, kembalian: 0, no: martNoStruk('kartu', d.transaksi?.id),
       ket: `${d.siswa.nama} · sisa ${rp(d.siswa.saldo)}` });
     martSelesai();
@@ -1163,7 +1178,7 @@ async function martBayarMart(metode) {
     toast(metode === 'tunai'
       ? `✔ Terbayar tunai — kembalian ${rp(d.jual.kembalian)}`
       : `✔ Transfer tercatat — ${esc(bank)}`, 'ok');
-    if (mart.struk) martCetakStruk({
+    if (mart.struk) martCetak({
       metode: metode === 'tunai' ? 'Tunai' : `Transfer ${bank}`,
       item: salinan, subtotal: sub, diskon, total,
       bayar: d.jual.uang_diterima, kembalian: d.jual.kembalian,
@@ -1181,39 +1196,217 @@ async function martBayarMart(metode) {
 const martNoStruk = (jenis, id) => id
   ? (jenis === 'kartu' ? 'KRT-' : 'MRT-') + String(id).padStart(6, '0') : '';
 
-/** Struk 58mm. Tetap terbaca kalau terpaksa dicetak di kertas A4. */
-function martCetakStruk(x) {
-  const nama = USER?.tenant_nama || 'IMBOS Mart';
-  // Cetak ulang menyebut waktu & kasir ASLINYA, bukan saat kertasnya keluar —
-  // struk yang menyebut jam cetak ulang akan dibaca sebagai transaksi lain.
-  const wkt = new Date(x.waktu || Date.now())
-    .toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
-  const gaya = `@page { size: 58mm auto; margin: 3mm; }
-    body { width: 52mm; margin: 0; font: 11px/1.45 'Courier New', monospace; color: #000; }
-    h1 { font-size: 13px; text-align: center; margin: 0 0 2px; }
-    .ket { text-align: center; font-size: 10px; margin-bottom: 6px; }
-    hr { border: 0; border-top: 1px dashed #000; margin: 5px 0; }
-    .b { display: flex; justify-content: space-between; gap: 6px; }
+// ------------------------------------------------------------- CETAK STRUK
+
+/*
+ * Dua jalur cetak, satu isi struk.
+ *
+ *   agen    — program kecil di PC kasir yang bicara ESC/POS langsung ke
+ *             printer. Cepat (< 1 detik), memotong kertas, bisa membuka laci.
+ *   peramban— jendela cetak biasa. Tanpa dialog kalau Chrome dijalankan
+ *             dengan --kiosk-printing, dengan dialog kalau tidak.
+ *
+ * Mode disimpan PER PC (localStorage), bukan per tenant: ini sifat mesinnya,
+ * bukan sifat tenantnya. Satu Mart bisa punya dua PC kasir dengan perangkat
+ * berbeda, dan mereka tidak boleh saling memaksa.
+ *
+ * Mode 'otomatis' mencoba agen lalu mundur ke peramban kalau agennya tidak
+ * menjawab. Jalur mundur itu bukan kemewahan: agen adalah program yang bisa
+ * mati — PC restart, Windows memperbarui diri, antivirus menahannya — dan
+ * tanpa jalur mundur struk berhenti keluar di tengah jam ramai.
+ */
+const CETAK_KUNCI = 'mart.cetak.mode';
+const CETAK_AGEN_URL = 'http://127.0.0.1:9100';
+let cetakAgenAda = null;            // null = belum diperiksa
+
+const cetakMode = () => localStorage.getItem(CETAK_KUNCI) || 'otomatis';
+
+/**
+ * Apakah agen lokal menjawab? Hasilnya diingat supaya tidak menyapa ulang
+ * setiap transaksi — kasir tidak boleh menunggu batas waktu jaringan hanya
+ * untuk mencetak.
+ */
+async function cetakPeriksaAgen(paksa) {
+  if (!paksa && cetakAgenAda !== null) return cetakAgenAda;
+  try {
+    const kendali = new AbortController();
+    const waktu = setTimeout(() => kendali.abort(), 700);
+    const r = await fetch(CETAK_AGEN_URL + '/ping', { signal: kendali.signal });
+    clearTimeout(waktu);
+    cetakAgenAda = r.ok;
+  } catch { cetakAgenAda = false; }
+  return cetakAgenAda;
+}
+
+/** Penanda kecil di layar kasir: kasir harus tahu ia sedang di jalur yang mana. */
+function cetakGambarStatus() {
+  const kotak = $('#mart-printer');
+  if (!kotak) return;
+  const mode = cetakMode();
+  const teks = mode === 'dialog' ? '🖨 dialog cetak'
+    : cetakAgenAda ? '🖨 agen aktif'
+    : mode === 'agen' ? '🖨 agen tidak terdeteksi'
+    : '🖨 lewat peramban';
+  const warna = mode === 'agen' && !cetakAgenAda ? 'var(--err)' : 'var(--muted)';
+  kotak.innerHTML = `<button class="linkbtn" id="mart-printer-btn"
+    style="color:${warna}" title="pengaturan pencetak">${teks}</button>`;
+  $('#mart-printer-btn').onclick = martPrinterModal;
+}
+
+/**
+ * Kirim struk ke jalur yang berlaku.
+ *
+ * Yang dikirim ke agen adalah ISI struk dalam bentuk data, bukan HTML: agen
+ * yang menyusunnya menjadi perintah ESC/POS. Dengan begitu lebar kertas,
+ * pemotongan, dan laci kas diurus oleh yang memang tahu printernya.
+ */
+async function martCetak(x) {
+  const mode = cetakMode();
+  if (mode !== 'dialog' && (mode === 'agen' || await cetakPeriksaAgen())) {
+    try {
+      const r = await fetch(CETAK_AGEN_URL + '/cetak', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(martStrukData(x)),
+      });
+      if (r.ok) return;
+      throw new Error('agen menolak');
+    } catch (e) {
+      cetakAgenAda = false;
+      cetakGambarStatus();
+      if (mode === 'agen') {
+        toast('Agen pencetak tidak menjawab — struk dicetak lewat peramban', 'err');
+      }
+    }
+  }
+  martCetakStrukHtml(x);
+}
+
+/** Bentuk data struk — dipakai agen, dan juga dasar penyusunan struk HTML. */
+function martStrukData(x) {
+  return {
+    toko: USER?.tenant_nama || 'IMBOS Mart',
+    sekolah: 'Insan Mulia Boarding School Pringsewu',
+    no: x.no || '', waktu: x.waktu || new Date().toISOString(),
+    kasir: x.operator || USER?.nama || '-',
+    ulang: !!x.ulang,
+    item: x.item.map((p) => ({ nama: p.nama, qty: p.qty, harga: p.harga, subtotal: p.qty * p.harga })),
+    subtotal: x.subtotal, diskon: x.diskon || 0, total: x.total,
+    metode: x.metode, bayar: x.bayar, kembalian: x.kembalian || 0,
+    ket: x.ket || '',
+  };
+}
+
+/**
+ * Struk 58mm untuk jalur peramban.
+ *
+ * Lebar isi 48mm, bukan 58mm: kertas 58mm hanya mencetak sekitar 48mm di
+ * tengahnya, dan teks yang disusun selebar kertas akan terpotong di kanan.
+ * Huruf monospace supaya kolom angka tetap lurus, dan seluruhnya hitam pekat
+ * — printer termal tidak mengenal abu-abu, ia hanya memanaskan atau tidak.
+ */
+function martCetakStrukHtml(x) {
+  const d = martStrukData(x);
+  const wkt = new Date(d.waktu).toLocaleString('id-ID',
+    { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const gaya = `@page { size: 58mm auto; margin: 2mm; }
+    * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body { width: 48mm; margin: 0; color: #000;
+      font: 11px/1.4 'Courier New', 'Consolas', monospace; }
+    .tengah { text-align: center; }
+    .toko { font-size: 15px; font-weight: bold; letter-spacing: .02em; }
+    .sekolah { font-size: 9px; margin-bottom: 4px; }
+    .ulang { font-size: 11px; font-weight: bold; border: 1px solid #000;
+      padding: 1px 0; margin: 3px 0; }
+    .garis { border-top: 1px dashed #000; margin: 4px 0; }
+    .tebal { border-top: 1px solid #000; margin: 4px 0; }
+    .kop { font-size: 10px; }
+    .kop div { display: flex; justify-content: space-between; }
+    .item { margin-bottom: 2px; }
+    .item .nama { word-break: break-word; }
+    .item .hit { display: flex; justify-content: space-between; font-size: 10px; }
+    .b { display: flex; justify-content: space-between; gap: 4px; }
     .b span:last-child { white-space: nowrap; }
-    .kecil { font-size: 10px; color: #333; }
-    .total { font-weight: bold; font-size: 12px; }
-    .kaki { text-align: center; font-size: 10px; margin-top: 8px; }`;
-  const baris = x.item.map((p) => `
-    <div class="b"><span>${esc(p.nama)}</span></div>
-    <div class="b kecil"><span>${p.qty} × ${rp(p.harga)}</span><span>${rp(p.qty * p.harga)}</span></div>`).join('');
-  cetakLembar('Struk', gaya, `
-    <h1>${esc(nama)}</h1>
-    <div class="ket">${x.no ? `No. ${esc(x.no)}<br>` : ''}${esc(wkt)}<br>
-      Kasir: ${esc(x.operator || USER?.nama || '-')}
-      ${x.ulang ? '<br><b>— CETAK ULANG —</b>' : ''}</div>
-    <hr>${baris}<hr>
-    <div class="b"><span>Subtotal</span><span>${rp(x.subtotal)}</span></div>
-    ${x.diskon ? `<div class="b"><span>Diskon</span><span>-${rp(x.diskon)}</span></div>` : ''}
-    <div class="b total"><span>TOTAL</span><span>${rp(x.total)}</span></div>
-    <div class="b"><span>${esc(x.metode)}</span><span>${rp(x.bayar)}</span></div>
-    ${x.kembalian ? `<div class="b"><span>Kembalian</span><span>${rp(x.kembalian)}</span></div>` : ''}
-    ${x.ket ? `<div class="kecil" style="margin-top:4px">${esc(x.ket)}</div>` : ''}
-    <div class="kaki">Terima kasih 🙏<br>Barang yang sudah dibeli<br>tidak dapat ditukar.</div>`);
+    .total { font-size: 15px; font-weight: bold; margin: 2px 0; }
+    .kembali { font-size: 13px; font-weight: bold; }
+    .kaki { font-size: 9px; margin-top: 8px; line-height: 1.35; }`;
+
+  const baris = d.item.map((p) => `
+    <div class="item">
+      <div class="nama">${esc(p.nama)}</div>
+      <div class="hit"><span>${p.qty} x ${rp(p.harga)}</span><span>${rp(p.subtotal)}</span></div>
+    </div>`).join('');
+
+  cetakLembar('Struk ' + (d.no || ''), gaya, `
+    <div class="tengah toko">${esc(d.toko)}</div>
+    <div class="tengah sekolah">${esc(d.sekolah)}</div>
+    ${d.ulang ? '<div class="tengah ulang">CETAK ULANG</div>' : ''}
+    <div class="garis"></div>
+    <div class="kop">
+      ${d.no ? `<div><span>No.</span><span>${esc(d.no)}</span></div>` : ''}
+      <div><span>Waktu</span><span>${esc(wkt)}</span></div>
+      <div><span>Kasir</span><span>${esc(d.kasir)}</span></div>
+    </div>
+    <div class="garis"></div>
+    ${baris}
+    <div class="garis"></div>
+    <div class="b"><span>Subtotal</span><span>${rp(d.subtotal)}</span></div>
+    ${d.diskon ? `<div class="b"><span>Diskon</span><span>-${rp(d.diskon)}</span></div>` : ''}
+    <div class="tebal"></div>
+    <div class="b total"><span>TOTAL</span><span>${rp(d.total)}</span></div>
+    <div class="tebal"></div>
+    <div class="b"><span>${esc(d.metode)}</span><span>${rp(d.bayar)}</span></div>
+    ${d.kembalian ? `<div class="b kembali"><span>KEMBALI</span><span>${rp(d.kembalian)}</span></div>` : ''}
+    ${d.ket ? `<div class="kop" style="margin-top:3px">${esc(d.ket)}</div>` : ''}
+    <div class="garis"></div>
+    <div class="tengah kaki">Terima kasih atas kunjungan Anda<br>
+      Barang yang sudah dibeli tidak dapat ditukar atau dikembalikan
+      <br><br>~ ${esc(d.toko)} ~</div>`);
+}
+
+/** Pengaturan pencetak — per PC, bukan per tenant. */
+async function martPrinterModal() {
+  await cetakPeriksaAgen(true);
+  const mode = cetakMode();
+  const pil = (nilai, judul, ket) => `
+    <label class="cek" style="align-items:flex-start; margin-bottom:8px">
+      <input type="radio" name="cetak-mode" value="${nilai}" ${mode === nilai ? 'checked' : ''}>
+      <span><b>${judul}</b><br><span class="muted" style="font-size:12.5px">${ket}</span></span>
+    </label>`;
+  openModal(`
+    <h2>Pencetak Struk</h2>
+    <p class="muted">Pengaturan ini milik <b>komputer ini</b>, bukan milik tenant —
+      PC kasir lain punya pengaturannya sendiri.</p>
+    <p>Agen pencetak lokal:
+      <b style="color:${cetakAgenAda ? 'var(--ok)' : 'var(--err)'}">
+        ${cetakAgenAda ? 'terdeteksi' : 'tidak terdeteksi'}</b></p>
+    ${pil('otomatis', 'Otomatis (disarankan)',
+      'Pakai agen kalau ada, mundur ke peramban kalau tidak. Struk tidak pernah berhenti keluar hanya karena agennya mati.')}
+    ${pil('agen', 'Agen saja',
+      'Hanya lewat agen lokal. Kalau agennya mati, struk tetap dicetak lewat peramban tetapi Anda diberi tahu.')}
+    ${pil('dialog', 'Lewat peramban',
+      'Jendela cetak peramban. Tanpa dialog kalau Chrome dijalankan dengan mode kiosk-printing, dengan dialog kalau tidak.')}
+    <div class="aju-unduh" style="margin-top:10px">
+      <b>Supaya tidak muncul dialog cetak:</b>
+      <span class="muted set-hint">Klik kanan pintasan Chrome → Properties → pada kolom
+        <b>Target</b>, tambahkan <code>--kiosk-printing</code> sebelum alamat situs. Lalu jadikan
+        printer struk sebagai <b>Default printer</b> Windows. Pintasan Chrome yang lama sebaiknya
+        dihapus — membuka situs dari pintasan lain membuat dialognya muncul lagi.</span>
+    </div>
+    <button class="linkbtn" id="cetak-uji" style="margin-top:10px">🖨 Cetak struk percobaan</button>`,
+    async () => {
+      const p = document.querySelector('input[name="cetak-mode"]:checked');
+      localStorage.setItem(CETAK_KUNCI, p ? p.value : 'otomatis');
+      await cetakPeriksaAgen(true);
+      cetakGambarStatus();
+      toast('✔ Pengaturan pencetak disimpan', 'ok');
+    }, 'Simpan');
+
+  $('#cetak-uji').onclick = () => martCetak({
+    no: 'UJI-000000', metode: 'Tunai', subtotal: 13000, diskon: 1000, total: 12000,
+    bayar: 20000, kembalian: 8000, ket: 'Struk percobaan — bukan penjualan',
+    item: [{ nama: 'Contoh Barang Satu', qty: 2, harga: 4000 },
+      { nama: 'Contoh Barang Dua', qty: 1, harga: 5000 }],
+  });
 }
 
 function martSelesai() {
@@ -1223,9 +1416,192 @@ function martSelesai() {
   mart.tapToken = null;
   mart.uang = 0;
   mart.diskon = 0;
+  mart.pilih = null;
   martRender();
+  // Kursor dikembalikan ke kotak cari: transaksi berikutnya harus bisa dimulai
+  // dengan memindai, tanpa tangan berpindah ke tetikus lebih dulu.
+  const q = $('#mart-q');
+  if (q) q.focus();
   martMuatInfo();
   martMuatKatalog();          // stok di katalog ikut turun
+}
+
+// --------------------------------------------------- PINTASAN PAPAN KETIK
+
+/*
+ * Kasir yang mahir tidak menyentuh tetikus. Satu transaksi penuh — pindai,
+ * betulkan jumlah, pilih metode, isi uang, bayar, cetak — harus bisa
+ * diselesaikan dari papan ketik saja.
+ *
+ * Dua aturan yang menjaganya tidak mengganggu:
+ *
+ *   1. Tombol HURUF/ANGKA (+ - * Del, panah) hanya bekerja saat kursor TIDAK
+ *      sedang berada di kotak isian. Kalau tidak, mengetik nama bank "BSI+"
+ *      atau mencari "A*" akan diam-diam mengubah keranjang.
+ *   2. Tombol F selalu bekerja, karena tidak ada kotak isian yang memakainya.
+ *
+ * Pendengarnya dipasang sekali untuk seumur halaman dan menyaring sendiri
+ * layar mana yang berlaku — lebih aman daripada memasang & mencabut
+ * pendengar setiap kali layar berganti, yang pernah meninggalkan pendengar
+ * menggantung di layar lain.
+ */
+const MART_PINTASAN = [
+  ['pindai / ketik', 'cari barang lalu masukkan ke keranjang'],
+  ['F1', 'tampilkan bantuan ini'],
+  ['F2', 'pindah ke kotak cari'],
+  ['↑ ↓', 'pilih baris keranjang'],
+  ['+ / −', 'tambah / kurangi jumlah baris terpilih'],
+  ['* lalu angka', 'setel jumlah langsung (mis. *12 Enter)'],
+  ['Delete', 'hapus baris terpilih'],
+  ['F3', 'bayar pakai Kartu'],
+  ['F4', 'bayar Tunai'],
+  ['F6', 'bayar Transfer'],
+  ['F7', 'isi diskon'],
+  ['F9', 'selesaikan pembayaran'],
+  ['Enter', 'di kotak uang: langsung selesaikan'],
+  ['Esc', 'kosongkan keranjang'],
+];
+
+function martBantuanModal() {
+  openModal(`
+    <h2>Pintasan Papan Ketik</h2>
+    <p class="muted">Satu transaksi penuh bisa diselesaikan tanpa menyentuh tetikus.</p>
+    <div class="tblwrap"><table>
+      <thead><tr><th style="width:140px">Tombol</th><th>Fungsi</th></tr></thead>
+      <tbody>${MART_PINTASAN.map(([k, v]) => `<tr>
+        <td><code>${esc(k)}</code></td><td>${esc(v)}</td></tr>`).join('')}</tbody>
+    </table></div>
+    <p class="muted">Tombol <code>+ − * Delete</code> dan panah hanya bekerja saat kursor
+      tidak sedang berada di kotak isian — supaya mengetik nama bank atau kata pencarian
+      tidak diam-diam mengubah keranjang.</p>`);
+}
+
+/** Sedang mengetik di kotak isian? */
+const diIsian = () => {
+  const a = document.activeElement;
+  return !!a && (a.tagName === 'INPUT' || a.tagName === 'SELECT' || a.tagName === 'TEXTAREA');
+};
+
+let martQtyKetik = null;        // null = tidak sedang mengetik jumlah lewat '*'
+
+function martPilihBaris(arah) {
+  if (!mart.cart.length) return;
+  const n = mart.cart.length;
+  mart.pilih = mart.pilih === null || mart.pilih === undefined
+    ? (arah > 0 ? 0 : n - 1)
+    : (mart.pilih + arah + n) % n;
+  martSorotBaris();
+}
+
+function martSorotBaris() {
+  document.querySelectorAll('#mart-cart .mart-baris').forEach((el, i) =>
+    el.classList.toggle('terpilih', i === mart.pilih));
+}
+
+function martUbahQty(delta) {
+  if (mart.pilih === null || mart.pilih === undefined) martPilihBaris(1);
+  const p = mart.cart[mart.pilih];
+  if (!p) return;
+  if (p.qty + delta < 1) {
+    mart.cart.splice(mart.pilih, 1);
+    mart.pilih = Math.min(mart.pilih, mart.cart.length - 1);
+    if (mart.cart.length === 0) mart.pilih = null;
+  } else {
+    p.qty += delta;
+  }
+  martRender();
+  martSorotBaris();
+}
+
+function martSetQty(n) {
+  const p = mart.cart[mart.pilih];
+  if (!p || !(n >= 1)) return;
+  p.qty = Math.min(n, 99);
+  martRender();
+  martSorotBaris();
+}
+
+document.addEventListener('keydown', (e) => {
+  if (!mart || activeView !== 'kasir' || USER?.tenant_mode !== 'mart') return;
+  // Modal terbuka punya aturannya sendiri (Esc menutup, Enter menyimpan).
+  if ($('#modal-root')?.children.length) return;
+
+  // ---- tombol F: selalu berlaku
+  const f = {
+    F1: () => martBantuanModal(),
+    F2: () => { const q = $('#mart-q'); if (q) { q.focus(); q.select(); } },
+    F3: () => martPilihMetode('kartu'),
+    F4: () => martPilihMetode('tunai'),
+    F6: () => martPilihMetode('transfer'),
+    F7: () => { const d = $('#mart-diskon'); if (d) { d.focus(); d.select(); }
+      else toast('Keranjang masih kosong', 'err'); },
+    F9: () => {
+      const tombol = $('#mart-bayar-kartu') || $('#mart-bayar-tunai') || $('#mart-bayar-transfer');
+      if (tombol && !tombol.disabled) tombol.click();
+      else toast('Belum siap dibayar — lengkapi dulu metode & nominalnya', 'err');
+    },
+  }[e.key];
+  if (f) { e.preventDefault(); f(); return; }
+
+  // ---- sisanya hanya saat tidak sedang mengetik
+  if (diIsian()) {
+    // Enter di kotak uang = langsung selesaikan, supaya tangan tidak pindah.
+    if (e.key === 'Enter' && document.activeElement.id === 'mart-uang') {
+      e.preventDefault();
+      const b = $('#mart-bayar-tunai');
+      if (b && !b.disabled) b.click();
+    }
+    return;
+  }
+
+  // Mengetik jumlah lewat '*': *12 Enter → baris terpilih menjadi 12.
+  if (martQtyKetik !== null) {
+    if (/^[0-9]$/.test(e.key)) { e.preventDefault(); martQtyKetik += e.key; martQtyPetunjuk(); return; }
+    if (e.key === 'Enter') { e.preventDefault(); martSetQty(Number(martQtyKetik)); martQtyKetik = null; martQtyPetunjuk(); return; }
+    if (e.key === 'Backspace') { e.preventDefault(); martQtyKetik = martQtyKetik.slice(0, -1); martQtyPetunjuk(); return; }
+    if (e.key === 'Escape') { e.preventDefault(); martQtyKetik = null; martQtyPetunjuk(); return; }
+  }
+
+  switch (e.key) {
+    case 'ArrowDown': e.preventDefault(); martPilihBaris(1); break;
+    case 'ArrowUp': e.preventDefault(); martPilihBaris(-1); break;
+    case '+': case '=': e.preventDefault(); martUbahQty(1); break;
+    case '-': e.preventDefault(); martUbahQty(-1); break;
+    case '*':
+      e.preventDefault();
+      if (mart.pilih === null || mart.pilih === undefined) martPilihBaris(1);
+      if (mart.cart.length) { martQtyKetik = ''; martQtyPetunjuk(); }
+      break;
+    case 'Delete':
+      e.preventDefault();
+      if (mart.cart.length && mart.pilih !== null && mart.pilih !== undefined) {
+        mart.cart.splice(mart.pilih, 1);
+        mart.pilih = mart.cart.length ? Math.min(mart.pilih, mart.cart.length - 1) : null;
+        martRender();
+        martSorotBaris();
+      }
+      break;
+    case 'Escape':
+      if (!mart.cart.length) break;
+      e.preventDefault();
+      // Dikonfirmasi: satu tombol tidak boleh menghapus belanjaan yang sudah
+      // dipindai satu per satu.
+      if (confirm(`Kosongkan keranjang (${mart.cart.length} barang)?`)) {
+        mart.cart = []; mart.metode = null; mart.uang = 0; mart.diskon = 0; mart.pilih = null;
+        martRender();
+      }
+      break;
+    default: break;
+  }
+});
+
+/** Petunjuk kecil saat jumlah sedang diketik lewat '*'. */
+function martQtyPetunjuk() {
+  const kotak = $('#mart-qty-ketik');
+  if (!kotak) return;
+  kotak.innerHTML = martQtyKetik === null ? ''
+    : `<b>Jumlah: ${esc(martQtyKetik || '…')}</b> — tekan Enter untuk menerapkan, Esc untuk batal`;
+  kotak.classList.toggle('hidden', martQtyKetik === null);
 }
 
 // ------------------------------------------------------- TUTUP KAS HARIAN
@@ -2329,7 +2705,7 @@ async function martRiwayatDetail(b, cetak) {
       toast('Transaksi lama ini tidak menyimpan rincian barang — struknya tidak bisa dicetak ulang', 'err');
       return;
     }
-    martCetakStruk({
+    martCetak({
       no: t.no, metode: metodeStruk, waktu: t.created_at, operator: t.operator, ulang: true,
       item: d.item.map((i) => ({ nama: i.nama, harga: i.harga, qty: i.qty })),
       subtotal: t.subtotal ?? t.total, diskon: t.diskon || 0, total: t.total,
