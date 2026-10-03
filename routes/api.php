@@ -62,6 +62,8 @@ Route::middleware('peran:tenant')->group(function () {
     Route::post('mart/jual-tunai', [MartController::class, 'jualTunai']);
     Route::post('mart/tutup-kas', [MartController::class, 'tutupKas']);
     Route::get('mart/riwayat', [MartController::class, 'riwayat']);
+    Route::get('mart/riwayat/{jenis}/{id}', [MartController::class, 'riwayatDetail'])
+        ->whereIn('jenis', ['jual', 'kartu']);
 
     // Manajemen barang & stok — LANGSUNG, tanpa pengajuan (lihat MartStokController).
     Route::get('mart/kategori', [MartStokController::class, 'kategori']);

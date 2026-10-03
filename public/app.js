@@ -118,9 +118,9 @@ const VIEWS = {
   // bukan menu masakan, jadi "Menu" diganti "Barang & Stok" dan ditambah
   // "Stok Opname". Pengajuan menu tidak ada di sini — Mart unit yayasan sendiri.
   tenant_mart: [
-    ['kasir', 'Kasir'], ['mart-stok', 'Barang & Stok'], ['mart-opname', 'Stok Opname'],
+    ['kasir', 'Kasir'], ['mart-riwayat', 'Riwayat'],
+    ['mart-stok', 'Barang & Stok'], ['mart-opname', 'Stok Opname'],
     ['dashboard', 'Dashboard'],
-    { grup: 'Laporan', anak: [['riwayat', 'Riwayat']] },
   ],
 };
 
@@ -407,6 +407,7 @@ function renderView(name) {
   const render = {
     kasir: USER?.tenant_mode === 'mart' ? martView : kasirView, menu: menuView, riwayat: riwayatView,
     'mart-stok': martStokView, 'mart-opname': martOpnameView,
+    'mart-riwayat': martRiwayatView,
     dashboard: USER?.role !== 'tenant' ? dashSAView
       : (USER?.tenant_mode === 'mart' ? martDashView : dashTenantView),
     saldo: saldoView, santri: siswaView, tenant: tenantView, analitik: analitikView,
@@ -444,6 +445,24 @@ $('#btn-logout').onclick = async () => {
 // Reader keyboard-wedge mengetik UID + Enter super cepat (jeda antar-karakter < 100ms).
 let kbBuf = '', kbLast = 0;
 let lastTap = { uid: '', at: 0 };
+/*
+ * Dipasang di FASE TANGKAP, bukan fase gelembung — dan itu yang membetulkan
+ * satu pindaian yang terbaca dua kali.
+ *
+ * Dulu pendengar ini duduk di fase gelembung, jadi ia berjalan SESUDAH
+ * pendengar milik kotak isian yang sedang disorot. Ketika kasir Mart memindai
+ * barang sementara kursornya ada di kotak cari — yang justru paling sering
+ * terjadi — tombol Enter dari pemindai diproses dua kali: sekali oleh kotak
+ * cari, sekali lagi oleh penangkap ini. Satu pindaian, dua barang masuk
+ * keranjang, dan tidak ada yang kelihatan salah di layar.
+ *
+ * Di fase tangkap ia berjalan lebih dulu, dan begitu yakin ketikan tadi
+ * memang berasal dari pemindai (deretan cepat, panjang >= 6), ia menelan
+ * kejadiannya: stopPropagation membuat kotak isian tidak pernah ikut
+ * menanganinya. Mengetik biasa tidak terpengaruh — jeda antar-huruf manusia
+ * jauh di atas 100 ms, sehingga kbBuf keburu dikosongkan dan Enter-nya
+ * diteruskan apa adanya ke kotak isian.
+ */
 document.addEventListener('keydown', (e) => {
   if (!USER) return;
   const now = performance.now();
@@ -452,11 +471,15 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') {
     const uid = normUid(kbBuf);
     kbBuf = '';
-    if (uid.length >= 6) { e.preventDefault(); onCardTapped(uid); }
+    if (uid.length >= 6) {
+      e.preventDefault();
+      e.stopPropagation();
+      onCardTapped(uid);
+    }
   } else if (e.key.length === 1) {
     kbBuf += e.key;
   }
-});
+}, true);
 
 function onCardTapped(uid) {
   const now = Date.now();
@@ -465,12 +488,17 @@ function onCardTapped(uid) {
    * di layar kasir/saldo itu berarti satu kartu terbaca dobel.
    *
    * TAPI di kasir Mart, memindai barang yang sama tiga kali berturut-turut
-   * adalah hal paling biasa (beli 3 bungkus) — remnya justru membuat dua
-   * barang terakhir hilang diam-diam. Karena itu penangan yang memang
-   * mengharapkan pindaian beruntun bisa melepas remnya sendiri.
+   * adalah hal paling biasa (beli 3 bungkus). Karena itu remnya tidak dicabut
+   * — hanya DIPERPENDEK: laporan ganda dari alat tiba dalam puluhan milidetik,
+   * sedangkan tangan manusia tidak mungkin memindai barang yang sama lebih
+   * cepat dari sekitar setengah detik. Jendela di antaranya memisahkan
+   * keduanya tanpa menghilangkan satu pun pindaian yang disengaja.
+   *
+   * Sempat rem ini dicabut habis untuk Mart, dan akibatnya tepat seperti yang
+   * dulu ingin dicegah: satu pindaian jadi dua barang.
    */
-  if (!(cardHandler && cardHandler.tanpaRem)
-      && uid === lastTap.uid && now - lastTap.at < 2000) return;
+  const rem = cardHandler && cardHandler.remMs !== undefined ? cardHandler.remMs : 2000;
+  if (rem > 0 && uid === lastTap.uid && now - lastTap.at < rem) return;
   lastTap = { uid, at: now };
   if (cardHandler) { cardHandler(uid); return; }
   if (USER.role === 'tenant' && activeView === 'kasir') kasirLookup(uid);
@@ -790,8 +818,9 @@ function martView(el) {
     </div>
   </div>`;
 
-  // `tanpaRem`: memindai barang yang sama berkali-kali memang disengaja.
-  martScan.tanpaRem = true;
+  // Rem dipendekkan, bukan dicabut: memindai barang yang sama berkali-kali
+  // memang disengaja, tetapi dua laporan dari satu pindaian tidak.
+  martScan.remMs = 400;
   cardHandler = martScan;
 
   $('#mart-cari').onclick = () => { const q = $('#mart-q').value.trim(); if (q) martCari(q, false); };
@@ -1105,7 +1134,8 @@ async function martBayarKartu() {
     }});
     toast(`✔ Terbayar — sisa saldo ${rp(d.siswa.saldo)}`, 'ok');
     if (mart.struk) martCetakStruk({ metode: 'Kartu (RFID)', item: salinan, subtotal: total,
-      diskon: 0, total, bayar: total, kembalian: 0, ket: `${d.siswa.nama} · sisa ${rp(d.siswa.saldo)}` });
+      diskon: 0, total, bayar: total, kembalian: 0, no: martNoStruk('kartu', d.transaksi?.id),
+      ket: `${d.siswa.nama} · sisa ${rp(d.siswa.saldo)}` });
     martSelesai();
   } catch (e) { toast(e.message, 'err'); btn.disabled = false; }
 }
@@ -1137,16 +1167,27 @@ async function martBayarMart(metode) {
       metode: metode === 'tunai' ? 'Tunai' : `Transfer ${bank}`,
       item: salinan, subtotal: sub, diskon, total,
       bayar: d.jual.uang_diterima, kembalian: d.jual.kembalian,
+      no: martNoStruk('jual', d.jual.id),
       ket: metode === 'transfer' ? `Pengirim: ${pengirim}` : '',
     });
     martSelesai();
   } catch (e) { toast(e.message, 'err'); btn.disabled = false; }
 }
 
+/**
+ * Nomor struk, disusun sama persis seperti di server (MartController::noStruk)
+ * supaya nomor di kertas dan nomor di layar Riwayat tidak pernah berbeda.
+ */
+const martNoStruk = (jenis, id) => id
+  ? (jenis === 'kartu' ? 'KRT-' : 'MRT-') + String(id).padStart(6, '0') : '';
+
 /** Struk 58mm. Tetap terbaca kalau terpaksa dicetak di kertas A4. */
 function martCetakStruk(x) {
   const nama = USER?.tenant_nama || 'IMBOS Mart';
-  const wkt = new Date().toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
+  // Cetak ulang menyebut waktu & kasir ASLINYA, bukan saat kertasnya keluar —
+  // struk yang menyebut jam cetak ulang akan dibaca sebagai transaksi lain.
+  const wkt = new Date(x.waktu || Date.now())
+    .toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' });
   const gaya = `@page { size: 58mm auto; margin: 3mm; }
     body { width: 52mm; margin: 0; font: 11px/1.45 'Courier New', monospace; color: #000; }
     h1 { font-size: 13px; text-align: center; margin: 0 0 2px; }
@@ -1162,7 +1203,9 @@ function martCetakStruk(x) {
     <div class="b kecil"><span>${p.qty} × ${rp(p.harga)}</span><span>${rp(p.qty * p.harga)}</span></div>`).join('');
   cetakLembar('Struk', gaya, `
     <h1>${esc(nama)}</h1>
-    <div class="ket">${esc(wkt)}<br>Kasir: ${esc(USER?.nama || '-')}</div>
+    <div class="ket">${x.no ? `No. ${esc(x.no)}<br>` : ''}${esc(wkt)}<br>
+      Kasir: ${esc(x.operator || USER?.nama || '-')}
+      ${x.ulang ? '<br><b>— CETAK ULANG —</b>' : ''}</div>
     <hr>${baris}<hr>
     <div class="b"><span>Subtotal</span><span>${rp(x.subtotal)}</span></div>
     ${x.diskon ? `<div class="b"><span>Diskon</span><span>-${rp(x.diskon)}</span></div>` : ''}
@@ -2135,6 +2178,199 @@ async function martOpnameDetail(id) {
     ['Barang', 'SKU', 'Stok sistem', 'Stok fisik', 'Selisih', 'HPP', 'Nilai selisih', 'Alasan'],
     o.item.map((i) => [i.nama, i.barcode, i.stok_sistem, i.stok_fisik ?? '', i.selisih,
       i.hpp, i.nilai_selisih, i.alasan]));
+}
+
+
+// --------------------------------------------------- RIWAYAT PENJUALAN MART
+
+/*
+ * Penjualan Mart hidup di DUA BUKU yang sengaja tidak pernah dilebur: tunai &
+ * transfer di `mart_jual` (uangnya di laci Mart), kartu di `transaksi`
+ * (uangnya di kas sekolah). Pemisahan itulah yang menjaga neraca sekolah
+ * tetap nol. Tetapi bagi penjaga Mart keduanya satu hal yang sama — "apa saja
+ * yang terjual hari ini" — dan sebelum layar ini ada, tab Riwayat hanya
+ * memperlihatkan penjualan kartu sehingga tunai & transfer seolah hilang.
+ */
+let martRw = { baris: [], hal: 1, nHalaman: 1, ringkas: null };
+
+function martRiwayatView(el) {
+  const hariIni = martHariIni();
+  el.innerHTML = `<div class="panel">
+    <div class="kat-head"><h2 style="margin:0">Riwayat Penjualan</h2>
+      <span>
+        <button class="linkbtn" id="rwm-unduh">⬇ unduh CSV</button> ·
+        <button class="linkbtn" id="rwm-ulang">⟳ muat ulang</button>
+      </span></div>
+    <p class="muted">Seluruh penjualan Mart — tunai, transfer, dan kartu — dalam satu daftar.
+      Uangnya tetap di buku masing-masing: tunai &amp; transfer ada di laci Mart, kartu masuk
+      kas sekolah. Yang disatukan di sini tampilannya, bukan uangnya.</p>
+    <div class="filterbar">
+      <div class="field"><label>Dari</label><input type="date" id="rwm-dari" value="${hariIni}"></div>
+      <div class="field"><label>Sampai</label><input type="date" id="rwm-sampai" value="${hariIni}"></div>
+      <div class="field"><label>Metode</label><select id="rwm-metode">
+        <option value="">semua</option><option value="tunai">tunai</option>
+        <option value="transfer">transfer</option><option value="kartu">kartu (RFID)</option>
+      </select></div>
+      <div class="field"><label>Cari</label>
+        <input id="rwm-cari" placeholder="barang, pembeli, bank, kasir"></div>
+      <button class="go" id="rwm-go">Terapkan</button>
+      <button id="rwm-reset">Hari ini</button>
+    </div>
+    <div id="rwm-ringkas" class="cards"></div>
+    <div class="tblwrap"><table>
+      <thead><tr><th>Waktu</th><th>No. struk</th><th>Metode</th><th class="num">Item</th>
+        <th class="num">Total</th><th>Keterangan</th><th>Kasir</th><th></th></tr></thead>
+      <tbody id="rwm-body"></tbody>
+    </table></div>
+    <div id="rwm-nav" style="display:flex; gap:8px; align-items:center; margin-top:12px"></div>
+  </div>`;
+
+  $('#rwm-go').onclick = () => { martRw.hal = 1; martMuatRiwayat(); };
+  $('#rwm-ulang').onclick = martMuatRiwayat;
+  $('#rwm-unduh').onclick = martUnduhRiwayatMart;
+  $('#rwm-reset').onclick = () => {
+    $('#rwm-dari').value = $('#rwm-sampai').value = martHariIni();
+    $('#rwm-metode').value = '';
+    $('#rwm-cari').value = '';
+    martRw.hal = 1;
+    martMuatRiwayat();
+  };
+  $('#rwm-metode').onchange = () => { martRw.hal = 1; martMuatRiwayat(); };
+  $('#rwm-cari').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); $('#rwm-go').click(); }
+  });
+  martMuatRiwayat();
+}
+
+/** Parameter saringan, dipakai bersama oleh daftar dan unduhan. */
+function martRiwayatQs(tambahan) {
+  const p = new URLSearchParams();
+  const dari = $('#rwm-dari').value, sampai = $('#rwm-sampai').value;
+  // Hari operasional WIB, bukan UTC — kalau tidak, penjualan sebelum pukul
+  // 07.00 terbaca sebagai milik hari sebelumnya.
+  if (dari) p.set('dari', new Date(dari + 'T00:00:00+07:00').toISOString());
+  if (sampai) p.set('sampai', new Date(sampai + 'T23:59:59.999+07:00').toISOString());
+  if ($('#rwm-metode').value) p.set('metode', $('#rwm-metode').value);
+  if ($('#rwm-cari').value.trim()) p.set('cari', $('#rwm-cari').value.trim());
+  for (const [k, v] of Object.entries(tambahan || {})) p.set(k, v);
+  return p.toString();
+}
+
+async function martMuatRiwayat() {
+  $('#rwm-body').innerHTML = '<tr><td colspan="8" class="muted">memuat…</td></tr>';
+  let d;
+  try {
+    d = await api('/api/mart/riwayat?' + martRiwayatQs({ hal: martRw.hal, per: 25 }));
+  } catch (e) {
+    $('#rwm-body').innerHTML = `<tr><td colspan="8" class="minus">${esc(e.message)}</td></tr>`;
+    return;
+  }
+  martRw = { baris: d.baris, hal: d.hal, nHalaman: d.n_halaman, ringkas: d.ringkas };
+  const r = d.ringkas;
+
+  $('#rwm-ringkas').innerHTML = `
+    <div class="statcard"><span class="muted">Transaksi</span><br><b>${r.n.toLocaleString('id-ID')}</b></div>
+    <div class="statcard"><span class="muted">Omzet periode ini</span><br><b class="rp">${rp(r.omzet)}</b></div>
+    <div class="statcard"><span class="muted">💵 Tunai</span><br><b class="rp">${rp(r.tunai)}</b></div>
+    <div class="statcard"><span class="muted">🏦 Transfer</span><br><b class="rp">${rp(r.transfer)}</b></div>
+    <div class="statcard"><span class="muted">💳 Kartu (kas sekolah)</span><br><b class="rp">${rp(r.kartu)}</b></div>
+    ${r.diskon ? `<div class="statcard"><span class="muted">Diskon diberikan</span><br>
+      <b class="rp">${rp(r.diskon)}</b></div>` : ''}`;
+
+  $('#rwm-body').innerHTML = d.baris.map((b, i) => `
+    <tr>
+      <td>${waktuSingkat(b.waktu)}</td>
+      <td><code>${esc(b.no)}</code></td>
+      <td>${MART_METODE_LABEL[b.metode] || esc(b.metode)}</td>
+      <td class="num">${b.n_item ?? '<span class="muted">—</span>'}</td>
+      <td class="num rp"><b>${rp(b.total)}</b>${b.diskon
+        ? `<br><span class="muted" style="font-size:11px">diskon ${rp(b.diskon)}</span>` : ''}</td>
+      <td class="muted">${esc(b.ket || '')}</td>
+      <td>${esc(b.operator || '')}</td>
+      <td style="white-space:nowrap">
+        <button class="linkbtn" data-rinci="${i}">rincian</button> ·
+        <button class="linkbtn" data-cetak="${i}">🖨 cetak ulang</button>
+      </td>
+    </tr>`).join('') || '<tr><td colspan="8" class="muted">Tidak ada penjualan pada rentang ini.</td></tr>';
+
+  document.querySelectorAll('#rwm-body [data-rinci]').forEach((b) => {
+    b.onclick = () => martRiwayatDetail(martRw.baris[Number(b.dataset.rinci)], false);
+  });
+  document.querySelectorAll('#rwm-body [data-cetak]').forEach((b) => {
+    b.onclick = () => martRiwayatDetail(martRw.baris[Number(b.dataset.cetak)], true);
+  });
+
+  $('#rwm-nav').innerHTML = d.n_halaman > 1 ? `
+    <button id="rwm-prev" ${d.hal <= 1 ? 'disabled' : ''}>← sebelumnya</button>
+    <span class="muted">halaman ${d.hal} dari ${d.n_halaman}</span>
+    <button id="rwm-next" ${d.hal >= d.n_halaman ? 'disabled' : ''}>berikutnya →</button>` : '';
+  if ($('#rwm-prev')) $('#rwm-prev').onclick = () => { martRw.hal -= 1; martMuatRiwayat(); };
+  if ($('#rwm-next')) $('#rwm-next').onclick = () => { martRw.hal += 1; martMuatRiwayat(); };
+}
+
+/**
+ * Rincian satu transaksi — dan, kalau diminta, cetak ulang struknya.
+ *
+ * Rinciannya dibaca ULANG dari server, tidak dari baris yang kebetulan sedang
+ * tampil: struk cetak ulang harus menyebut barang yang benar-benar tercatat
+ * terjual, bukan ringkasannya.
+ */
+async function martRiwayatDetail(b, cetak) {
+  let d;
+  try {
+    d = await api(`/api/mart/riwayat/${b.jenis}/${b.id}`);
+  } catch (e) { toast(e.message, 'err'); return; }
+  const t = d.transaksi;
+  const metodeStruk = t.metode === 'tunai' ? 'Tunai'
+    : t.metode === 'transfer' ? ('Transfer ' + (t.bank || '')).trim() : 'Kartu (RFID)';
+
+  if (cetak) {
+    if (!d.item.length) {
+      toast('Transaksi lama ini tidak menyimpan rincian barang — struknya tidak bisa dicetak ulang', 'err');
+      return;
+    }
+    martCetakStruk({
+      no: t.no, metode: metodeStruk, waktu: t.created_at, operator: t.operator, ulang: true,
+      item: d.item.map((i) => ({ nama: i.nama, harga: i.harga, qty: i.qty })),
+      subtotal: t.subtotal ?? t.total, diskon: t.diskon || 0, total: t.total,
+      bayar: t.uang_diterima ?? t.total, kembalian: t.kembalian || 0, ket: t.ket || '',
+    });
+    return;
+  }
+
+  openModal(`
+    <h2>Struk ${esc(t.no)}</h2>
+    <p class="muted">${esc(waktuSingkat(t.created_at))} · ${MART_METODE_LABEL[t.metode] || esc(t.metode)}
+      · kasir ${esc(t.operator || '-')}${t.ket ? `<br>${esc(t.ket)}` : ''}</p>
+    ${d.item.length ? `<div class="tblwrap"><table>
+      <thead><tr><th>Barang</th><th class="num">Harga</th><th class="num">Qty</th>
+        <th class="num">Subtotal</th></tr></thead>
+      <tbody>${d.item.map((i) => `<tr><td>${esc(i.nama)}</td>
+        <td class="num rp">${rp(i.harga)}</td><td class="num">${i.qty}</td>
+        <td class="num rp">${rp(i.subtotal)}</td></tr>`).join('')}</tbody>
+    </table></div>` : `<p class="muted">Transaksi ini tidak menyimpan rincian barang.
+      ${t.keterangan ? `Keterangannya: <b>${esc(t.keterangan)}</b>` : ''}</p>`}
+    <div class="cart">
+      <div class="cart-line"><span>Subtotal</span><span class="rp">${rp(t.subtotal ?? t.total)}</span></div>
+      ${t.diskon ? `<div class="cart-line"><span>Diskon</span>
+        <span class="rp">−${rp(t.diskon)}</span></div>` : ''}
+      <div class="cart-line"><span><b>Total</b></span><span class="rp"><b>${rp(t.total)}</b></span></div>
+      ${t.kembalian ? `<div class="cart-line"><span>Dibayar / kembalian</span>
+        <span class="rp">${rp(t.uang_diterima)} / ${rp(t.kembalian)}</span></div>` : ''}
+    </div>
+    <button class="linkbtn" id="rwm-cetak-detail" ${d.item.length ? '' : 'disabled'}>🖨 cetak ulang struk</button>`);
+  if ($('#rwm-cetak-detail')) $('#rwm-cetak-detail').onclick = () => martRiwayatDetail(b, true);
+}
+
+function martUnduhRiwayatMart() {
+  const r = martRw.ringkas;
+  unduhCsv(`riwayat-mart-${$('#rwm-dari').value || 'awal'}-sd-${$('#rwm-sampai').value || 'kini'}.csv`,
+    ['Waktu', 'No. struk', 'Metode', 'Jumlah item', 'Diskon', 'Total', 'Keterangan', 'Kasir'],
+    [...martRw.baris.map((b) => [b.waktu, b.no, b.metode, b.n_item ?? '', b.diskon || 0,
+      b.total, b.ket || '', b.operator || '']),
+      [], ['RINGKASAN HALAMAN INI', ''],
+      ['Transaksi (seluruh periode)', r?.n ?? ''], ['Omzet', r?.omzet ?? ''],
+      ['Tunai', r?.tunai ?? ''], ['Transfer', r?.transfer ?? ''], ['Kartu', r?.kartu ?? '']]);
 }
 
 // ╔══════════════════════════════════════════════════════════╗

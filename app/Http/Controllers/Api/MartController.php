@@ -317,13 +317,153 @@ class MartController extends Controller
     }
 
     /** Riwayat penutupan kas & penjualan tunai terakhir. */
+    /**
+     * Riwayat penjualan Mart — DUA BUKU disatukan di satu layar.
+     *
+     * Penjualan tunai & transfer hidup di `mart_jual` (uangnya di laci Mart),
+     * penjualan kartu di `transaksi` (uangnya di kas sekolah). Pemisahan itu
+     * yang menjaga neraca sekolah tetap nol, dan tidak boleh dilebur. Tetapi
+     * bagi penjaga Mart keduanya satu hal yang sama: "apa saja yang terjual
+     * hari ini". Jadi yang disatukan TAMPILANNYA, bukan uangnya.
+     *
+     * Halaman diambil dengan cara mengambil $hal × $per teratas dari masing-
+     * masing buku, menggabungkan, lalu memotong. Itu berarti halaman ke-20
+     * membaca lebih banyak baris daripada halaman pertama — dan itu sengaja
+     * diterima: satu toko sekolah menjual puluhan sampai ratusan kali sehari,
+     * dan menggabungkan dua tabel di tingkat SQL menukar keterbacaan dengan
+     * kecepatan yang tidak akan pernah terasa di ukuran segini.
+     */
     public function riwayat(Request $r)
     {
         $t = $this->martKu($r);
+        $hal = max(1, (int) $r->query('hal', 1));
+        $per = min(100, max(10, (int) $r->query('per', 25)));
+        $metode = in_array($r->query('metode'), ['tunai', 'transfer', 'kartu'], true)
+            ? $r->query('metode') : null;
+        $cari = mb_substr(trim((string) $r->query('cari', '')), 0, 60);
+        $dari = $r->query('dari');
+        $sampai = $r->query('sampai');
+        $like = '%' . $cari . '%';
+
+        $baris = [];
+        $ringkas = ['tunai' => 0, 'transfer' => 0, 'kartu' => 0, 'diskon' => 0, 'n' => 0];
+
+        if ($metode !== 'kartu') {
+            $q = MartJual::where('tenant_id', $t->id)
+                ->when($metode, fn ($w) => $w->where('metode', $metode))
+                ->when($dari, fn ($w) => $w->where('created_at', '>=', $dari))
+                ->when($sampai, fn ($w) => $w->where('created_at', '<=', $sampai))
+                ->when($cari !== '', fn ($w) => $w->where(fn ($x) => $x
+                    ->where('bank', 'like', $like)
+                    ->orWhere('pengirim', 'like', $like)
+                    ->orWhere('operator', 'like', $like)
+                    ->orWhereExists(fn ($s) => $s->from('mart_jual_item')
+                        ->whereColumn('mart_jual_item.jual_id', 'mart_jual.id')
+                        ->where('mart_jual_item.nama', 'like', $like))));
+
+            $agg = (clone $q)
+                ->selectRaw("COALESCE(SUM(CASE WHEN metode='tunai' THEN total END),0) tunai")
+                ->selectRaw("COALESCE(SUM(CASE WHEN metode='transfer' THEN total END),0) transfer")
+                ->selectRaw('COALESCE(SUM(diskon),0) diskon, COUNT(*) n')->first();
+            $ringkas['tunai'] = (int) $agg->tunai;
+            $ringkas['transfer'] = (int) $agg->transfer;
+            $ringkas['diskon'] = (int) $agg->diskon;
+            $ringkas['n'] += (int) $agg->n;
+
+            foreach ((clone $q)->orderByDesc('id')->limit($hal * $per)->get() as $j) {
+                $baris[] = [
+                    'jenis' => 'jual', 'id' => (int) $j->id, 'no' => self::noStruk('jual', $j->id),
+                    'waktu' => $j->created_at, 'metode' => $j->metode, 'total' => (int) $j->total,
+                    'diskon' => (int) $j->diskon, 'n_item' => (int) $j->n_item,
+                    'operator' => $j->operator,
+                    'ket' => $j->metode === 'transfer' ? trim($j->bank . ' · ' . $j->pengirim) : '',
+                ];
+            }
+        }
+
+        if ($metode === null || $metode === 'kartu') {
+            $q = Transaksi::where('tenant_id', $t->id)->where('tipe', 'beli')
+                ->when($dari, fn ($w) => $w->where('created_at', '>=', $dari))
+                ->when($sampai, fn ($w) => $w->where('created_at', '<=', $sampai))
+                ->when($cari !== '', fn ($w) => $w->where(fn ($x) => $x
+                    ->where('siswa_nama', 'like', $like)
+                    ->orWhere('kelas', 'like', $like)
+                    ->orWhere('keterangan', 'like', $like)
+                    ->orWhere('operator', 'like', $like)));
+
+            $agg = (clone $q)->selectRaw('COALESCE(SUM(-jumlah),0) total, COUNT(*) n')->first();
+            $ringkas['kartu'] = (int) $agg->total;
+            $ringkas['n'] += (int) $agg->n;
+
+            foreach ((clone $q)->orderByDesc('id')->limit($hal * $per)->get() as $x) {
+                $baris[] = [
+                    'jenis' => 'kartu', 'id' => (int) $x->id, 'no' => self::noStruk('kartu', $x->id),
+                    'waktu' => $x->created_at, 'metode' => 'kartu', 'total' => (int) -$x->jumlah,
+                    'diskon' => 0, 'n_item' => null, 'operator' => $x->operator,
+                    'ket' => trim($x->siswa_nama . ($x->kelas ? ' · ' . $x->kelas : '')),
+                ];
+            }
+        }
+
+        usort($baris, fn ($a, $b) => strcmp((string) $b['waktu'], (string) $a['waktu'])
+            ?: ($b['id'] <=> $a['id']));
 
         return response()->json([
-            'kas' => MartKas::where('tenant_id', $t->id)->orderByDesc('tanggal')->limit(30)->get(),
-            'jual' => MartJual::where('tenant_id', $t->id)->orderByDesc('id')->limit(20)->get(),
+            'baris' => array_slice($baris, ($hal - 1) * $per, $per),
+            'ringkas' => array_merge($ringkas, ['omzet' =>
+                $ringkas['tunai'] + $ringkas['transfer'] + $ringkas['kartu']]),
+            'hal' => $hal, 'per' => $per, 'n_halaman' => (int) max(1, ceil($ringkas['n'] / $per)),
+        ]);
+    }
+
+    /** Nomor struk yang dilihat manusia. Dua buku, dua awalan, tidak pernah bentrok. */
+    private static function noStruk(string $jenis, int $id): string
+    {
+        return ($jenis === 'kartu' ? 'KRT-' : 'MRT-') . str_pad((string) $id, 6, '0', STR_PAD_LEFT);
+    }
+
+    /**
+     * Satu transaksi beserta rinciannya — untuk layar rincian dan cetak ulang
+     * struk. Rinciannya dibaca ulang dari basis data, bukan dari apa yang
+     * kebetulan masih tersimpan di layar kasir: struk cetak ulang harus
+     * menyebut barang yang benar-benar tercatat terjual.
+     */
+    public function riwayatDetail(Request $r, string $jenis, int $id)
+    {
+        $t = $this->martKu($r);
+
+        if ($jenis === 'jual') {
+            $j = MartJual::where('id', $id)->where('tenant_id', $t->id)->first();
+            if (! $j) {
+                throw new ApiError(404, 'Transaksi tidak ditemukan');
+            }
+
+            return response()->json(['transaksi' => array_merge($j->toArray(), [
+                'jenis' => 'jual', 'no' => self::noStruk('jual', $j->id),
+                'ket' => $j->metode === 'transfer' ? trim($j->bank . ' · ' . $j->pengirim) : '',
+            ]), 'item' => MartJualItem::where('jual_id', $j->id)->get()]);
+        }
+
+        $x = Transaksi::where('id', $id)->where('tenant_id', $t->id)->where('tipe', 'beli')->first();
+        if (! $x) {
+            throw new ApiError(404, 'Transaksi tidak ditemukan');
+        }
+        $item = DB::table('transaksi_item')->where('transaksi_id', $x->id)
+            ->get(['produk_id', 'nama', 'kategori', 'harga', 'qty', 'subtotal']);
+
+        return response()->json([
+            'transaksi' => [
+                'jenis' => 'kartu', 'id' => (int) $x->id, 'no' => self::noStruk('kartu', $x->id),
+                'metode' => 'kartu', 'created_at' => $x->created_at,
+                'subtotal' => (int) -$x->jumlah, 'diskon' => 0, 'total' => (int) -$x->jumlah,
+                'uang_diterima' => (int) -$x->jumlah, 'kembalian' => 0,
+                'n_item' => $item->sum('qty'), 'operator' => $x->operator,
+                'ket' => trim($x->siswa_nama . ($x->kelas ? ' · ' . $x->kelas : '')),
+                // Rincian bisa kosong untuk transaksi lama yang dicatat sebelum
+                // kasir mengirim rincian; keterangannya yang menggantikan.
+                'keterangan' => $x->keterangan,
+            ],
+            'item' => $item,
         ]);
     }
 }
