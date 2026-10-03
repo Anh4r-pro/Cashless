@@ -18,6 +18,7 @@ use App\Http\Controllers\Api\TopupOrtuController;
 use App\Http\Controllers\Api\TransaksiController;
 use App\Http\Controllers\Api\DonasiController;
 use App\Http\Controllers\Api\KiosController;
+use App\Http\Controllers\Api\MartBeliController;
 use App\Http\Controllers\Api\MartController;
 use App\Http\Controllers\Api\MartKoreksiController;
 use App\Http\Controllers\Api\MartMemberController;
@@ -80,6 +81,19 @@ Route::middleware('peran:tenant')->group(function () {
     Route::get('mart/piutang', [MartMemberController::class, 'piutang']);
     Route::post('mart/piutang/{id}/bayar', [MartMemberController::class, 'bayar']);
     Route::get('mart/piutang/bayar', [MartMemberController::class, 'riwayatBayar']);
+
+    // Pemasok & pembelian — nota masuk: stok naik, harga modal diperbarui,
+    // kewajiban ke pemasok lahir (lihat MartBeliController).
+    Route::get('mart/supplier', [MartBeliController::class, 'supplier']);
+    Route::post('mart/supplier', [MartBeliController::class, 'supplierSimpan']);
+    Route::put('mart/supplier/{id}', [MartBeliController::class, 'supplierSimpan']);
+    Route::delete('mart/supplier/{id}', [MartBeliController::class, 'supplierHapus']);
+    Route::get('mart/beli', [MartBeliController::class, 'index']);
+    Route::post('mart/beli', [MartBeliController::class, 'simpan']);
+    Route::get('mart/beli/hutang', [MartBeliController::class, 'hutang']);
+    Route::get('mart/beli/{id}', [MartBeliController::class, 'detail']);
+    Route::post('mart/beli/{id}/batal', [MartBeliController::class, 'batal']);
+    Route::post('mart/beli/{id}/bayar', [MartBeliController::class, 'bayar']);
 
     // Transaksi tertahan.
     Route::get('mart/tahan', [MartKoreksiController::class, 'tahanDaftar']);

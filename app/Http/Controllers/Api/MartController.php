@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Exceptions\ApiError;
+use App\Models\MartBeliBayar;
 use App\Models\MartJual;
 use App\Models\MartJualItem;
 use App\Models\MartJualUbah;
@@ -100,12 +101,20 @@ class MartController extends Controller
         $cicil = fn (string $metode) => MartPiutangBayar::where('tenant_id', $t->id)
             ->where('created_at', '>=', $mulai)->where('metode', $metode)
             ->selectRaw('COALESCE(SUM(jumlah),0) total, COUNT(*) n')->first();
+        // Uang KELUAR: pembayaran ke pemasok. Membayar dari laci membuat isi
+        // laci berkurang, dan laci yang berkurang tanpa catatan hanya akan
+        // terbaca sebagai selisih yang tidak bisa dijelaskan.
+        $bayarPemasok = fn (string $metode) => MartBeliBayar::where('tenant_id', $t->id)
+            ->where('created_at', '>=', $mulai)->where('metode', $metode)
+            ->selectRaw('COALESCE(SUM(jumlah),0) total, COUNT(*) n')->first();
 
         $tunai = $jual('tunai');
         $transfer = $jual('transfer');
         $hutang = $jual('hutang');
         $cicilTunai = $cicil('tunai');
         $cicilTransfer = $cicil('transfer');
+        $keluarTunai = $bayarPemasok('tunai');
+        $keluarTransfer = $bayarPemasok('transfer');
         $cashless = Transaksi::where('tenant_id', $t->id)->where('tipe', 'beli')
             ->where('created_at', '>=', $mulai)
             ->selectRaw('COALESCE(SUM(-jumlah),0) total, COUNT(*) n')->first();
@@ -121,6 +130,9 @@ class MartController extends Controller
             // Barang keluar hari ini tanpa uang: bukan pemasukan, melainkan
             // piutang baru. Ditampilkan supaya kasir tidak mencarinya di laci.
             'hutang' => ['total' => (int) $hutang->total, 'n' => (int) $hutang->n],
+            'keluar' => ['total' => (int) $keluarTunai->total, 'n' => (int) $keluarTunai->n],
+            'keluar_transfer' => ['total' => (int) $keluarTransfer->total,
+                'n' => (int) $keluarTransfer->n],
         ];
     }
 
@@ -301,8 +313,8 @@ class MartController extends Controller
                 MartJualItem::create([
                     'jual_id' => $jual->id, 'produk_id' => $b['produk_id'] ?? null,
                     'nama' => $b['nama'], 'kategori' => $b['kategori'] ?? 'makanan',
-                    'harga' => (int) $b['harga'], 'qty' => (int) ($b['qty'] ?? 1),
-                    'subtotal' => (int) $b['subtotal'],
+                    'harga' => (int) $b['harga'], 'hpp' => $b['hpp'] ?? null,
+                    'qty' => (int) ($b['qty'] ?? 1), 'subtotal' => (int) $b['subtotal'],
                 ]);
                 if (! empty($b['produk_id'])) {
                     Stok::jual((int) $b['produk_id'], (int) ($b['qty'] ?? 1), (string) $txId, $op);
@@ -350,19 +362,24 @@ class MartController extends Controller
         $hari = $this->ringkasHari($t, $tgl);
         $tunai = (int) $hari['tunai']['total'];
         $transfer = (int) $hari['transfer']['total'];
-        $seharusnya = $kasAwal + $tunai;
+        $keluar = (int) $hari['keluar']['total'];
+        $keluarTransfer = (int) $hari['keluar_transfer']['total'];
+        $seharusnya = $kasAwal + $tunai - $keluar;
 
         // Transfer dicocokkan ke mutasi rekening, bukan ke laci. Kalau kasir
         // tidak mengisinya, dianggap sama dengan catatan sistem — bukan nol,
         // sebab nol akan terbaca seolah seluruh transfer hilang.
+        $transferBersih = $transfer - $keluarTransfer;
         $fisikTransfer = $r->input('hitung_transfer') === null
-            ? $transfer : (int) floor((float) $r->input('hitung_transfer'));
+            ? $transferBersih : (int) floor((float) $r->input('hitung_transfer'));
 
         $kas = MartKas::create([
             'tenant_id' => $t->id, 'tanggal' => $tgl, 'kas_awal' => $kasAwal,
             'tunai' => $tunai, 'transfer' => $transfer,
+            'keluar' => $keluar, 'keluar_transfer' => $keluarTransfer,
             'hitung_fisik' => $fisik, 'hitung_transfer' => $fisikTransfer,
-            'selisih' => $fisik - $seharusnya, 'selisih_transfer' => $fisikTransfer - $transfer,
+            'selisih' => $fisik - $seharusnya,
+            'selisih_transfer' => $fisikTransfer - $transferBersih,
             'catatan' => mb_substr(trim((string) $r->input('catatan', '')), 0, 300),
             'operator' => $this->operator,
             'created_at' => WaktuIso::sekarang(),

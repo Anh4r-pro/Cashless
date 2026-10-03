@@ -77,6 +77,10 @@ class Keranjang
                 $nama = $pr->nama;
                 $harga = (int) $pr->harga;
                 $kategori = $pr->kategori;
+                // Harga modal ikut dibawa untuk DIPOTRET pada baris penjualan.
+                // Tanpa potret, laba bulan lalu ikut berubah setiap kali harga
+                // beli hari ini naik.
+                $hpp = $pr->hpp === null ? null : (int) $pr->hpp;
             } else {
                 // Input manual: kasir menyebut kategorinya sendiri, dan
                 // non-makanan hanya boleh di tenant koperasi.
@@ -104,6 +108,7 @@ class Keranjang
                 }
                 $nama = $deskripsi !== '' ? $deskripsi : 'Input manual';
                 $kategori = (($it['kategori'] ?? '') === 'non_makanan') ? 'non_makanan' : 'makanan';
+                $hpp = null;        // barang ketikan bebas tidak punya harga modal
                 if ($kategori === 'non_makanan' && $tenant->jenis !== 'koperasi') {
                     throw new ApiError(400, 'Hanya tenant koperasi yang boleh menjual barang non-makanan');
                 }
@@ -119,7 +124,7 @@ class Keranjang
 
             $rincian[] = [
                 'produk_id' => isset($it['produk_id']) && $it['produk_id'] !== null ? (int) $it['produk_id'] : null,
-                'nama' => $nama, 'harga' => $harga, 'qty' => $qty,
+                'nama' => $nama, 'harga' => $harga, 'hpp' => $hpp, 'qty' => $qty,
                 'subtotal' => $subtotal, 'kategori' => $kategori,
             ];
         }

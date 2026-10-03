@@ -264,7 +264,8 @@ class KasirController extends Controller
                 'transaksi_id' => $trx->id, 'produk_id' => $b['produk_id'],
                 'tenant_id' => $trx->tenant_id, 'tenant_nama' => $tenantNama,
                 'nama' => $b['nama'], 'kategori' => $b['kategori'],
-                'harga' => $b['harga'], 'qty' => $b['qty'], 'subtotal' => $b['subtotal'],
+                'harga' => $b['harga'], 'hpp' => $b['hpp'] ?? null,
+                'qty' => $b['qty'], 'subtotal' => $b['subtotal'],
                 'siswa_id' => $trx->siswa_id, 'kelas' => $s->kelas,
                 'golongan' => $s->golongan, 'created_at' => $trx->created_at,
             ]);

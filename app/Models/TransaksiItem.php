@@ -26,6 +26,7 @@ class TransaksiItem extends Model
         'nama',
         'kategori',
         'harga',
+        'hpp',
         'qty',
         'subtotal',
         'siswa_id',

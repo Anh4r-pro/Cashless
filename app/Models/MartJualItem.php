@@ -11,7 +11,11 @@ class MartJualItem extends Model
 
     protected $table = 'mart_jual_item';
 
-    protected $fillable = ['jual_id', 'produk_id', 'nama', 'kategori', 'harga', 'qty', 'subtotal'];
+    // `hpp` adalah POTRET harga modal saat barang itu terjual. Tanpa potret,
+    // satu kenaikan harga beli hari ini akan diam-diam mengubah laba yang
+    // dilaporkan bulan lalu.
+    protected $fillable = ['jual_id', 'produk_id', 'nama', 'kategori', 'harga', 'hpp',
+        'qty', 'subtotal'];
 
-    protected $casts = ['harga' => 'int', 'qty' => 'int', 'subtotal' => 'int'];
+    protected $casts = ['harga' => 'int', 'hpp' => 'int', 'qty' => 'int', 'subtotal' => 'int'];
 }

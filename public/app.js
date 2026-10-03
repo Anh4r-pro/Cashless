@@ -119,6 +119,7 @@ const VIEWS = {
   // "Stok Opname". Pengajuan menu tidak ada di sini — Mart unit yayasan sendiri.
   tenant_mart: [
     ['kasir', 'Kasir'], ['mart-riwayat', 'Riwayat'], ['mart-piutang', 'Member & Piutang'],
+    ['mart-beli', 'Pemasok & Pembelian'],
     ['mart-stok', 'Barang & Stok'], ['mart-opname', 'Stok Opname'],
     ['dashboard', 'Dashboard'],
   ],
@@ -408,6 +409,7 @@ function renderView(name) {
     kasir: USER?.tenant_mode === 'mart' ? martView : kasirView, menu: menuView, riwayat: riwayatView,
     'mart-stok': martStokView, 'mart-opname': martOpnameView,
     'mart-riwayat': martRiwayatView, 'mart-piutang': martPiutangView,
+    'mart-beli': martBeliView,
     dashboard: USER?.role !== 'tenant' ? dashSAView
       : (USER?.tenant_mode === 'mart' ? martDashView : dashTenantView),
     saldo: saldoView, santri: siswaView, tenant: tenantView, analitik: analitikView,
@@ -1843,7 +1845,8 @@ async function martKasModal() {
       <p class="muted">Ditutup oleh <b>${esc(d.kas.operator)}</b>.</p>
       <div class="cart">
         <div class="cart-line"><span>Kas awal</span><span class="rp">${rp(d.kas.kas_awal)}</span></div>
-        <div class="cart-line"><span>Penjualan tunai</span><span class="rp">${rp(d.kas.tunai)}</span></div>
+        <div class="cart-line"><span>Uang masuk tunai</span><span class="rp">${rp(d.kas.tunai)}</span></div>
+        <div class="cart-line"><span>Uang keluar (pemasok)</span><span class="rp">−${rp(d.kas.keluar || 0)}</span></div>
         <div class="cart-line"><span>Hitungan fisik laci</span><span class="rp">${rp(d.kas.hitung_fisik)}</span></div>
         <div class="cart-line"><span>Selisih laci</span><span class="rp">${rp(d.kas.selisih)}</span></div>
         <div class="cart-line"><span>Transfer tercatat</span><span class="rp">${rp(d.kas.transfer)}</span></div>
@@ -1863,13 +1866,17 @@ async function martKasModal() {
     <fieldset class="ortu-set"><legend>Laci (tunai)</legend>
       <div class="field"><label>Kas awal / modal laci</label>${inputUang({ id: 'mk-awal', nilai: usul })}
         <span class="muted set-hint">${d.kas_kemarin ? 'Diisi dari hitungan penutupan terakhir.' : 'Modal kembalian yang ada di laci pagi tadi.'}</span></div>
-      <p class="muted" style="margin:0 0 8px">Penjualan tunai hari ini <b>${rp(h.tunai.total)}</b> (${h.tunai.n} transaksi).</p>
+      <p class="muted" style="margin:0 0 8px">Uang masuk hari ini <b>${rp(h.tunai.total)}</b>
+        (${h.tunai.n} kali)${h.tunai.cicilan ? ` — termasuk cicilan piutang ${rp(h.tunai.cicilan)}` : ''}.
+        ${h.keluar.total ? `<br>Uang keluar ke pemasok <b class="minus">−${rp(h.keluar.total)}</b>
+          (${h.keluar.n} pembayaran).` : ''}</p>
       <div class="field"><label>Hitungan fisik laci sekarang</label>${inputUang({ id: 'mk-fisik', nilai: '' })}</div>
     </fieldset>
     <fieldset class="ortu-set"><legend>Transfer</legend>
-      <p class="muted" style="margin:0 0 8px">Tercatat sistem <b>${rp(h.transfer.total)}</b> (${h.transfer.n} transaksi).</p>
-      <div class="field"><label>Yang benar-benar masuk rekening</label>
-        ${inputUang({ id: 'mk-transfer', nilai: h.transfer.total })}
+      <p class="muted" style="margin:0 0 8px">Masuk <b>${rp(h.transfer.total)}</b> (${h.transfer.n} kali)
+        ${h.keluar_transfer.total ? ` · keluar <b class="minus">−${rp(h.keluar_transfer.total)}</b>` : ''}.</p>
+      <div class="field"><label>Perubahan bersih di rekening</label>
+        ${inputUang({ id: 'mk-transfer', nilai: h.transfer.total - h.keluar_transfer.total })}
         <span class="muted set-hint">Biarkan apa adanya kalau cocok dengan mutasi rekening.</span></div>
     </fieldset>
     <div class="field"><label>Catatan (opsional)</label>
@@ -1891,10 +1898,13 @@ async function martKasModal() {
     }, 'Tutup kas');
 
   const hitung = () => {
-    const seharusnya = (nilaiUang('#mk-awal') || 0) + h.tunai.total;
+    // Uang keluar ikut dikurangkan: membayar pemasok dari laci membuat isinya
+    // berkurang, dan dulu itu muncul sebagai selisih yang harus dijelaskan
+    // dengan catatan tangan.
+    const seharusnya = (nilaiUang('#mk-awal') || 0) + h.tunai.total - h.keluar.total;
     const fisik = nilaiUang('#mk-fisik') || 0;
     const selisih = fisik - seharusnya;
-    const st = (nilaiUang('#mk-transfer') || 0) - h.transfer.total;
+    const st = (nilaiUang('#mk-transfer') || 0) - (h.transfer.total - h.keluar_transfer.total);
     $('#mk-hitung').innerHTML =
       `Laci seharusnya <b>${rp(seharusnya)}</b>` +
       (fisik ? ` · selisih <b style="color:${selisih === 0 ? 'var(--ok)' : 'var(--err)'}">${rp(selisih)}</b>` : '') +
@@ -3251,6 +3261,469 @@ function martUnduhPiutang() {
   unduhCsv(`piutang-mart-${martHariIni()}.csv`,
     ['Tanggal', 'No. struk', 'Member', 'Nilai', 'Dibayar', 'Sisa', 'Umur (hari)'],
     martMem.piutang.map((p) => [p.waktu, p.no, p.member, p.total, p.dibayar, p.sisa, p.umur_hari]));
+}
+
+// ------------------------------------------- PEMASOK & PEMBELIAN (layar)
+
+/*
+ * "Pemasok" yang berguna bukan sekadar daftar nama. Yang dibutuhkan toko
+ * adalah NOTA: barang apa yang datang, berapa harganya, dari siapa, sudah
+ * dibayar atau belum. Tanpa itu, harga modal di sistem hanya angka yang
+ * diketik sekali lalu tidak pernah benar lagi — dan seluruh laporan laba
+ * berdiri di atasnya.
+ *
+ * Hutang ke pemasok adalah kebalikan persis dari piutang member, dan sengaja
+ * ditampilkan dengan bentuk yang sama supaya keduanya bisa dibaca dengan
+ * kebiasaan berpikir yang sama.
+ */
+let martBeli = { supplier: [], beli: [], hutang: [], ringkas: null };
+
+function martBeliView(el) {
+  el.innerHTML = `
+  <div class="panel hidden" id="mb-hutang-panel">
+    <div class="kat-head"><h2 style="margin:0">Hutang ke Pemasok
+      <span class="muted" id="mb-hutang-n"></span></h2>
+      <button class="linkbtn" id="mb-unduh-hutang">⬇ unduh CSV</button></div>
+    <p class="muted">Barangnya sudah ada di rak, uangnya belum dibayarkan — kebalikan dari
+      piutang member. Jatuh tempo yang sudah lewat ditandai merah.</p>
+    <div class="tblwrap"><table>
+      <thead><tr><th>Nota</th><th>Pemasok</th><th>Tanggal</th><th>Jatuh tempo</th>
+        <th class="num">Nilai</th><th class="num">Dibayar</th><th class="num">Sisa</th><th></th></tr></thead>
+      <tbody id="mb-hutang-body"></tbody>
+    </table></div>
+  </div>
+
+  <div class="panel">
+    <div class="kat-head"><h2 style="margin:0">Nota Pembelian <span class="muted" id="mb-n"></span></h2>
+      <span><button class="linkbtn" id="mb-unduh">⬇ unduh CSV</button> ·
+        <button class="linkbtn" id="mb-catat">+ Catat nota</button></span></div>
+    <p class="muted">Satu nota mengerjakan tiga hal sekaligus: <b>stok naik</b>,
+      <b>harga modal diperbarui</b> ke harga beli terbaru, dan <b>kewajiban ke pemasok lahir</b>.
+      Nota tunai/transfer langsung tercatat sebagai uang keluar hari ini — dan tutup kas
+      memperhitungkannya, jadi laci yang berkurang tidak lagi muncul sebagai selisih.</p>
+    <div id="mb-ringkas" class="cards"></div>
+    <div class="filterbar">
+      <div class="field"><label>Dari</label><input type="date" id="mb-dari"></div>
+      <div class="field"><label>Sampai</label><input type="date" id="mb-sampai"></div>
+      <div class="field"><label>Pemasok</label><select id="mb-f-sup"><option value="">semua</option></select></div>
+      <button class="go" id="mb-go">Terapkan</button>
+    </div>
+    <div class="tblwrap"><table>
+      <thead><tr><th>Tanggal</th><th>Nota</th><th>Pemasok</th><th>Metode</th>
+        <th class="num">Item</th><th class="num">Nilai</th><th class="num">Sisa</th><th></th></tr></thead>
+      <tbody id="mb-body"></tbody>
+    </table></div>
+  </div>
+
+  <div class="panel">
+    <div class="kat-head"><h2 style="margin:0">Pemasok <span class="muted" id="mb-ns"></span></h2>
+      <span><button class="linkbtn" id="mb-unduh-sup">⬇ unduh CSV</button> ·
+        <button class="linkbtn" id="mb-tambah-sup">+ Tambah pemasok</button></span></div>
+    <div class="tblwrap"><table>
+      <thead><tr><th>Kode</th><th>Nama</th><th>HP</th><th>Alamat</th>
+        <th class="num">Hutang</th><th>Status</th><th></th></tr></thead>
+      <tbody id="mb-sup-body"></tbody>
+    </table></div>
+  </div>`;
+
+  $('#mb-catat').onclick = martNotaModal;
+  $('#mb-tambah-sup').onclick = () => martSupplierModal(null);
+  $('#mb-go').onclick = martMuatBeli;
+  $('#mb-unduh').onclick = martUnduhNota;
+  $('#mb-unduh-sup').onclick = martUnduhSupplier;
+  $('#mb-unduh-hutang').onclick = martUnduhHutangPemasok;
+  martMuatBeli();
+}
+
+async function martMuatBeli() {
+  const p = new URLSearchParams();
+  if ($('#mb-dari')?.value) p.set('dari', $('#mb-dari').value);
+  if ($('#mb-sampai')?.value) p.set('sampai', $('#mb-sampai').value);
+  if ($('#mb-f-sup')?.value) p.set('supplier_id', $('#mb-f-sup').value);
+
+  const [ds, db, dh] = await Promise.all([
+    api('/api/mart/supplier'), api('/api/mart/beli?' + p), api('/api/mart/beli/hutang'),
+  ]);
+  martBeli = { supplier: ds.supplier, beli: db.beli, hutang: dh.hutang, ringkas: db.ringkas };
+
+  const sel = $('#mb-f-sup');
+  if (sel) {
+    const dipilih = sel.value;
+    sel.innerHTML = '<option value="">semua</option>' +
+      ds.supplier.map((s) => `<option value="${s.id}">${esc(s.nama)}</option>`).join('');
+    sel.value = dipilih;
+  }
+
+  $('#mb-ringkas').innerHTML = `
+    <div class="statcard"><span class="muted">Nota pada rentang ini</span><br><b>${db.ringkas.n_nota}</b></div>
+    <div class="statcard"><span class="muted">Nilai pembelian</span><br>
+      <b class="rp">${rp(db.ringkas.nilai)}</b></div>
+    <div class="statcard" style="${dh.total_sisa ? 'border-color:var(--warn)' : ''}">
+      <span class="muted">Hutang ke pemasok</span><br>
+      <b class="rp" style="${dh.total_sisa ? 'color:var(--warn)' : ''}">${rp(dh.total_sisa)}</b></div>
+    <div class="statcard"><span class="muted">Jumlah pemasok</span><br><b>${ds.ringkas.n_supplier}</b></div>`;
+  $('#mb-n').textContent = `— ${db.beli.length}`;
+  $('#mb-ns').textContent = `— ${ds.supplier.length}`;
+
+  // ---- hutang
+  $('#mb-hutang-panel').classList.toggle('hidden', !dh.hutang.length);
+  $('#mb-hutang-n').textContent = dh.hutang.length ? `— ${dh.hutang.length} nota` : '';
+  $('#mb-hutang-body').innerHTML = dh.hutang.map((x, i) => `
+    <tr>
+      <td><code>${esc(x.no_nota)}</code></td>
+      <td><b>${esc(x.supplier)}</b></td>
+      <td>${esc(x.tanggal)}</td>
+      <td class="${x.telat_hari > 0 ? 'minus' : ''}">${x.jatuh_tempo
+        ? esc(x.jatuh_tempo) + (x.telat_hari > 0 ? `<br>telat ${x.telat_hari} hr` : '')
+        : '<span class="muted">—</span>'}</td>
+      <td class="num rp">${rp(x.total)}</td>
+      <td class="num rp">${x.dibayar ? rp(x.dibayar) : '<span class="muted">—</span>'}</td>
+      <td class="num rp"><b>${rp(x.sisa)}</b></td>
+      <td><button class="linkbtn" data-bayar-sup="${i}">💸 bayar</button></td>
+    </tr>`).join('');
+  document.querySelectorAll('[data-bayar-sup]').forEach((b) => {
+    b.onclick = () => martBayarPemasokModal(martBeli.hutang[Number(b.dataset.bayarSup)]);
+  });
+
+  // ---- daftar nota
+  const METODE = { tunai: '💵 tunai', transfer: '🏦 transfer', tempo: '📒 tempo' };
+  $('#mb-body').innerHTML = db.beli.map((b, i) => `
+    <tr${b.status === 'batal' ? ' class="rwm-batal"' : ''}>
+      <td>${esc(b.tanggal)}</td>
+      <td><code>${esc(b.no_nota || '#' + b.id)}</code>
+        ${b.status === 'batal' ? '<br><span class="badge blokir">batal</span>' : ''}</td>
+      <td>${esc(b.supplier)}</td>
+      <td>${METODE[b.metode] || esc(b.metode)}</td>
+      <td class="num">${b.n_item}</td>
+      <td class="num rp"><b>${rp(b.total)}</b></td>
+      <td class="num rp">${b.sisa ? `<b style="color:var(--warn)">${rp(b.sisa)}</b>`
+        : '<span class="muted">lunas</span>'}</td>
+      <td><button class="linkbtn" data-nota="${i}">rincian</button></td>
+    </tr>`).join('') || '<tr><td colspan="8" class="muted">Belum ada nota pembelian.</td></tr>';
+  document.querySelectorAll('#mb-body [data-nota]').forEach((b) => {
+    b.onclick = () => martNotaDetail(martBeli.beli[Number(b.dataset.nota)].id);
+  });
+
+  // ---- pemasok
+  $('#mb-sup-body').innerHTML = ds.supplier.map((s, i) => `
+    <tr>
+      <td><code>${esc(s.kode)}</code></td>
+      <td><b>${esc(s.nama)}</b>${s.keterangan ? `<br><span class="muted">${esc(s.keterangan)}</span>` : ''}</td>
+      <td>${esc(s.hp || '—')}</td>
+      <td class="muted">${esc(s.alamat || '')}</td>
+      <td class="num rp">${s.hutang ? `<b>${rp(s.hutang)}</b>` : '<span class="muted">—</span>'}</td>
+      <td><span class="badge ${s.aktif ? 'aktif' : 'nonaktif'}">${s.aktif ? 'aktif' : 'nonaktif'}</span></td>
+      <td style="white-space:nowrap">
+        <button class="linkbtn" data-ubah-s="${i}">ubah</button> ·
+        <button class="linkbtn danger" data-hapus-s="${i}">hapus</button></td>
+    </tr>`).join('') || '<tr><td colspan="7" class="muted">Belum ada pemasok.</td></tr>';
+  document.querySelectorAll('#mb-sup-body [data-ubah-s]').forEach((b) => {
+    b.onclick = () => martSupplierModal(martBeli.supplier[Number(b.dataset.ubahS)]);
+  });
+  document.querySelectorAll('#mb-sup-body [data-hapus-s]').forEach((b) => {
+    b.onclick = async () => {
+      const s = martBeli.supplier[Number(b.dataset.hapusS)];
+      if (!confirm(`Hapus pemasok "${s.nama}"?`)) return;
+      try {
+        const h = await api('/api/mart/supplier/' + s.id, { method: 'DELETE' });
+        toast(h.dinonaktifkan ? h.pesan : '✔ Pemasok dihapus', 'ok');
+        martMuatBeli();
+      } catch (e) { toast(e.message, 'err'); }
+    };
+  });
+}
+
+function martSupplierModal(s) {
+  openModal(`
+    <h2>${s ? 'Ubah' : 'Tambah'} Pemasok</h2>
+    <div class="field"><label>Nama</label>
+      <input id="ms-nama" value="${esc(s?.nama || '')}" maxlength="120" placeholder="mis. Toko Grosir Pringsewu"></div>
+    <div class="field"><label>Nomor HP</label>
+      <input id="ms-hp" value="${esc(s?.hp || '')}" maxlength="25" inputmode="numeric"></div>
+    <div class="field"><label>Alamat</label>
+      <input id="ms-alamat" value="${esc(s?.alamat || '')}" maxlength="200"></div>
+    <div class="field"><label>Keterangan</label>
+      <input id="ms-ket" value="${esc(s?.keterangan || '')}" maxlength="160"
+        placeholder="mis. kirim tiap Senin & Kamis"></div>
+    ${s ? `<label class="cek"><input type="checkbox" id="ms-aktif" ${s.aktif ? 'checked' : ''}>
+      aktif</label>` : ''}`,
+    async () => {
+      const body = { nama: $('#ms-nama').value, hp: $('#ms-hp').value,
+        alamat: $('#ms-alamat').value, keterangan: $('#ms-ket').value };
+      if (s) body.aktif = $('#ms-aktif').checked ? 1 : 0;
+      if (s) await api('/api/mart/supplier/' + s.id, { method: 'PUT', body });
+      else await api('/api/mart/supplier', { method: 'POST', body });
+      toast('✔ Pemasok tersimpan', 'ok');
+      martMuatBeli();
+    });
+  const n = $('#ms-nama');
+  if (n) n.focus();
+}
+
+/** Catat nota pembelian. Barisnya disusun di layar, hitungannya oleh server. */
+async function martNotaModal() {
+  let produk;
+  try { produk = (await api('/api/mart/barang')).produk; }
+  catch (e) { toast(e.message, 'err'); return; }
+  if (!martBeli.supplier.filter((s) => s.aktif).length) {
+    toast('Tambahkan dulu pemasoknya', 'err');
+    martSupplierModal(null);
+    return;
+  }
+
+  const baris = [];
+  openModal(`
+    <h2>Catat Nota Pembelian</h2>
+    <div class="row" style="gap:10px">
+      <div class="field"><label>Pemasok</label><select id="mn-sup">
+        ${martBeli.supplier.filter((s) => s.aktif)
+          .map((s) => `<option value="${s.id}">${esc(s.nama)}</option>`).join('')}
+      </select></div>
+      <div class="field"><label>No. nota pemasok</label>
+        <input id="mn-no" maxlength="60" placeholder="seperti tertulis di kertasnya"></div>
+    </div>
+    <div class="row" style="gap:10px">
+      <div class="field"><label>Tanggal nota</label>
+        <input type="date" id="mn-tgl" value="${martHariIni()}"></div>
+      <div class="field"><label>Pembayaran</label><select id="mn-metode">
+        <option value="tunai">💵 Tunai — uang keluar dari laci hari ini</option>
+        <option value="transfer">🏦 Transfer — uang keluar dari rekening</option>
+        <option value="tempo">📒 Tempo — dibayar nanti</option>
+      </select></div>
+    </div>
+    <div class="row" style="gap:10px">
+      <div class="field hidden" id="mn-tempo-box"><label>Jatuh tempo</label>
+        <input type="date" id="mn-tempo"></div>
+      <div class="field hidden" id="mn-bank-box"><label>Bank / kanal</label>
+        <input id="mn-bank" maxlength="40" placeholder="mis. BSI"></div>
+    </div>
+
+    <h3 style="font-size:13.5px; margin-bottom:4px">Barang yang datang</h3>
+    <div style="display:flex; gap:8px; align-items:flex-end; margin-bottom:8px">
+      <div class="field" style="flex:1; margin:0"><label>Tambah barang</label>
+        <select id="mn-pilih"><option value="">— pilih barang —</option>
+          ${produk.filter((p) => p.aktif).map((p) => `<option value="${p.id}">${esc(p.nama)}
+            ${p.barcode ? '· ' + esc(p.barcode) : ''}</option>`).join('')}
+        </select></div>
+      <button class="go" id="mn-tambah" style="flex:none">+ Tambah</button>
+    </div>
+    <div class="tblwrap"><table>
+      <thead><tr><th>Barang</th><th class="num">Modal lama</th><th class="num" style="width:90px">Qty</th>
+        <th class="num" style="width:120px">Harga beli</th><th class="num">Subtotal</th><th></th></tr></thead>
+      <tbody id="mn-body"><tr><td colspan="6" class="muted">Belum ada barang.</td></tr></tbody>
+    </table></div>
+    <span class="muted set-hint">Harga modal barang akan <b>diperbarui ke harga beli di nota ini</b>.
+      Angka lamanya disimpan, jadi kalau notanya dibatalkan ia kembali apa adanya.</span>
+    <div class="row" style="gap:10px; margin-top:10px">
+      <div class="field"><label>Diskon nota</label>${inputUang({ id: 'mn-diskon', nilai: '' })}</div>
+      <div class="field"><label>Catatan</label><input id="mn-catatan" maxlength="200"></div>
+    </div>
+    <div id="mn-hitung" class="cart"></div>`,
+    async () => {
+      if (!baris.length) throw new Error('Nota kosong — tambahkan dulu barangnya');
+      await api('/api/mart/beli', { method: 'POST', body: {
+        supplier_id: Number($('#mn-sup').value), no_nota: $('#mn-no').value,
+        metode: $('#mn-metode').value, tanggal: $('#mn-tgl').value,
+        jatuh_tempo: $('#mn-tempo').value || undefined, bank: $('#mn-bank').value,
+        diskon: nilaiUang('#mn-diskon') || 0, catatan: $('#mn-catatan').value,
+        items: baris.map((b) => ({ produk_id: b.id, qty: Number($('#mn-q-' + b.id).value || 0),
+          harga: nilaiUang('#mn-h-' + b.id) || 0 })),
+      }});
+      toast('✔ Nota tercatat — stok & harga modal diperbarui', 'ok');
+      martMuatBeli();
+    }, 'Simpan nota');
+  $('#modal-root .modal').classList.add('modal-lebar');
+
+  const gambar = () => {
+    $('#mn-body').innerHTML = baris.length ? baris.map((b) => `
+      <tr>
+        <td>${esc(b.nama)}</td>
+        <td class="num muted rp">${b.hpp ? rp(b.hpp) : '—'}</td>
+        <td class="num"><input type="number" min="1" id="mn-q-${b.id}" value="${b.qty}"
+          style="width:70px; text-align:right"></td>
+        <td class="num">${inputUang({ id: 'mn-h-' + b.id, nilai: b.harga, kelas: 'bt-kecil' })}</td>
+        <td class="num rp" id="mn-s-${b.id}">${rp(b.harga * b.qty)}</td>
+        <td><button class="linkbtn danger" data-buang-b="${b.id}">✕</button></td>
+      </tr>`).join('') : '<tr><td colspan="6" class="muted">Belum ada barang.</td></tr>';
+    baris.forEach((b) => {
+      $('#mn-q-' + b.id).addEventListener('input', hitung);
+      $('#mn-h-' + b.id).addEventListener('input', hitung);
+    });
+    document.querySelectorAll('[data-buang-b]').forEach((x) => {
+      x.onclick = () => {
+        const i = baris.findIndex((b) => b.id === Number(x.dataset.buangB));
+        if (i >= 0) baris.splice(i, 1);
+        gambar();
+        hitung();
+      };
+    });
+    hitung();
+  };
+
+  const hitung = () => {
+    let sub = 0;
+    let rugi = [];
+    baris.forEach((b) => {
+      const q = Number($('#mn-q-' + b.id)?.value || 0);
+      const h = nilaiUang('#mn-h-' + b.id) || 0;
+      sub += q * h;
+      if ($('#mn-s-' + b.id)) $('#mn-s-' + b.id).textContent = rp(q * h);
+      if (h >= b.jual) rugi.push(b.nama);
+    });
+    const dis = Math.min(nilaiUang('#mn-diskon') || 0, sub);
+    $('#mn-hitung').innerHTML = `
+      <div class="cart-line"><span>Subtotal nota</span><span class="rp">${rp(sub)}</span></div>
+      <div class="cart-line"><span>Diskon</span><span class="rp">−${rp(dis)}</span></div>
+      <div class="cart-line"><span><b>Total dibayar</b></span>
+        <span class="rp"><b>${rp(sub - dis)}</b></span></div>
+      ${rugi.length ? `<div class="cart-line"><span class="minus">
+        ⚠ Harga beli ≥ harga jual: <b>${rugi.map(esc).join(', ')}</b> — periksa lagi, atau
+        naikkan harga jualnya di Barang &amp; Stok.</span></div>` : ''}`;
+  };
+
+  $('#mn-tambah').onclick = () => {
+    const id = Number($('#mn-pilih').value);
+    const p = produk.find((x) => x.id === id);
+    if (!p) { toast('Pilih barangnya dulu', 'err'); return; }
+    if (baris.some((b) => b.id === id)) { toast('Barang itu sudah ada di nota', 'err'); return; }
+    baris.push({ id: p.id, nama: p.nama, hpp: p.hpp, jual: p.harga, qty: 1, harga: p.hpp || 0 });
+    $('#mn-pilih').value = '';
+    gambar();
+  };
+  $('#mn-metode').onchange = () => {
+    const m = $('#mn-metode').value;
+    $('#mn-tempo-box').classList.toggle('hidden', m !== 'tempo');
+    $('#mn-bank-box').classList.toggle('hidden', m !== 'transfer');
+  };
+  $('#mn-diskon').addEventListener('input', hitung);
+  gambar();
+}
+
+async function martNotaDetail(id) {
+  const d = await api('/api/mart/beli/' + id);
+  const b = d.beli;
+  const METODE = { tunai: '💵 Tunai', transfer: '🏦 Transfer', tempo: '📒 Tempo' };
+  openModal(`
+    <h2>Nota ${esc(b.no_nota || '#' + b.id)}</h2>
+    ${b.status === 'batal' ? `<p class="preview" style="border-color:var(--err); color:var(--err)">
+      <b>Nota ini dibatalkan.</b> Stoknya sudah ditarik kembali dan harga modal barangnya
+      dikembalikan ke angka sebelum nota ini.</p>` : ''}
+    <p class="muted">${esc(b.supplier)} · ${esc(b.tanggal)} ·
+      ${METODE[b.metode] || esc(b.metode)}${b.jatuh_tempo ? ` · jatuh tempo ${esc(b.jatuh_tempo)}` : ''}
+      · dicatat ${esc(b.operator)}${b.catatan ? `<br>${esc(b.catatan)}` : ''}</p>
+    <div class="tblwrap"><table>
+      <thead><tr><th>Barang</th><th class="num">Qty</th><th class="num">Harga beli</th>
+        <th class="num">Subtotal</th><th class="num">Modal sebelumnya</th></tr></thead>
+      <tbody>${d.item.map((i) => `<tr><td>${esc(i.nama)}</td>
+        <td class="num">${i.qty}</td><td class="num rp">${rp(i.harga)}</td>
+        <td class="num rp">${rp(i.subtotal)}</td>
+        <td class="num rp muted">${i.hpp_lama === null ? '—' : rp(i.hpp_lama)}</td></tr>`).join('')}</tbody>
+    </table></div>
+    <div class="cart">
+      <div class="cart-line"><span>Subtotal</span><span class="rp">${rp(b.subtotal)}</span></div>
+      ${b.diskon ? `<div class="cart-line"><span>Diskon</span>
+        <span class="rp">−${rp(b.diskon)}</span></div>` : ''}
+      <div class="cart-line"><span><b>Total</b></span><span class="rp"><b>${rp(b.total)}</b></span></div>
+      <div class="cart-line"><span>Sudah dibayar</span><span class="rp">${rp(b.dibayar)}</span></div>
+      ${b.sisa ? `<div class="cart-line"><span><b>Sisa hutang</b></span>
+        <span class="rp"><b style="color:var(--warn)">${rp(b.sisa)}</b></span></div>` : ''}
+    </div>
+    ${d.bayar.length ? `<h3 style="font-size:13.5px">Pembayaran</h3>
+      <div class="tblwrap"><table>
+        <thead><tr><th>Waktu</th><th>Metode</th><th class="num">Jumlah</th>
+          <th>Catatan</th><th>Oleh</th></tr></thead>
+        <tbody>${d.bayar.map((x) => `<tr><td>${waktuSingkat(x.created_at)}</td>
+          <td>${x.metode === 'transfer' ? '🏦 ' + esc(x.bank || 'transfer') : '💵 tunai'}</td>
+          <td class="num rp">${rp(x.jumlah)}</td><td class="muted">${esc(x.catatan || '')}</td>
+          <td>${esc(x.operator)}</td></tr>`).join('')}</tbody>
+      </table></div>` : ''}
+    ${b.status === 'sah' && !d.bayar.length && !b.terkunci
+      ? '<button class="linkbtn danger" id="mn-batal">✕ batalkan nota</button>'
+      : b.status === 'sah' ? `<p class="muted">Nota ini tidak bisa dibatalkan lagi —
+          ${d.bayar.length ? 'uangnya sudah keluar' : 'kas tanggal itu sudah ditutup'}.</p>` : ''}`);
+  $('#modal-root .modal').classList.add('modal-lebar');
+  if ($('#mn-batal')) $('#mn-batal').onclick = () => martBatalNotaModal(b);
+}
+
+function martBatalNotaModal(b) {
+  openModal(`
+    <h2>Batalkan nota ${esc(b.no_nota || '#' + b.id)}?</h2>
+    <ul class="muted" style="line-height:1.9">
+      <li>Stok yang masuk lewat nota ini <b>ditarik kembali</b>.</li>
+      <li>Harga modal barangnya <b>dikembalikan</b> ke angka sebelum nota ini.</li>
+      <li>Barisnya <b>tetap ada</b> bertanda batal — nota yang pernah dicatat tidak boleh
+        hilang tanpa bekas.</li>
+    </ul>
+    <div class="field"><label>Alasan <b class="minus">wajib</b></label>
+      <input id="mnb-alasan" maxlength="200" placeholder="mis. barang dikembalikan, kemasan rusak"></div>`,
+    async () => {
+      await api(`/api/mart/beli/${b.id}/batal`, { method: 'POST',
+        body: { alasan: $('#mnb-alasan').value } });
+      toast('✔ Nota dibatalkan — stok & harga modal dikembalikan', 'ok');
+      martMuatBeli();
+    }, 'Batalkan nota');
+  const a = $('#mnb-alasan');
+  if (a) a.focus();
+}
+
+function martBayarPemasokModal(h) {
+  openModal(`
+    <h2>Bayar Pemasok</h2>
+    <p class="muted"><code>${esc(h.no_nota)}</code> · ${esc(h.supplier)}
+      ${h.jatuh_tempo ? ` · jatuh tempo ${esc(h.jatuh_tempo)}` : ''}
+      ${h.telat_hari > 0 ? ` · <b class="minus">telat ${h.telat_hari} hari</b>` : ''}</p>
+    <div class="cart">
+      <div class="cart-line"><span>Nilai nota</span><span class="rp">${rp(h.total)}</span></div>
+      <div class="cart-line"><span>Sudah dibayar</span><span class="rp">${rp(h.dibayar)}</span></div>
+      <div class="cart-line"><span><b>Sisa</b></span><span class="rp"><b>${rp(h.sisa)}</b></span></div>
+    </div>
+    <div class="k-chip-baris" style="margin:10px 0 8px">
+      <button class="k-chip" id="mbp-lunas">Lunasi ${rp(h.sisa)}</button>
+    </div>
+    <div class="field"><label>Jumlah dibayar</label>${inputUang({ id: 'mbp-jumlah', nilai: '' })}</div>
+    <div class="field"><label>Dibayar dari</label><select id="mbp-metode">
+      <option value="tunai">💵 Tunai — uang keluar dari laci</option>
+      <option value="transfer">🏦 Transfer — uang keluar dari rekening</option></select></div>
+    <div class="field hidden" id="mbp-bank-box"><label>Bank / kanal</label>
+      <input id="mbp-bank" maxlength="40"></div>
+    <div class="field"><label>Catatan (opsional)</label><input id="mbp-catatan" maxlength="160"></div>
+    <p class="muted">Uang ini keluar <b>hari ini</b>, dan tutup kas hari ini yang akan
+      memperhitungkannya — jadi laci yang berkurang tidak muncul sebagai selisih.</p>`,
+    async () => {
+      const d = await api(`/api/mart/beli/${h.id}/bayar`, { method: 'POST', body: {
+        jumlah: nilaiUang('#mbp-jumlah') || 0, metode: $('#mbp-metode').value,
+        bank: $('#mbp-bank').value, catatan: $('#mbp-catatan').value,
+      }});
+      toast(d.lunas ? '✔ Hutang ke pemasok LUNAS' : `✔ Dibayar — sisa ${rp(d.sisa)}`, 'ok');
+      martMuatBeli();
+    }, 'Bayar');
+  $('#mbp-lunas').onclick = () => isiUang('#mbp-jumlah', h.sisa);
+  $('#mbp-metode').onchange = () =>
+    $('#mbp-bank-box').classList.toggle('hidden', $('#mbp-metode').value !== 'transfer');
+  const j = $('#mbp-jumlah');
+  if (j) j.focus();
+}
+
+function martUnduhNota() {
+  unduhCsv(`nota-pembelian-${martHariIni()}.csv`,
+    ['Tanggal', 'No. nota', 'Pemasok', 'Metode', 'Jatuh tempo', 'Item', 'Subtotal', 'Diskon',
+      'Total', 'Dibayar', 'Sisa', 'Status', 'Catatan'],
+    martBeli.beli.map((b) => [b.tanggal, b.no_nota, b.supplier, b.metode, b.jatuh_tempo || '',
+      b.n_item, b.subtotal, b.diskon, b.total, b.dibayar, b.sisa, b.status, b.catatan]));
+}
+
+function martUnduhSupplier() {
+  unduhCsv(`pemasok-mart-${martHariIni()}.csv`,
+    ['Kode', 'Nama', 'HP', 'Alamat', 'Keterangan', 'Hutang', 'Status'],
+    martBeli.supplier.map((s) => [s.kode, s.nama, s.hp, s.alamat, s.keterangan,
+      s.hutang, s.aktif ? 'aktif' : 'nonaktif']));
+}
+
+function martUnduhHutangPemasok() {
+  unduhCsv(`hutang-pemasok-${martHariIni()}.csv`,
+    ['No. nota', 'Pemasok', 'Tanggal', 'Jatuh tempo', 'Telat (hari)', 'Nilai', 'Dibayar', 'Sisa'],
+    martBeli.hutang.map((h) => [h.no_nota, h.supplier, h.tanggal, h.jatuh_tempo || '',
+      h.telat_hari ?? '', h.total, h.dibayar, h.sisa]));
 }
 
 // ------------------------------- BETULKAN / BATALKAN TRANSAKSI (riwayat)

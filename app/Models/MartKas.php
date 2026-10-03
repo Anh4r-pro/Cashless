@@ -22,12 +22,13 @@ class MartKas extends Model
     // tersimpan sebagai nol, dan selisihnya terbaca seolah uangnya hilang.
     protected $fillable = [
         'tenant_id', 'tanggal', 'kas_awal', 'tunai', 'hitung_fisik', 'selisih',
-        'transfer', 'hitung_transfer', 'selisih_transfer',
+        'transfer', 'keluar', 'keluar_transfer', 'hitung_transfer', 'selisih_transfer',
         'catatan', 'operator', 'created_at',
     ];
 
     protected $casts = [
         'kas_awal' => 'int', 'tunai' => 'int', 'hitung_fisik' => 'int', 'selisih' => 'int',
-        'transfer' => 'int', 'hitung_transfer' => 'int', 'selisih_transfer' => 'int',
+        'transfer' => 'int', 'keluar' => 'int', 'keluar_transfer' => 'int',
+        'hitung_transfer' => 'int', 'selisih_transfer' => 'int',
     ];
 }

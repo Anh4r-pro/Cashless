@@ -154,19 +154,31 @@ class MartLaporanController extends Controller
         return max(0, $hutang - $bayar);
     }
 
-    /** Modal barang yang terjual pada periode — dari dua buku penjualan sekaligus. */
+    /**
+     * Modal barang yang terjual pada periode — dari dua buku penjualan sekaligus.
+     *
+     * Yang dipakai POTRET harga modal pada baris penjualannya (`i.hpp`), bukan
+     * harga modal yang berlaku sekarang. Sejak ada modul pembelian, harga modal
+     * berubah setiap kali nota masuk; membaca harga hari ini akan membuat laba
+     * bulan lalu ikut bergerak — angka yang sudah dibaca orang dan mungkin
+     * sudah dibawa ke rapat.
+     *
+     * Baris lama yang belum punya potret jatuh ke `produk.hpp`, persis seperti
+     * cara lama. Ia tidak menjadi lebih benar, tetapi juga tidak kehilangan
+     * angkanya hanya karena kolom baru ditambahkan.
+     */
     private function hpp(Tenant $t, ?string $sejak): int
     {
         $a = DB::table('mart_jual_item as i')->join('mart_jual as j', 'j.id', '=', 'i.jual_id')
-            ->join('produk as p', 'p.id', '=', 'i.produk_id')
+            ->leftJoin('produk as p', 'p.id', '=', 'i.produk_id')
             ->where('j.tenant_id', $t->id)->where('j.status', 'sah')
             ->when($sejak, fn ($q) => $q->where('j.created_at', '>=', $sejak))
-            ->selectRaw('COALESCE(SUM(i.qty * COALESCE(p.hpp,0)),0) n')->value('n');
+            ->selectRaw('COALESCE(SUM(i.qty * COALESCE(i.hpp, p.hpp, 0)),0) n')->value('n');
 
-        $b = DB::table('transaksi_item as i')->join('produk as p', 'p.id', '=', 'i.produk_id')
+        $b = DB::table('transaksi_item as i')->leftJoin('produk as p', 'p.id', '=', 'i.produk_id')
             ->where('i.tenant_id', $t->id)
             ->when($sejak, fn ($q) => $q->where('i.created_at', '>=', $sejak))
-            ->selectRaw('COALESCE(SUM(i.qty * COALESCE(p.hpp,0)),0) n')->value('n');
+            ->selectRaw('COALESCE(SUM(i.qty * COALESCE(i.hpp, p.hpp, 0)),0) n')->value('n');
 
         return (int) $a + (int) $b;
     }
