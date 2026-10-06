@@ -60,7 +60,7 @@ class TopupMassalController extends Controller
             $sheet->setCellValue([$k + 1, 1], $kol['judul']);
             $sheet->getColumnDimensionByColumn($k + 1)->setWidth($kol['lebar']);
         }
-        $sheet->getStyle('A1:F1')->getFont()->setBold(true);
+        $sheet->getStyle('A1:' . ImporTopup::hurufAkhir() . '1')->getFont()->setBold(true);
         $sheet->freezePane('A2');
 
         $baris = 2;
@@ -70,6 +70,7 @@ class TopupMassalController extends Controller
             // memperlakukannya sebagai angka, dan NIS itulah kunci pencocokannya.
             $sheet->setCellValueExplicit([2, $baris], $s->nis, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
             $sheet->setCellValue([3, $baris], $s->nama);
+            $sheet->setCellValue([4, $baris], $s->kelas);
             $baris++;
         }
         // Berkas kosong tetap diberi 30 baris bernomor supaya terlihat sebagai
@@ -306,26 +307,36 @@ class TopupMassalController extends Controller
         // (05/08 bisa jadi 5 Agustus atau 8 Mei), sedangkan teks berbentuk tetap
         // dibaca server dengan satu tafsiran. Rumus di bawah memeriksa BENTUKNYA;
         // kebenaran kalendernya (mis. 31/02) diperiksa server.
+        // Huruf kolom DITURUNKAN dari definisi kolom. Lihat KolomTemplate:
+        // menyisipkan satu kolom baru di tengah pernah nyaris membuat aturan
+        // isian menempel pada kolom yang keliru, tanpa satu pun tanda.
+        $kNo = ImporTopup::huruf('no');
+        $kNis = ImporTopup::huruf('nis');
+        $kNom = ImporTopup::huruf('nominal');
+        $kTgl = ImporTopup::huruf('tanggal');
+        $kMet = ImporTopup::huruf('metode');
+
         $bentukTanggal = implode(',', [
-            'LEN(E2)=10', 'MID(E2,3,1)="/"', 'MID(E2,6,1)="/"',
-            'ISNUMBER(VALUE(LEFT(E2,2)))', 'ISNUMBER(VALUE(MID(E2,4,2)))', 'ISNUMBER(VALUE(RIGHT(E2,4)))',
-            'VALUE(LEFT(E2,2))>=1', 'VALUE(LEFT(E2,2))<=31',
-            'VALUE(MID(E2,4,2))>=1', 'VALUE(MID(E2,4,2))<=12',
-            'VALUE(RIGHT(E2,4))>=2020',
+            "LEN({$kTgl}2)=10", "MID({$kTgl}2,3,1)=\"/\"", "MID({$kTgl}2,6,1)=\"/\"",
+            "ISNUMBER(VALUE(LEFT({$kTgl}2,2)))", "ISNUMBER(VALUE(MID({$kTgl}2,4,2)))",
+            "ISNUMBER(VALUE(RIGHT({$kTgl}2,4)))",
+            "VALUE(LEFT({$kTgl}2,2))>=1", "VALUE(LEFT({$kTgl}2,2))<=31",
+            "VALUE(MID({$kTgl}2,4,2))>=1", "VALUE(MID({$kTgl}2,4,2))<=12",
+            "VALUE(RIGHT({$kTgl}2,4))>=2020",
         ]);
 
         $aturan = [
-            ['A', DataValidation::TYPE_WHOLE, DataValidation::OPERATOR_BETWEEN, '1', (string) $b,
+            [$kNo, DataValidation::TYPE_WHOLE, DataValidation::OPERATOR_BETWEEN, '1', (string) $b,
                 'Nomor urut', 'Hanya penomoran, boleh dibiarkan kosong.',
                 'Nomor tidak valid', 'Kolom No hanya boleh berisi angka urut.'],
 
-            ['B', DataValidation::TYPE_TEXTLENGTH, DataValidation::OPERATOR_BETWEEN, '3', '20',
+            [$kNis, DataValidation::TYPE_TEXTLENGTH, DataValidation::OPERATOR_BETWEEN, '3', '20',
                 'NIS santri',
                 'Harus sama dengan NIS pada data santri (3–20 karakter). Nama santri akan dicocokkan dengan NIS ini.',
                 'NIS tidak valid', 'NIS harus 3–20 karakter. Jangan menulis nama di kolom ini.'],
 
-            ['D', DataValidation::TYPE_CUSTOM, null,
-                "AND(ISNUMBER(D2),D2>={$nomMin},D2<={$maksNominal},MOD(D2,100)=0)", null,
+            [$kNom, DataValidation::TYPE_CUSTOM, null,
+                "AND(ISNUMBER({$kNom}2),{$kNom}2>={$nomMin},{$kNom}2<={$maksNominal},MOD({$kNom}2,100)=0)", null,
                 'Nominal top up',
                 'Tulis ANGKA saja tanpa "Rp" atau titik, mis. 50000. Kelipatan 100, antara ' .
                     Rupiah::f($nomMin) . ' dan ' . Rupiah::f($maksNominal) . '.',
@@ -333,14 +344,14 @@ class TopupMassalController extends Controller
                 'Nominal harus angka (bukan teks), kelipatan Rp100, antara ' . Rupiah::f($nomMin) .
                     ' dan ' . Rupiah::f($maksNominal) . '. Contoh: 50000. Jangan pakai "Rp" atau titik ribuan.'],
 
-            ['E', DataValidation::TYPE_CUSTOM, null, "AND({$bentukTanggal})", null,
+            [$kTgl, DataValidation::TYPE_CUSTOM, null, "AND({$bentukTanggal})", null,
                 'Tanggal uang diterima',
                 'Format DD/MM/YYYY dengan angka nol di depan, mis. 05/08/2026.',
                 'Format tanggal salah',
                 'Tulis tanggal persis dalam bentuk DD/MM/YYYY, mis. 05/08/2026. ' .
                     'Tanggal di masa depan atau lebih dari 365 hari yang lalu akan ditolak saat diperiksa.'],
 
-            ['F', DataValidation::TYPE_LIST, null,
+            [$kMet, DataValidation::TYPE_LIST, null,
                 '"' . implode(',', array_values(ImporTopup::METODE)) . '"', null,
                 'Metode pembayaran', 'Pilih dari daftar: Tunai, Transfer Bank, atau QRIS.',
                 'Metode tidak dikenal', 'Pilih salah satu dari daftar: Tunai, Transfer Bank, atau QRIS.'],

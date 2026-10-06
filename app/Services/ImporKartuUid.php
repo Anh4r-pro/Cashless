@@ -26,6 +26,8 @@ use PhpOffice\PhpSpreadsheet\IOFactory;
  */
 class ImporKartuUid
 {
+    use \App\Support\KolomTemplate;
+
     public const MAKS_BARIS = 500;
 
     public const JENIS = ['santri', 'sdm'];
@@ -34,6 +36,10 @@ class ImporKartuUid
         ['kunci' => 'no', 'judul' => 'No', 'lebar' => 6],
         ['kunci' => 'nis', 'judul' => 'NIS/NIY', 'lebar' => 18],
         ['kunci' => 'nama', 'judul' => 'Nama', 'lebar' => 32],
+        // Hanya untuk yang mengisi berkasnya — tidak dibaca saat mengurai.
+        // Judulnya "Kelas / Unit" karena template yang sama dipakai santri
+        // (berkelas) dan SDM (berunit).
+        ['kunci' => 'kelas', 'judul' => 'Kelas / Unit', 'lebar' => 16],
         ['kunci' => 'uid', 'judul' => 'UID Kartu', 'lebar' => 22],
     ];
 
@@ -41,6 +47,7 @@ class ImporKartuUid
         'uid' => '/uid|rfid|kartu/i',
         'nis' => '/\bniy\b|pegawai|\bnip\b|\bnis\b|induk/i',
         'nama' => '/nama/i',
+        'kelas' => '/\bkelas\b|\bunit\b/i',
         'no' => '/^no\.?$|nomor urut|urut/i',
     ];
 

@@ -45,7 +45,7 @@ class KartuMassalController extends Controller
             $sheet->setCellValue([$k + 1, 1], $kol['judul']);
             $sheet->getColumnDimensionByColumn($k + 1)->setWidth($kol['lebar']);
         }
-        $sheet->getStyle('A1:D1')->getFont()->setBold(true);
+        $sheet->getStyle('A1:' . ImporKartuUid::hurufAkhir() . '1')->getFont()->setBold(true);
         $sheet->freezePane('A2');
 
         $baris = 2;
@@ -53,6 +53,7 @@ class KartuMassalController extends Controller
             $sheet->setCellValueExplicit([1, $baris], $i + 1, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_NUMERIC);
             $sheet->setCellValueExplicit([2, $baris], $s->nis, \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_STRING);
             $sheet->setCellValue([3, $baris], $s->nama);
+            $sheet->setCellValue([4, $baris], $s->kelas);
             $baris++;
         }
         if ($siswa->isEmpty()) {
@@ -250,16 +251,17 @@ class KartuMassalController extends Controller
         $ist = ImporKartuUid::istilah($jenis);
 
         $aturan = [
-            ['A', DataValidation::TYPE_WHOLE, DataValidation::OPERATOR_BETWEEN, '1', (string) $b,
+            [ImporKartuUid::huruf('no'), DataValidation::TYPE_WHOLE, DataValidation::OPERATOR_BETWEEN, '1', (string) $b,
                 'Nomor urut', 'Hanya penomoran, boleh dibiarkan apa adanya.',
                 'Nomor tidak valid', 'Kolom No hanya boleh berisi angka urut.'],
 
-            ['B', DataValidation::TYPE_TEXTLENGTH, DataValidation::OPERATOR_BETWEEN, '3', '20',
+            [ImporKartuUid::huruf('nis'), DataValidation::TYPE_TEXTLENGTH, DataValidation::OPERATOR_BETWEEN, '3', '20',
                 $ist['nomor'],
                 "Harus sama dengan {$ist['nomor']} pada data " . $ist['orang'] . ' yang sudah terdaftar.',
                 "{$ist['nomor']} tidak valid", "{$ist['nomor']} harus 3–20 karakter."],
 
-            ['D', DataValidation::TYPE_TEXTLENGTH, DataValidation::OPERATOR_BETWEEN, '0', '40',
+            // Huruf kolom diturunkan dari definisi; lihat KolomTemplate.
+            [ImporKartuUid::huruf('uid'), DataValidation::TYPE_TEXTLENGTH, DataValidation::OPERATOR_BETWEEN, '0', '40',
                 'UID Kartu',
                 'Kosongkan baris yang kartunya belum ada di tangan Anda sekarang — baris kosong ' .
                     'dilewati, bukan dianggap gagal. Isi PERSIS seperti yang tercetak/terbaca di kartu.',

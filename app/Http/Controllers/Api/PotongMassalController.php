@@ -58,7 +58,7 @@ class PotongMassalController extends Controller
             $sheet->setCellValue([$k + 1, 1], $kol['judul']);
             $sheet->getColumnDimensionByColumn($k + 1)->setWidth($kol['lebar']);
         }
-        $sheet->getStyle('A1:E1')->getFont()->setBold(true);
+        $sheet->getStyle('A1:' . ImporPotong::hurufAkhir() . '1')->getFont()->setBold(true);
         $sheet->freezePane('A2');
 
         $baris = 2;
@@ -68,6 +68,7 @@ class PotongMassalController extends Controller
             // memperlakukannya sebagai angka, dan NIS itulah kunci pencocokannya.
             $sheet->setCellValueExplicit([2, $baris], $s->nis, DataType::TYPE_STRING);
             $sheet->setCellValue([3, $baris], $s->nama);
+            $sheet->setCellValue([4, $baris], $s->kelas);
             $baris++;
         }
         if ($siswa->isEmpty()) {
@@ -75,7 +76,10 @@ class PotongMassalController extends Controller
                 $sheet->setCellValue([1, $i + 1], $i);
             }
         }
-        $sheet->getStyle('B2:B' . max($baris, ImporPotong::MAKS_BARIS + 1))
+        // NIS diformat TEKS: nol di depan hilang kalau Excel menganggapnya
+        // bilangan, dan NIS itulah kunci pencocokannya.
+        $kNis = ImporPotong::huruf('nis');
+        $sheet->getStyle("{$kNis}2:{$kNis}" . max($baris, ImporPotong::MAKS_BARIS + 1))
             ->getNumberFormat()->setFormatCode('@');
 
         $p = $book->createSheet();
@@ -91,6 +95,8 @@ class PotongMassalController extends Controller
             '1. Satu baris untuk satu santri. Kolom No hanya penomoran. Baris kosong dilewati.',
             '2. Jangan mengubah judul kolom — kolom dikenali dari judulnya, bukan urutannya.',
             '3. NIS: angka saja, dan inilah yang menentukan santrinya.',
+            '   Kolom Kelas hanya penolong baca — ia tidak diperiksa, sebab santri bisa naik kelas',
+            '   antara template ini diunduh dan berkasnya diunggah.',
             '4. Nama Santri: WAJIB diisi dan harus cocok dengan nama di sistem. Nama di sini bukan',
             '   hiasan — ia yang menangkap NIS salah ketik yang kebetulan menunjuk santri lain.',
             '   Baris yang namanya tidak cocok akan ditolak di layar pratinjau, bukan dipotong.',

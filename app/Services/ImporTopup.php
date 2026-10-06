@@ -18,6 +18,8 @@ use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
  */
 class ImporTopup
 {
+    use \App\Support\KolomTemplate;
+
     public const MAKS_BARIS = 1000;
 
     /** Tanggal terima lebih tua dari ini hampir pasti salah ketik. */
@@ -29,6 +31,13 @@ class ImporTopup
         ['kunci' => 'no', 'judul' => 'No', 'lebar' => 6],
         ['kunci' => 'nis', 'judul' => 'NIS', 'lebar' => 16],
         ['kunci' => 'nama', 'judul' => 'Nama Santri', 'lebar' => 30],
+        // Kelas ikut dituliskan walau TIDAK dibaca saat mengurai: ia untuk
+        // yang mengisi berkasnya — menyaring, mengurutkan, dan memecah per
+        // kelas di Excel. Tidak diperiksa karena santri bisa naik kelas antara
+        // template diunduh dan berkasnya diunggah, dan menolak baris karena
+        // itu hanya akan membuat orang curiga pada sistemnya, bukan pada
+        // berkasnya.
+        ['kunci' => 'kelas', 'judul' => 'Kelas', 'lebar' => 12],
         ['kunci' => 'nominal', 'judul' => 'Nominal Topup', 'lebar' => 18],
         ['kunci' => 'tanggal', 'judul' => 'Tanggal Uang Diterima (Format DD/MM/YYYY)', 'lebar' => 26],
         ['kunci' => 'metode', 'judul' => 'Metode Pembayaran (Tunai, Transfer Bank, dan QRIS)', 'lebar' => 30],
@@ -38,6 +47,7 @@ class ImporTopup
     private const PETUNJUK = [
         'nis' => '/\bnis\b|nisn|induk/i',
         'nama' => '/nama/i',
+        'kelas' => '/\bkelas\b|\bunit\b/i',
         'nominal' => '/nominal|jumlah|rupiah|nilai|saldo/i',
         'tanggal' => '/tanggal|tgl|diterima/i',
         'metode' => '/metode|cara|bayar|pembayaran/i',

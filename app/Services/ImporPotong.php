@@ -33,19 +33,27 @@ use PhpOffice\PhpSpreadsheet\IOFactory;
  */
 class ImporPotong
 {
+    use \App\Support\KolomTemplate;
+
     public const MAKS_BARIS = 1000;
 
     public const KOLOM = [
-        ['judul' => 'No', 'lebar' => 6],
-        ['judul' => 'NIS', 'lebar' => 16],
-        ['judul' => 'Nama Santri', 'lebar' => 30],
-        ['judul' => 'Nominal Potong', 'lebar' => 18],
-        ['judul' => 'Keterangan', 'lebar' => 40],
+        ['kunci' => 'no', 'judul' => 'No', 'lebar' => 6],
+        ['kunci' => 'nis', 'judul' => 'NIS', 'lebar' => 16],
+        ['kunci' => 'nama', 'judul' => 'Nama Santri', 'lebar' => 30],
+        // Ikut dituliskan tetapi TIDAK dibaca saat mengurai — ia untuk yang
+        // mengisi berkasnya. Santri bisa naik kelas antara template diunduh
+        // dan berkasnya diunggah; menolak baris karena itu akan terasa seperti
+        // kesalahan sistem, padahal datanya benar.
+        ['kunci' => 'kelas', 'judul' => 'Kelas', 'lebar' => 12],
+        ['kunci' => 'nominal', 'judul' => 'Nominal Potong', 'lebar' => 18],
+        ['kunci' => 'keterangan', 'judul' => 'Keterangan', 'lebar' => 40],
     ];
 
     /** Kolom dikenali dari JUDULNYA, bukan posisinya. */
     private const PETUNJUK = [
         'nis' => '/\bnis\b|nisn|induk/i',
+        'kelas' => '/\bkelas\b|\bunit\b/i',
         'nominal' => '/nominal|potong|jumlah|rupiah|nilai/i',
         'keterangan' => '/keterangan|alasan|catatan|sebab/i',
         'nama' => '/nama/i',
