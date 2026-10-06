@@ -5359,6 +5359,22 @@ function saldoView(el) {
         <button data-mode="potong" class="minus-mode">− Potong</button>
         <button data-mode="kolektif" class="minus-mode">👥 Potong Kolektif</button>
       </div>
+      <p class="muted hidden" id="sd-impor-ajak" style="margin:0 0 10px">
+        Nominalnya berbeda-beda tiap santri?
+        <button class="linkbtn" id="sd-impor-buka">⬆ Potong via Excel</button> ·
+        <button class="linkbtn" id="sd-impor-riwayat">riwayat</button></p>
+      <div class="aju-unduh hidden" id="sd-impor-box">
+        <span class="muted">Satu berkas, nominal berbeda tiap santri:</span>
+        <select id="sd-impor-kelas" class="k-chip-select" style="width:auto; margin:0 4px">
+          <option value="">template kosong</option>
+        </select>
+        <button class="linkbtn" id="sd-impor-tpl">⬇ Unduh template</button>
+        <label class="linkbtn" style="cursor:pointer">📂 Pilih berkas yang sudah diisi
+          <input type="file" id="sd-impor-berkas" accept=".xlsx,.csv" class="hidden"></label>
+        <span class="muted set-hint">Berkasnya diperiksa dulu di layar — <b>tidak ada satu rupiah
+          pun yang berpindah</b> sebelum Anda menekan terapkan. Baris yang namanya tidak cocok,
+          NIS-nya tidak terdaftar, atau saldonya kurang akan dilewati beserta sebabnya.</span>
+      </div>
       <div class="field"><label id="sd-jumlah-label">Nominal</label>
         <div class="quick" id="sd-quick"></div>
         ${inputUang({ id: 'sd-jumlah', placeholder: 'Nominal lain (Rp)' })}</div>
@@ -5418,6 +5434,10 @@ function saldoView(el) {
       $('#sd-ket').value = '';
       el.querySelectorAll('#sd-mode button').forEach((x) => x.classList.toggle('sel', x === b));
       $('#sd-kurang-field').classList.toggle('hidden', !sdKolektif());
+      // Jalur Excel hanya ditawarkan di mode kolektif — di sanalah "nominal
+      // berbeda tiap santri" menjadi pertanyaan yang wajar muncul.
+      $('#sd-impor-ajak').classList.toggle('hidden', !sdKolektif());
+      if (!sdKolektif()) $('#sd-impor-box').classList.add('hidden');
       sdRenderTarget();
       sdRenderQuick();
       sdRenderKategori();
@@ -5445,6 +5465,28 @@ function saldoView(el) {
   // yang tersorot begitu teksnya menyimpang dari kategori mana pun)
   $('#sd-ket').addEventListener('input', () => { sdRenderKategori(); sdSync(); });
   $('#sd-kurang').addEventListener('change', () => { sdRenderBatch(); sdSync(); });
+
+  $('#sd-impor-buka').onclick = () => $('#sd-impor-box').classList.toggle('hidden');
+  $('#sd-impor-riwayat').onclick = potongRiwayatModal;
+  $('#sd-impor-tpl').onclick = () => {
+    // Berkas biner: lewat <a>, bukan fetch+JSON.
+    const kelas = $('#sd-impor-kelas').value;
+    const a2 = document.createElement('a');
+    a2.href = '/api/potong-massal/template' + (kelas ? `?isi=1&kelas=${encodeURIComponent(kelas)}` : '');
+    document.body.appendChild(a2); a2.click(); a2.remove();
+  };
+  $('#sd-impor-berkas').onchange = (e) => {
+    const f = e.target.files[0];
+    e.target.value = '';   // berkas yang sama boleh dipilih lagi sesudah diperbaiki
+    if (f) potongImporPratinjau(f);
+  };
+  // Daftar kelas untuk template terisi — dipakai juga oleh saringan di panel 1.
+  api('/api/kelas').then((d) => {
+    const sel = $('#sd-impor-kelas');
+    if (!sel || !d.kelas) return;
+    sel.innerHTML = '<option value="">template kosong</option>'
+      + d.kelas.map((k) => `<option value="${esc(k)}">terisi kelas ${esc(k)}</option>`).join('');
+  }).catch(() => {});
   $('#btn-saldo').onclick = doSaldo;
   $('#sd-refresh').onclick = loadPenyesuaian;
 
@@ -7311,6 +7353,128 @@ function tenantModal(t) {
   };
   $('#m-mode').addEventListener('change', selarasManual);
   selarasManual();
+}
+
+/*
+ * Potong saldo kolektif lewat berkas Excel, nominal berbeda tiap santri.
+ *
+ * Dua langkah, dan langkah pertama TIDAK memindahkan satu rupiah pun. Itu
+ * bukan kehati-hatian berlebihan: berkas ini MENGAMBIL uang dari kartu santri,
+ * dan sesudah diterapkan pembetulannya hanya bisa lewat top up balik. Satu
+ * layar pemeriksaan jauh lebih murah daripada satu kelas yang saldonya
+ * terpotong salah.
+ */
+async function potongImporPratinjau(file) {
+  let data, d;
+  try {
+    data = await fileToDataUrl(file);
+    d = await api('/api/potong-massal/pratinjau', { method: 'POST',
+      body: { data, nama_berkas: file.name } });
+  } catch (e) { toast(e.message, 'err'); return; }
+
+  const r = d.ringkas;
+  const baris = d.baris.map((b) => `
+    <tr class="${b.status === 'siap' ? '' : 'tp-menunggu'}">
+      <td class="num muted">${b.baris}</td>
+      <td><code>${esc(b.nis || '—')}</code></td>
+      <td>${esc(b.nama || b.nama_berkas || '—')}
+        ${b.kelas ? `<br><span class="muted">${esc(b.kelas)}</span>` : ''}</td>
+      <td class="num rp">${b.saldo ? rp(b.saldo) : '<span class="muted">—</span>'}</td>
+      <td class="num rp">${b.nominal ? rp(b.nominal) : '—'}</td>
+      <td class="muted">${esc(b.keterangan || '')}</td>
+      <td>${b.status === 'siap' ? '<span class="badge aktif">siap</span>'
+        : `<span class="minus">${esc(b.pesan)}</span>`}</td>
+    </tr>`).join('');
+
+  openModal(`
+    <h2>Pratinjau potong saldo</h2>
+    ${d.sudah_pernah ? `<p class="preview" style="border-color:var(--err); color:var(--err)">
+      <b>Berkas dengan isi yang sama persis sudah pernah diterapkan</b> pada
+      ${esc(String(d.sudah_pernah.waktu).slice(0, 10))} oleh ${esc(d.sudah_pernah.operator)} —
+      ${d.sudah_pernah.n_berhasil} santri, total ${rp(d.sudah_pernah.total)}.
+      Menerapkannya lagi akan ditolak, jadi saldo tidak akan terpotong dua kali.</p>` : ''}
+    <p><b>${esc(d.nama_berkas)}</b> — ${r.n_baris} baris:
+      <b>${r.n_siap} siap dipotong</b>${r.n_gagal ? `, <span class="minus">${r.n_gagal} dilewati</span>` : ''}.
+      Total yang akan dipotong <b class="rp">${rp(r.total_potong)}</b>.</p>
+    ${r.n_saldo_kurang ? `<p class="muted">${r.n_saldo_kurang} santri saldonya kurang dan
+      <b>dilewati utuh</b> — tidak dipotong sebagian. Tagih sisanya terpisah, atau betulkan
+      nominalnya lalu unggah lagi.</p>` : ''}
+    <div class="tblwrap" style="max-height:48vh; overflow:auto"><table>
+      <thead><tr><th class="num">Baris</th><th>NIS</th><th>Santri</th><th class="num">Saldo</th>
+        <th class="num">Dipotong</th><th>Keterangan</th><th>Status</th></tr></thead>
+      <tbody>${baris}</tbody>
+    </table></div>
+    <div class="field" style="margin-top:10px"><label>Alasan umum <b class="minus">wajib</b></label>
+      <input id="pt-alasan" maxlength="200" placeholder="mis. potongan kegiatan Oktober">
+      <span class="muted set-hint">Dipakai baris yang kolom Keterangannya kosong. Tercatat satu
+        per satu di riwayat tiap santri atas nama <b>${esc(USER?.nama || '')}</b> dan tidak bisa
+        dihapus — pembetulan dilakukan dengan top up balik.</span></div>`,
+    r.n_siap ? async () => {
+      const alasan = $('#pt-alasan').value.trim();
+      if (alasan.length < 3) throw new Error('Alasan umum wajib diisi (minimal 3 huruf)');
+      const batch = 'POT-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+      const h = await api('/api/potong-massal/terapkan', { method: 'POST', body: {
+        data, nama_berkas: d.nama_berkas, sidik: d.sidik, batch_id: batch, alasan } });
+      if (h.duplikat) { toast(h.pesan, 'err'); return; }
+      toast(`✔ ${h.berhasil.length} santri terpotong — total ${rp(h.impor.total_potong)}`, 'ok');
+      potongHasilModal(h);
+    } : null, `Potong ${r.n_siap} santri · ${rp(r.total_potong)}`);
+  $('#modal-root .modal').classList.add('modal-lebar');
+  const a = $('#pt-alasan');
+  if (a) a.focus();
+}
+
+/** Hasil penerapan — termasuk yang gagal, supaya tidak ada yang hilang diam-diam. */
+function potongHasilModal(h) {
+  const gagal = [...(h.dilewati || []), ...(h.gagal_pratinjau || [])];
+  setTimeout(() => openModal(`
+    <h2>Hasil potong saldo</h2>
+    <p><b>${h.berhasil.length} santri</b> terpotong, total <b class="rp">${rp(h.impor.total_potong)}</b>.
+      ${gagal.length ? `<span class="minus">${gagal.length} dilewati.</span>` : ''}</p>
+    <div class="tblwrap" style="max-height:40vh; overflow:auto"><table>
+      <thead><tr><th>Santri</th><th class="num">Dipotong</th><th class="num">Saldo sesudah</th></tr></thead>
+      <tbody>${h.berhasil.map((b) => `<tr><td>${esc(b.nama)}
+        <span class="muted">${esc(b.kelas || '')}</span></td>
+        <td class="num rp">${rp(b.nominal)}</td>
+        <td class="num rp">${rp(b.saldo_sesudah)}</td></tr>`).join('')
+        || '<tr><td colspan="3" class="muted">Tidak ada.</td></tr>'}</tbody>
+    </table></div>
+    ${gagal.length ? `<h3 style="font-size:13.5px">Dilewati</h3>
+      <div class="tblwrap" style="max-height:30vh; overflow:auto"><table>
+        <thead><tr><th class="num">Baris</th><th>NIS</th><th>Santri</th><th>Sebab</th></tr></thead>
+        <tbody>${gagal.map((b) => `<tr><td class="num muted">${b.baris}</td>
+          <td><code>${esc(b.nis || '—')}</code></td>
+          <td>${esc(b.nama || b.nama_berkas || '—')}</td>
+          <td class="minus">${esc(b.pesan)}</td></tr>`).join('')}</tbody>
+      </table></div>` : ''}`), 150);
+  setTimeout(() => $('#modal-root .modal')?.classList.add('modal-lebar'), 160);
+}
+
+async function potongRiwayatModal() {
+  const d = await api('/api/potong-massal/riwayat');
+  openModal(`
+    <h2>Riwayat Potong via Excel</h2>
+    <p class="muted">Berkas yang isinya sama persis tidak bisa diterapkan dua kali —
+      daftar ini yang mengingatnya.</p>
+    <div class="tblwrap" style="max-height:50vh; overflow:auto"><table>
+      <thead><tr><th>Waktu</th><th>Berkas</th><th>Alasan</th><th class="num">Kena</th>
+        <th class="num">Dilewati</th><th class="num">Total</th><th>Oleh</th></tr></thead>
+      <tbody>${d.impor.map((x) => `<tr>
+        <td>${waktuSingkat(x.created_at)}</td>
+        <td><code>${esc(x.berkas || '—')}</code></td>
+        <td class="muted">${esc(x.alasan || '')}</td>
+        <td class="num">${x.n_berhasil}</td>
+        <td class="num">${x.n_gagal}</td>
+        <td class="num rp"><b>${rp(x.total_potong)}</b></td>
+        <td>${esc(x.operator)}</td></tr>`).join('')
+        || '<tr><td colspan="7" class="muted">Belum pernah.</td></tr>'}</tbody>
+    </table></div>
+    <button class="linkbtn" id="pt-unduh">⬇ unduh CSV</button>`);
+  $('#modal-root .modal').classList.add('modal-lebar');
+  $('#pt-unduh').onclick = () => unduhCsv(`riwayat-potong-massal.csv`,
+    ['Waktu', 'Berkas', 'Alasan', 'Baris', 'Kena', 'Dilewati', 'Total dipotong', 'Oleh'],
+    d.impor.map((x) => [x.created_at, x.berkas, x.alasan, x.n_baris, x.n_berhasil,
+      x.n_gagal, x.total_potong, x.operator]));
 }
 
 // ╔══════════════════════════════════════════════════════════╗

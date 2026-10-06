@@ -28,6 +28,7 @@ use App\Http\Controllers\Api\MartStokController;
 use App\Http\Controllers\Api\OrtuController;
 use App\Http\Controllers\Api\PengaturanController;
 use App\Http\Controllers\Api\NotifController;
+use App\Http\Controllers\Api\PotongMassalController;
 use App\Http\Controllers\Api\ProdukController;
 use App\Http\Controllers\Api\SaldoController;
 use App\Http\Controllers\Api\SiswaController;
@@ -279,6 +280,21 @@ Route::middleware('peran:superadmin')->group(function () {
     Route::post('topup-massal/pratinjau', [TopupMassalController::class, 'pratinjau'])->middleware('izin:massal.lihat');
     Route::post('topup-massal/terapkan', [TopupMassalController::class, 'terapkan'])->middleware('izin:massal.terapkan');
     Route::get('topup-massal/riwayat', [TopupMassalController::class, 'riwayat'])->middleware('izin:massal.lihat');
+});
+
+// --- potong saldo massal dari berkas Excel (nominal berbeda per santri) ----
+// Hak yang dipakai `saldo.koreksi_massal`, sama dengan potong massal lewat
+// layar — bukan hak `massal.*` milik top up. Keduanya memang dua kewenangan
+// yang berbeda: menambah saldo dan mengambilnya.
+Route::middleware('peran:superadmin')->group(function () {
+    Route::get('potong-massal/template', [PotongMassalController::class, 'template'])
+        ->middleware('izin:saldo.koreksi_massal');
+    Route::post('potong-massal/pratinjau', [PotongMassalController::class, 'pratinjau'])
+        ->middleware('izin:saldo.koreksi_massal');
+    Route::post('potong-massal/terapkan', [PotongMassalController::class, 'terapkan'])
+        ->middleware('izin:saldo.koreksi_massal');
+    Route::get('potong-massal/riwayat', [PotongMassalController::class, 'riwayat'])
+        ->middleware('izin:saldo.koreksi_massal');
 });
 
 // --- top up mandiri orang tua ---------------------------------------------
