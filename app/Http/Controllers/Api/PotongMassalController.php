@@ -8,6 +8,7 @@ use App\Models\Siswa;
 use App\Services\BukuBesar;
 use App\Services\ImporPotong;
 use App\Services\ImporTopup;
+use App\Services\PotongSaldo;
 use App\Services\Kelas;
 use App\Services\Rupiah;
 use App\Support\WaktuIso;
@@ -144,15 +145,17 @@ class PotongMassalController extends Controller
 
         $lama = PotongImpor::where('sidik', $sidik)->orderByDesc('id')->first();
 
+        $sumber = PotongSaldo::sumberSah($r->query('sumber', $r->input('sumber')));
+
         return response()->json(array_merge(
-            ['ok' => true, 'nama_berkas' => $nama, 'sidik' => $sidik,
+            ['ok' => true, 'nama_berkas' => $nama, 'sidik' => $sidik, 'sumber' => $sumber,
                 // Berkas yang isinya sama persis pernah diterapkan: diberitahu
                 // SEKARANG, bukan nanti setelah tombol terapkan ditekan.
                 'sudah_pernah' => $lama ? [
                     'waktu' => $lama->created_at, 'operator' => $lama->operator,
                     'n_berhasil' => $lama->n_berhasil, 'total' => $lama->total_potong,
                 ] : null],
-            ImporPotong::urai($isi, $nama),
+            ImporPotong::urai($isi, $nama, $sumber),
         ));
     }
 
@@ -197,7 +200,8 @@ class PotongMassalController extends Controller
                 'impor' => $kembar]);
         }
 
-        $urai = ImporPotong::urai($isi, $nama);
+        $sumber = PotongSaldo::sumberSah($r->input('sumber'));
+        $urai = ImporPotong::urai($isi, $nama, $sumber);
         $siap = array_values(array_filter($urai['baris'], fn ($x) => $x['status'] === 'siap'));
         if (! $siap) {
             // Berkasnya diurai ULANG di sini, jadi baris yang tadi siap bisa
@@ -209,29 +213,35 @@ class PotongMassalController extends Controller
                 'Ulangi pratinjau untuk melihat keadaan terbarunya.');
         }
 
-        $hasil = DB::transaction(function () use ($siap, $batchId, $alasan, $user, $urai, $sidik, $nama) {
+        $hasil = DB::transaction(function () use ($siap, $batchId, $alasan, $user, $urai,
+            $sidik, $nama, $sumber) {
             $berhasil = [];
             $dilewati = [];
             foreach ($siap as $b) {
-                $potong = (int) $b['nominal'];
-                // Pengurangan BERSYARAT di basis data: kalau saldonya sudah
-                // berubah sejak pratinjau dan jadi kurang, baris ini tidak
-                // tersentuh sama sekali — bukan terpotong sebagian.
-                $ubah = Siswa::where('id', $b['siswa_id'])->where('saldo', '>=', $potong)
-                    ->update(['saldo' => DB::raw("saldo - {$potong}")]);
-                if ($ubah === 0) {
-                    $s = Siswa::find($b['siswa_id']);
+                $s = Siswa::find($b['siswa_id']);
+                // Dihitung ULANG di sini, bukan dipercaya dari pratinjau:
+                // saldonya bisa berubah oleh jajan di antara dua langkah.
+                $bagi = $s ? PotongSaldo::bagi($s, (int) $b['nominal'], $sumber, false) : null;
+                if (! $bagi || ! $bagi['cukup']) {
+                    $punya = $s ? (int) $s->saldo + ($sumber === 'kartu' ? 0 : (int) $s->saldo_titipan) : 0;
                     $dilewati[] = array_merge($b, ['status' => 'gagal',
-                        'pesan' => 'Saldo berubah sejak pratinjau — sekarang ' .
-                            Rupiah::f((int) ($s->saldo ?? 0))]);
+                        'pesan' => 'Saldo berubah sejak pratinjau — sekarang ' . Rupiah::f($punya)]);
 
                     continue;
                 }
-                $s = Siswa::find($b['siswa_id']);
                 $ket = $b['keterangan'] !== '' ? $b['keterangan'] : $alasan;
-                BukuBesar::catatTransaksi("{$batchId}-{$b['siswa_id']}", 'koreksi', $s,
-                    -$potong, $user->nama, mb_substr('[Potong massal] ' . $ket, 0, 300));
-                $berhasil[] = array_merge($b, ['saldo_sesudah' => (int) $s->saldo]);
+                $h = PotongSaldo::ambil($s, $bagi, $user->nama,
+                    mb_substr('[Potong massal] ' . $ket, 0, 260), "{$batchId}-{$b['siswa_id']}");
+                if (! empty($h['gagal'])) {
+                    $dilewati[] = array_merge($b, ['status' => 'gagal',
+                        'pesan' => 'Saldo berubah saat pemotongan berjalan']);
+
+                    continue;
+                }
+                $berhasil[] = array_merge($b, [
+                    'dari_kartu' => $h['kartu'], 'dari_titipan' => $h['titipan'],
+                    'saldo_sesudah' => (int) $h['siswa']->saldo,
+                    'titipan_sesudah' => (int) $h['siswa']->saldo_titipan]);
             }
 
             $impor = PotongImpor::create([
@@ -240,6 +250,7 @@ class PotongMassalController extends Controller
                 'n_berhasil' => count($berhasil),
                 'n_gagal' => $urai['ringkas']['n_gagal'] + count($dilewati),
                 'total_potong' => array_sum(array_map(fn ($x) => $x['nominal'], $berhasil)),
+                'sumber' => $sumber,
                 'operator' => $user->nama, 'created_at' => WaktuIso::sekarang(),
             ]);
 

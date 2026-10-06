@@ -91,6 +91,10 @@ class PengaturanSeeder extends Seeder
 
             // portal wali: 4 digit HP sebagai kunci ketiga
             'ortu_minta_hp' => 0,
+            // Riwayat titipan di portal wali. Menyala: begitu titipan bisa
+            // dipotong, angka yang dilihat wali berubah oleh sebab yang harus
+            // bisa mereka telusuri sendiri.
+            'ortu_lihat_titipan' => 1,
 
             // Jenjang kelas santri. DISIMPAN SEBAGAI PENGATURAN, bukan ditulis
             // di kode: pesantren ini menjalankan SMP+SMA (kelas 7-12), tapi

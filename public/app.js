@@ -5377,7 +5377,17 @@ function saldoView(el) {
       </div>
       <div class="field"><label id="sd-jumlah-label">Nominal</label>
         <div class="quick" id="sd-quick"></div>
+        <button class="linkbtn hidden" id="sd-kosongkan" style="margin-bottom:6px">
+          🧹 Kosongkan seluruh saldo</button>
         ${inputUang({ id: 'sd-jumlah', placeholder: 'Nominal lain (Rp)' })}</div>
+      <div class="field hidden" id="sd-sumber-field"><label>Sumber potongan</label>
+        <select id="sd-sumber">
+          <option value="kartu">Kartu saja — titipan tidak disentuh</option>
+          <option value="kartu_titipan">Kartu dulu, sisanya dari titipan</option>
+          <option value="titipan_kartu">Titipan dulu, sisanya dari kartu</option>
+        </select>
+        <span class="muted set-hint">Titipan adalah uang yang sengaja diparkir wali —
+          ia tidak pernah ikut terambil kecuali dipilih di sini.</span></div>
       <div class="field hidden" id="sd-kurang-field"><label>Kalau saldo santri kurang</label>
         <select id="sd-kurang">
           <option value="lewati">Lewati santri itu (saldo tidak berubah)</option>
@@ -5434,6 +5444,9 @@ function saldoView(el) {
       $('#sd-ket').value = '';
       el.querySelectorAll('#sd-mode button').forEach((x) => x.classList.toggle('sel', x === b));
       $('#sd-kurang-field').classList.toggle('hidden', !sdKolektif());
+      // Sumber potongan berlaku untuk kedua mode potong, bukan hanya kolektif.
+      $('#sd-sumber-field').classList.toggle('hidden', saldo.mode === 'topup');
+      $('#sd-kosongkan').classList.toggle('hidden', saldo.mode === 'topup');
       // Jalur Excel hanya ditawarkan di mode kolektif — di sanalah "nominal
       // berbeda tiap santri" menjadi pertanyaan yang wajar muncul.
       $('#sd-impor-ajak').classList.toggle('hidden', !sdKolektif());
@@ -5465,6 +5478,8 @@ function saldoView(el) {
   // yang tersorot begitu teksnya menyimpang dari kategori mana pun)
   $('#sd-ket').addEventListener('input', () => { sdRenderKategori(); sdSync(); });
   $('#sd-kurang').addEventListener('change', () => { sdRenderBatch(); sdSync(); });
+  $('#sd-sumber').addEventListener('change', () => { sdRenderBatch(); sdSync(); });
+  $('#sd-kosongkan').onclick = sdKosongkan;
 
   $('#sd-impor-buka').onclick = () => $('#sd-impor-box').classList.toggle('hidden');
   $('#sd-impor-riwayat').onclick = potongRiwayatModal;
@@ -5682,11 +5697,63 @@ async function sdTambahKelas() {
   btn.disabled = false;
 }
 
+/**
+ * Berapa yang benar-benar terpotong dari satu santri — dan dari kantong mana.
+ *
+ * Cerminan dari Services\PotongSaldo::bagi() di server. Ditulis dua kali
+ * dengan sadar: layar harus bisa memperlihatkan pecahannya SEBELUM apa pun
+ * dikirim, sedangkan yang menentukan tetap server. Kalau keduanya berbeda,
+ * pratinjau berbohong — jadi uji menyandingkan hasil keduanya.
+ */
+function sdBagi(s) {
+  const n = saldo.nominal || 0;
+  const sumber = $('#sd-sumber')?.value || 'kartu';
+  const sebisanya = $('#sd-kurang')?.value === 'sebisanya';
+  const adaKartu = Math.max(0, s.saldo || 0);
+  const adaTitipan = sumber === 'kartu' ? 0 : Math.max(0, s.saldo_titipan || 0);
+  if (!n) return { kartu: 0, titipan: 0, total: 0, cukup: false };
+
+  let sisa = n, kartu = 0, titipan = 0;
+  if (sumber === 'titipan_kartu') {
+    titipan = Math.min(sisa, adaTitipan); sisa -= titipan;
+    kartu = Math.min(sisa, adaKartu); sisa -= kartu;
+  } else {
+    kartu = Math.min(sisa, adaKartu); sisa -= kartu;
+    titipan = Math.min(sisa, adaTitipan); sisa -= titipan;
+  }
+  const cukup = sisa === 0;
+  if (!cukup && !sebisanya) return { kartu: 0, titipan: 0, total: 0, cukup: false };
+  return { kartu, titipan, total: kartu + titipan, cukup };
+}
+
 // Berapa yang benar-benar terpotong dari satu santri dengan nominal & mode saat ini.
 function sdPotongEfektif(s) {
-  const n = saldo.nominal || 0;
-  if (!n) return 0;
-  return $('#sd-kurang')?.value === 'sebisanya' ? Math.min(n, s.saldo) : (s.saldo >= n ? n : 0);
+  return sdBagi(s).total;
+}
+
+/** Isi nominal dengan angka yang mengosongkan seluruh uang yang terpilih. */
+function sdKosongkan() {
+  const sumber = $('#sd-sumber')?.value || 'kartu';
+  const punya = (s) => Math.max(0, s.saldo || 0)
+    + (sumber === 'kartu' ? 0 : Math.max(0, s.saldo_titipan || 0));
+
+  let n = 0;
+  if (sdKolektif()) {
+    const dipilih = saldo.batch.filter((x) => saldo.pilih.has(x.id));
+    if (!dipilih.length) { toast('Belum ada santri yang dicentang', 'err'); return; }
+    // Nominal disetel sebesar isi TERBANYAK, lalu "sebisanya" membuat tiap
+    // santri terpotong sebesar isinya sendiri — bukan sebesar angka itu.
+    n = Math.max(0, ...dipilih.map(punya));
+    $('#sd-kurang').value = 'sebisanya';
+  } else {
+    if (!saldo.siswa) { toast('Pilih santrinya dulu', 'err'); return; }
+    n = punya(saldo.siswa);
+  }
+  if (!n) { toast('Tidak ada saldo yang bisa dikosongkan', 'err'); return; }
+  isiUang('#sd-jumlah', n);
+  saldo.nominal = n;
+  if (sdKolektif()) sdRenderBatch();
+  sdSync();
 }
 
 function sdRenderBatch() {
@@ -5699,15 +5766,19 @@ function sdRenderBatch() {
   const n = saldo.nominal || 0;
   const rows = saldo.batch.map((s) => {
     const dicentang = saldo.pilih.has(s.id);
-    const efektif = sdPotongEfektif(s);
+    const bagi = sdBagi(s);
+    const efektif = bagi.total;
     const kurang = n > 0 && efektif < n;
+    const pakaiTitipan = ($('#sd-sumber')?.value || 'kartu') !== 'kartu';
     return `<tr class="${dicentang ? '' : 'off'}">
       <td><input type="checkbox" data-id="${s.id}" ${dicentang ? 'checked' : ''} style="width:auto"></td>
       <td><b>${esc(s.nama)}</b>${s.status === 'blokir' ? ' <span class="badge blokir">blokir</span>' : ''}</td>
       <td>${esc(s.kelas)}</td>
-      <td class="num rp">${rp(s.saldo)}</td>
+      <td class="num rp">${rp(s.saldo)}${pakaiTitipan
+        ? `<br><span class="muted" style="font-size:11px">titipan ${rp(s.saldo_titipan || 0)}</span>` : ''}</td>
       <td class="num ${kurang ? 'minus' : 'muted'}">${!n ? '—'
         : efektif > 0 ? '−' + rp(efektif) + (kurang ? ' (sebagian)' : '')
+          + (bagi.titipan > 0 ? `<br><span class="muted" style="font-size:11px">${rp(bagi.kartu)} kartu + ${rp(bagi.titipan)} titipan</span>` : '')
         : 'dilewati'}</td>
     </tr>`;
   }).join('');
@@ -6032,9 +6103,12 @@ function sdSyncKolektif(n, ket) {
   else if (ket.length < 3) pesan = 'Alasan pemotongan wajib diisi (minimal 3 huruf).';
   else {
     ok = true;
+    const kartu = r.dipilih.reduce((x, s) => x + sdBagi(s).kartu, 0);
+    const titipan = r.dipilih.reduce((x, s) => x + sdBagi(s).titipan, 0);
     pesan = `<b>${r.dipilih.length} santri</b>${kelas.length ? ' · kelas ' + esc(kelas.join(', ')) : ''}<br>
       ${rp(n)} × ${r.kena.length + r.sebagian.length} santri →
       total <b class="minus">−${rp(r.total)}</b>` +
+      (titipan > 0 ? `<br><b>${rp(kartu)}</b> dari kartu · <b>${rp(titipan)}</b> dari titipan` : '') +
       (r.sebagian.length ? `<br><span class="muted">${r.sebagian.length} santri dipotong sebagian (saldo habis)</span>` : '') +
       (r.lewat.length ? `<br><span class="muted">${r.lewat.length} santri dilewati karena saldonya kurang</span>` : '');
   }
@@ -6075,6 +6149,7 @@ async function kirimSaldo() {
     siswa_id: saldo.siswa.id,
     jumlah: nominal,
     keterangan: $('#sd-ket').value.trim(),
+    ...(potong ? { sumber: $('#sd-sumber')?.value || 'kartu' } : {}),
     ...(keTitipan ? { ke_titipan: true } : {}),
     ...(pungut ? { biaya_admin: true } : {}),
     tx_id: 'adm-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
@@ -6115,6 +6190,7 @@ function doSaldoKolektif() {
       const d = await api('/api/koreksi-massal', { method: 'POST', body: {
         siswa_ids: r.dipilih.map((s) => s.id),
         jumlah: n,
+        sumber: $('#sd-sumber')?.value || 'kartu',
         keterangan: (kelas.length ? `[Kolektif ${kelas.join(', ')}] ` : '[Kolektif] ') + alasan,
         saldo_kurang: sebisanya ? 'sebisanya' : 'lewati',
         batch_id: 'btc-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
@@ -7488,6 +7564,14 @@ async function potongImporPratinjau(file) {
       potongHasilModal(h);
     } : null, `Potong ${r.n_siap} santri · ${rp(r.total_potong)}`);
   $('#modal-root .modal').classList.add('modal-lebar');
+  // Mengubah sumber = menghitung ulang seluruh berkas DI SERVER, bukan di
+  // layar: pecahan yang ditampilkan harus datang dari penghitung yang sama
+  // dengan yang nanti menjalankannya.
+  $('#pt-sumber').onchange = () => {
+    const pilih = $('#pt-sumber').value;
+    closeModal();
+    potongImporPratinjau({ name: d.nama_berkas }, pilih, data);
+  };
   const a = $('#pt-alasan');
   if (a) a.focus();
 }

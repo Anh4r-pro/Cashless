@@ -74,8 +74,9 @@ class ImporPotong
     /**
      * @return array{baris: array, ringkas: array}
      */
-    public static function urai(string $isi, string $namaBerkas): array
+    public static function urai(string $isi, string $namaBerkas, string $sumber = 'kartu'): array
     {
+        $sumber = PotongSaldo::sumberSah($sumber);
         $baris = self::barisDariBerkas($isi, $namaBerkas);
         ['peta' => $peta, 'kepala' => $kepala] = self::petakan($baris);
 
@@ -101,7 +102,8 @@ class ImporPotong
             $b = [
                 'baris' => $i + 1, 'nis' => $nis, 'nama_berkas' => $namaBerkasBaris,
                 'nama' => '', 'kelas' => '', 'siswa_id' => null,
-                'nominal' => (int) ($nominal ?? 0), 'saldo' => 0,
+                'nominal' => (int) ($nominal ?? 0), 'saldo' => 0, 'titipan' => 0,
+                'dari_kartu' => 0, 'dari_titipan' => 0,
                 'keterangan' => mb_substr(trim(ImporTopup::teks($sel('keterangan'))), 0, 200),
                 'status' => 'gagal', 'pesan' => '',
             ];
@@ -112,6 +114,7 @@ class ImporPotong
                 $b['nama'] = $s->nama;
                 $b['kelas'] = $s->kelas;
                 $b['saldo'] = (int) $s->saldo;
+                $b['titipan'] = (int) $s->saldo_titipan;
             }
 
             if ($nis === '') {
@@ -127,12 +130,21 @@ class ImporPotong
             } elseif ($nominal === null || $nominal <= 0) {
                 $b['pesan'] = $nominalTeks === ''
                     ? 'Nominal potong kosong' : "Nominal \"{$nominalTeks}\" tidak valid";
-            } elseif ((int) $s->saldo < $nominal) {
-                $b['pesan'] = 'Saldo ' . Rupiah::f((int) $s->saldo) .
-                    ' — kurang ' . Rupiah::f($nominal - (int) $s->saldo);
             } else {
-                $b['status'] = 'siap';
-                $diBerkas[$nis] = $b['baris'];
+                // Pecahan kartu/titipan dihitung DI SINI juga, bukan hanya saat
+                // diterapkan: angka yang disetujui orang di layar harus angka
+                // yang benar-benar dijalankan.
+                $bagi = PotongSaldo::bagi($s, $nominal, $sumber, false);
+                if (! $bagi['cukup']) {
+                    $punya = (int) $s->saldo + ($sumber === 'kartu' ? 0 : (int) $s->saldo_titipan);
+                    $b['pesan'] = ($sumber === 'kartu' ? 'Saldo ' : 'Kartu + titipan ')
+                        . Rupiah::f($punya) . ' — kurang ' . Rupiah::f($nominal - $punya);
+                } else {
+                    $b['dari_kartu'] = $bagi['kartu'];
+                    $b['dari_titipan'] = $bagi['titipan'];
+                    $b['status'] = 'siap';
+                    $diBerkas[$nis] = $b['baris'];
+                }
             }
             $hasil[] = $b;
         }
@@ -167,6 +179,9 @@ class ImporPotong
                 'n_siap' => count($siap),
                 'n_gagal' => count($hasil) - count($siap),
                 'total_potong' => array_sum(array_map(fn ($x) => $x['nominal'], $siap)),
+                'total_kartu' => array_sum(array_map(fn ($x) => $x['dari_kartu'], $siap)),
+                'total_titipan' => array_sum(array_map(fn ($x) => $x['dari_titipan'], $siap)),
+                'sumber' => $sumber,
                 'n_saldo_kurang' => count(array_filter($hasil,
                     fn ($x) => $x['status'] === 'gagal' && str_contains($x['pesan'], 'kurang'))),
             ],

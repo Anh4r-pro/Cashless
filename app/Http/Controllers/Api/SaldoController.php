@@ -10,6 +10,7 @@ use App\Services\BiayaAdmin;
 use App\Services\BukuBesar;
 use App\Services\DanaAdmin;
 use App\Services\Pengaturan;
+use App\Services\PotongSaldo;
 use App\Services\Rupiah;
 use App\Services\Setoran;
 use App\Services\SmartTopup;
@@ -124,22 +125,30 @@ class SaldoController extends Controller
             return response()->json($dupe);
         }
 
-        return response()->json(DB::transaction(function () use ($siswaId, $jumlah, $user, $keterangan, $txId) {
+        $sumber = PotongSaldo::sumberSah($r->input('sumber'));
+
+        return response()->json(DB::transaction(function () use ($siswaId, $jumlah, $user,
+            $keterangan, $txId, $sumber) {
+            $s = Siswa::find($siswaId);
+            if (! $s) {
+                throw new ApiError(404, 'Santri tidak ditemukan');
+            }
             // Kartu blokir tetap boleh dipotong — justru saldo santri keluar
             // yang perlu dikembalikan. Saldo tidak boleh minus (dijaga di WHERE).
-            $ubah = Siswa::where('id', $siswaId)->where('saldo', '>=', $jumlah)
-                ->update(['saldo' => DB::raw("saldo - {$jumlah}")]);
-            if ($ubah === 0) {
-                $s = Siswa::find($siswaId);
-                if (! $s) {
-                    throw new ApiError(404, 'Santri tidak ditemukan');
-                }
-                throw new ApiError(402, 'Saldo tidak cukup untuk dipotong (saldo ' . Rupiah::f($s->saldo) . ')');
+            $bagi = PotongSaldo::bagi($s, $jumlah, $sumber, false);
+            if (! $bagi['cukup']) {
+                throw new ApiError(402, $sumber === 'kartu'
+                    ? 'Saldo tidak cukup untuk dipotong (saldo ' . Rupiah::f((int) $s->saldo) . ')'
+                    : 'Kartu + titipan tidak cukup (kartu ' . Rupiah::f((int) $s->saldo) .
+                      ', titipan ' . Rupiah::f((int) $s->saldo_titipan) . ')');
             }
-            $s = Siswa::find($siswaId);
+            $h = PotongSaldo::ambil($s, $bagi, $user->nama, $keterangan, $txId);
+            if (! empty($h['gagal'])) {
+                throw new ApiError(409, 'Saldo berubah saat pemotongan berjalan — ulangi');
+            }
 
-            return ['ok' => true, 'siswa' => $s,
-                'transaksi' => BukuBesar::catatTransaksi($txId, 'koreksi', $s, -$jumlah, $user->nama, $keterangan)];
+            return ['ok' => true, 'siswa' => $h['siswa'], 'transaksi' => $h['transaksi'],
+                'mutasi' => $h['mutasi'], 'dari_kartu' => $h['kartu'], 'dari_titipan' => $h['titipan']];
         }));
     }
 
@@ -193,7 +202,10 @@ class SaldoController extends Controller
             ]);
         }
 
-        return response()->json(DB::transaction(function () use ($ids, $jumlah, $modeKurang, $batchId, $user, $keterangan) {
+        $sumber = PotongSaldo::sumberSah($r->input('sumber'));
+
+        return response()->json(DB::transaction(function () use ($ids, $jumlah, $modeKurang,
+            $batchId, $user, $keterangan, $sumber) {
             $berhasil = [];
             $dilewati = [];
             foreach ($ids as $id) {
@@ -204,19 +216,30 @@ class SaldoController extends Controller
 
                     continue;
                 }
-                $potong = $modeKurang === 'sebisanya' ? min($jumlah, $s->saldo) : $jumlah;
-                if ($potong <= 0 || $s->saldo < $potong) {
-                    $dilewati[] = ['id' => $id, 'nama' => $s->nama, 'kelas' => $s->kelas, 'saldo' => $s->saldo,
-                        'alasan' => $s->saldo === 0 ? 'Saldo kosong' : 'Saldo kurang (' . Rupiah::f($s->saldo) . ')'];
+                $bagi = PotongSaldo::bagi($s, $jumlah, $sumber, $modeKurang === 'sebisanya');
+                if ($bagi['total'] <= 0) {
+                    $punya = (int) $s->saldo + ($sumber === 'kartu' ? 0 : (int) $s->saldo_titipan);
+                    $dilewati[] = ['id' => $id, 'nama' => $s->nama, 'kelas' => $s->kelas,
+                        'saldo' => (int) $s->saldo, 'titipan' => (int) $s->saldo_titipan,
+                        'alasan' => $punya === 0 ? 'Saldo kosong'
+                            : ($sumber === 'kartu' ? 'Saldo kurang (' . Rupiah::f((int) $s->saldo) . ')'
+                                : 'Kartu + titipan kurang (' . Rupiah::f($punya) . ')')];
 
                     continue;
                 }
-                Siswa::where('id', $id)->where('saldo', '>=', $potong)
-                    ->update(['saldo' => DB::raw("saldo - {$potong}")]);
-                $baru = Siswa::find($id);
-                BukuBesar::catatTransaksi("{$batchId}-{$id}", 'koreksi', $baru, -$potong, $user->nama, $keterangan);
+                $h = PotongSaldo::ambil($s, $bagi, $user->nama, $keterangan, "{$batchId}-{$id}");
+                if (! empty($h['gagal'])) {
+                    $dilewati[] = ['id' => $id, 'nama' => $s->nama, 'kelas' => $s->kelas,
+                        'saldo' => (int) $s->saldo, 'titipan' => (int) $s->saldo_titipan,
+                        'alasan' => 'Saldo berubah saat pemotongan berjalan'];
+
+                    continue;
+                }
+                $baru = $h['siswa'];
                 $berhasil[] = ['id' => $id, 'nama' => $baru->nama, 'kelas' => $baru->kelas,
-                    'dipotong' => $potong, 'saldo_sesudah' => $baru->saldo];
+                    'dipotong' => $h['total'], 'dari_kartu' => $h['kartu'],
+                    'dari_titipan' => $h['titipan'], 'saldo_sesudah' => (int) $baru->saldo,
+                    'titipan_sesudah' => (int) $baru->saldo_titipan];
             }
 
             return ['ok' => true, 'batch_id' => $batchId, 'berhasil' => $berhasil, 'dilewati' => $dilewati,

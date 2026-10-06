@@ -280,8 +280,11 @@ async function muatRingkasan() {
   // sisanya masih tercatat — bukan hilang, dan bukan pula bisa dibelanjakan.
   const titipan = $('#o-titipan');
   titipan.classList.toggle('hidden', !(s.saldo_titipan > 0));
-  if (s.saldo_titipan > 0)
-    titipan.textContent = `+ ${rp(s.saldo_titipan)} saldo titipan — otomatis mengisi kartu saat saldo menipis`;
+  if (s.saldo_titipan > 0) {
+    titipan.innerHTML = `+ ${rp(s.saldo_titipan)} saldo titipan — otomatis mengisi kartu saat saldo menipis
+      · <button class="linkbtn" id="o-titipan-lihat">lihat rinciannya</button>`;
+    $('#o-titipan-lihat').onclick = bukaTitipan;
+  }
   $('#o-terakhir').textContent = 'Transaksi terakhir: ' + sejakKapan(d.terakhir);
 
   const kartu = [['Jajan hari ini', rp(d.belanja_hari_ini), `${d.n_hari_ini}× transaksi`]];
@@ -757,3 +760,59 @@ api('/api/ortu/me')
   // Server tak terjangkau: tampilkan form dengan kunci terlengkap yang mungkin,
   // supaya wali tidak tertahan oleh kolom yang hilang saat sambungan pulih.
   .catch(() => { pasangKunci(true); tampilLogin(); });
+
+/*
+ * Rincian titipan.
+ *
+ * Ada karena titipan kini bisa ikut terpotong oleh sekolah, dan angka yang
+ * dilihat wali tidak boleh berubah oleh sebab yang tidak bisa mereka telusuri
+ * sendiri. Halaman riwayat biasa hanya memuat mutasi kartu; titipan tinggal di
+ * buku terpisah dan sampai sekarang tidak pernah terlihat dari sini.
+ *
+ * Sekolah boleh mematikannya. Saat mati, yang ditampilkan adalah KEADAAN itu
+ * apa adanya — bukan daftar kosong yang membuat orang menyangka tidak pernah
+ * ada mutasi apa pun.
+ */
+const TITIPAN_JENIS = {
+  setor: ['＋', 'Setoran titipan'],
+  cair: ['⇢', 'Dicairkan ke kartu'],
+  smart: ['⇢', 'Isi ulang otomatis ke kartu'],
+  tarik: ['−', 'Ditarik sekolah'],
+};
+
+async function bukaTitipan() {
+  let d;
+  try { d = await api('/api/ortu/titipan'); }
+  catch (e) { toast(e.message, 'err'); return; }
+
+  if (!d.aktif) {
+    bukaModal(`<h2>Saldo Titipan</h2>
+      <p style="font-size:26px; font-weight:800; margin:4px 0">${rp(d.saldo_titipan)}</p>
+      <p class="muted">${esc(d.pesan)}</p>`,
+      '<button id="om-batal">Tutup</button>');
+    return;
+  }
+
+  bukaModal(`<h2>Saldo Titipan</h2>
+    <p style="font-size:26px; font-weight:800; margin:4px 0">${rp(d.saldo_titipan)}</p>
+    <p class="muted">Uang yang sudah diterima sekolah tetapi sengaja belum ditaruh di kartu.
+      Ia mengisi kartu sedikit demi sedikit saat saldonya menipis.</p>
+    ${d.mutasi.length ? d.mutasi.map((m) => {
+      const [tanda, label] = TITIPAN_JENIS[m.jenis] || ['·', m.jenis];
+      const masuk = m.jumlah > 0;
+      return `<div class="o-tx">
+        <div class="o-tx-ikon ${masuk ? 'masuk' : 'keluar'}">${ikon(masuk ? 'masuk' : 'keluar')}</div>
+        <div class="o-tx-isi">
+          <b>${tanda} ${esc(label)}</b>
+          <span class="muted">${esc(waktuWib(m.waktu))}</span>
+          ${m.keterangan ? `<span class="o-tx-ket">${esc(m.keterangan)}</span>` : ''}
+        </div>
+        <div class="o-tx-nilai">
+          <b class="${masuk ? 'plus' : 'minus'}">${masuk ? '+' : '−'}${rp(Math.abs(m.jumlah))}</b>
+          <span class="muted">sisa ${rp(m.saldo_sesudah)}</span>
+        </div>
+      </div>`;
+    }).join('')
+      : '<p class="muted">Belum ada mutasi titipan.</p>'}`,
+    '<button id="om-batal">Tutup</button>');
+}

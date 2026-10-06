@@ -81,6 +81,7 @@ class PengaturanController extends Controller
 
     public const LABEL_ORTU = [
         'ortu_minta_hp' => ['label' => 'Minta 4 digit HP wali saat masuk portal', 'unit' => 'onoff'],
+        'ortu_lihat_titipan' => ['label' => 'Wali boleh melihat riwayat titipan', 'unit' => 'onoff'],
     ];
 
     /**

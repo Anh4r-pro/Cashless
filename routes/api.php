@@ -253,6 +253,8 @@ Route::get('ortu/me', [OrtuController::class, 'me']);
 Route::middleware('ortu')->group(function () {
     Route::get('ortu/ringkasan', [OrtuController::class, 'ringkasan']);
     Route::get('ortu/transaksi', [OrtuController::class, 'transaksi']);
+    // Riwayat titipan — bisa dimatikan sekolah lewat `ortu_lihat_titipan`.
+    Route::get('ortu/titipan', [OrtuController::class, 'titipan']);
 });
 
 // --- donasi: admin menentukan jenis & besarannya ---------------------------

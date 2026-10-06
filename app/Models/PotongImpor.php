@@ -19,7 +19,7 @@ class PotongImpor extends Model
 
     protected $table = 'potong_impor';
 
-    protected $fillable = ['batch_id', 'berkas', 'sidik', 'alasan', 'n_baris',
+    protected $fillable = ['batch_id', 'berkas', 'sidik', 'alasan', 'sumber', 'n_baris',
         'n_berhasil', 'n_gagal', 'total_potong', 'operator', 'created_at'];
 
     protected $casts = ['n_baris' => 'int', 'n_berhasil' => 'int', 'n_gagal' => 'int',

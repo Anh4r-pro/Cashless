@@ -6,6 +6,7 @@ use App\Exceptions\ApiError;
 use App\Models\Golongan;
 use App\Models\SesiOrtu;
 use App\Models\Siswa;
+use App\Models\TitipanMutasi;
 use App\Models\Transaksi;
 use App\Services\Kartu;
 use App\Services\KunciWali;
@@ -271,6 +272,43 @@ class OrtuController extends Controller
         }
 
         return $s;
+    }
+
+
+    /**
+     * Riwayat titipan untuk wali.
+     *
+     * Ada karena sejak titipan bisa ikut dipotong, angkanya berubah oleh sebab
+     * yang sebelumnya tidak terlihat di mana pun yang bisa dijangkau wali —
+     * halaman riwayat mereka hanya membaca tabel transaksi, sedangkan mutasi
+     * titipan tinggal di buku terpisah. Uang yang sengaja dititipkan orang tua
+     * tidak boleh berkurang tanpa penjelasan yang bisa mereka baca sendiri.
+     *
+     * Bisa dimatikan sekolah lewat `ortu_lihat_titipan`; saat mati, jawabannya
+     * menyebut keadaan itu apa adanya alih-alih berpura-pura tidak ada data.
+     */
+    public function titipan(Request $r)
+    {
+        $s = $this->ortu($r);
+        if ((Pengaturan::sekolah()['ortu_lihat_titipan'] ?? 1) !== 1) {
+            return response()->json(['aktif' => false, 'saldo_titipan' => (int) $s->saldo_titipan,
+                'mutasi' => [], 'pesan' => 'Rincian titipan sedang tidak ditampilkan oleh sekolah. ' .
+                    'Tanyakan ke bendahara bila ada yang perlu dijelaskan.']);
+        }
+
+        $limit = min(100, (int) $r->query('limit', 50) ?: 50);
+
+        return response()->json([
+            'aktif' => true,
+            'saldo_titipan' => (int) $s->saldo_titipan,
+            'mutasi' => TitipanMutasi::where('siswa_id', $s->id)
+                ->orderByDesc('id')->limit($limit)->get()
+                ->map(fn ($m) => [
+                    'waktu' => $m->created_at, 'jenis' => $m->jenis,
+                    'jumlah' => (int) $m->jumlah, 'saldo_sesudah' => (int) $m->saldo_sesudah,
+                    'keterangan' => $m->keterangan,
+                ]),
+        ]);
     }
 
     /** Bidang yang boleh dilihat wali. Kunci masuknya sendiri TIDAK termasuk. */
