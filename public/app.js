@@ -6454,6 +6454,7 @@ function siswaView(el, sdm) {
         ${bolehKartu ? '<button class="linkbtn" id="btn-kartu-massal">📇 Daftar Kartu Massal</button>' : ''}
         ${!sdm && boleh('santri.kenaikan') ? '<button class="linkbtn" id="btn-kenaikan">🎓 Kenaikan Kelas</button>' : ''}
         ${bolehArsip ? '<button class="linkbtn" id="btn-arsip">📦 Arsipkan</button>' : ''}
+        <button class="linkbtn" id="btn-unduh-daftar">⬇ Unduh daftar</button>
         ${bolehTambah ? `<button class="linkbtn" id="btn-add-siswa">+ Tambah ${esc(t.orang)}</button>` : ''}
       </div>
     </div>
@@ -6529,6 +6530,7 @@ function siswaView(el, sdm) {
   $('#sw-prev').onclick = () => { if (siswaState.page > 1) { siswaState.page--; loadSiswa(); } };
   $('#sw-next').onclick = () => { siswaState.page++; loadSiswa(); };
   if ($('#btn-add-siswa')) $('#btn-add-siswa').onclick = () => siswaModal(null);
+  $('#btn-unduh-daftar').onclick = unduhDaftarModal;
   if ($('#btn-golongan')) $('#btn-golongan').onclick = kelolaGolonganModal;
   if ($('#btn-unit-sdm')) $('#btn-unit-sdm').onclick = kelolaUnitSdmModal;
   if ($('#btn-impor')) $('#btn-impor').onclick = () => imporKartuPanel(!!sdm);
@@ -6615,18 +6617,84 @@ function lencanaBerlaku(s) {
   return `<span class="badge ${habis ? 'blokir' : 'aktif'}">${esc(s.berlaku_sampai)}${habis ? ' — habis' : ''}</span>`;
 }
 
-async function loadSiswa() {
-  const p = new URLSearchParams({ page: siswaState.page, limit: 20,
+/**
+ * Saringan daftar pemegang kartu, dalam satu tempat.
+ *
+ * Dipakai bersama oleh daftar di layar DAN unduhannya, supaya yang terunduh
+ * selalu yang terlihat. Dua susunan parameter yang terpisah cepat atau lambat
+ * berbeda, dan admin yang menyerahkan berkasnya tidak punya cara mengetahuinya.
+ */
+function siswaQs(tambahan) {
+  const p = new URLSearchParams({
     urut: siswaState.urut || 'nama', arah: siswaState.arah || 'asc' });
-  const sdm = siswaState.sdm;
-  if ($('#sw-cari').value.trim()) p.set('cari', $('#sw-cari').value.trim());
-  if ($('#sw-kelas').value) p.set('kelas', $('#sw-kelas').value);
-  if ($('#sw-status').value) p.set('status', $('#sw-status').value);
+  if ($('#sw-cari')?.value.trim()) p.set('cari', $('#sw-cari').value.trim());
+  if ($('#sw-kelas')?.value) p.set('kelas', $('#sw-kelas').value);
+  if ($('#sw-status')?.value) p.set('status', $('#sw-status').value);
   if ($('#sw-ortu')?.value) p.set('ortu', $('#sw-ortu').value);
   if ($('#sw-biaya')?.value) p.set('biaya', $('#sw-biaya').value);
   // Tanpa parameter golongan server hanya mengirim santri; menu SDM menyebut
   // sisanya secara eksplisit supaya golongan yang ditambahkan admin ikut tampil.
-  if (sdm) p.set('golongan', $('#sw-gol')?.value || kodeSdm());
+  if (siswaState.sdm) p.set('golongan', $('#sw-gol')?.value || kodeSdm());
+  for (const [k, v] of Object.entries(tambahan || {})) {
+    if (v === null) p.delete(k); else p.set(k, v);
+  }
+  return p;
+}
+
+/**
+ * Unduh daftar pemegang kartu.
+ *
+ * Bawaannya mengikuti saringan yang sedang berlaku di layar — itulah yang
+ * biasanya dimaksud orang ketika menekan "unduh". Pilihan "semua" disediakan
+ * terpisah dan disebut terang-terangan, supaya tidak ada yang mengira sudah
+ * mengunduh seluruh santri padahal yang terbawa hanya satu kelas.
+ */
+function unduhDaftarModal() {
+  const t = ISTILAH(siswaState.sdm);
+  const kelas = $('#sw-kelas')?.value || '';
+  const cari = $('#sw-cari')?.value.trim() || '';
+  const status = $('#sw-status')?.value || '';
+  const label = siswaState.sdm ? 'unit' : 'kelas';
+  const saringan = [
+    kelas ? `${label} <b>${esc(kelas)}</b>` : null,
+    status ? `status <b>${esc(status)}</b>` : null,
+    cari ? `pencarian <b>"${esc(cari)}"</b>` : null,
+  ].filter(Boolean);
+
+  openModal(`
+    <h2>Unduh Daftar ${esc(t.orang)}</h2>
+    <label class="cek" style="align-items:flex-start; margin-bottom:8px">
+      <input type="radio" name="ud-lingkup" value="layar" checked>
+      <span><b>Sesuai saringan di layar</b><br><span class="muted" style="font-size:12.5px">
+        ${saringan.length ? saringan.join(' · ') : 'tanpa saringan — seluruh ' + esc(t.orang) + ' aktif'}
+      </span></span></label>
+    <label class="cek" style="align-items:flex-start; margin-bottom:8px">
+      <input type="radio" name="ud-lingkup" value="semua">
+      <span><b>Semua ${esc(label === 'kelas' ? 'kelas' : 'unit')}</b><br>
+        <span class="muted" style="font-size:12.5px">Saringan ${label}, status, dan pencarian
+        diabaikan. Yang sudah terarsip tetap tidak ikut.</span></span></label>
+    <label class="cek" style="margin-top:4px"><input type="checkbox" id="ud-arsip">
+      ikut sertakan yang sudah terarsip (lulus/keluar)</label>
+    <p class="muted set-hint">Berkas .xlsx berisi NIS, nama, ${esc(label)}, golongan, status,
+      saldo, titipan, UID kartu, NISN, tanggal lahir, HP wali, dan masa berlaku kartu — beserta
+      baris jumlah di bawahnya. <b>PIN kios tidak pernah ikut terunduh.</b><br>
+      Karena memuat data pribadi, simpan dan bagikan berkasnya seperlunya saja.</p>`,
+    async () => {
+      const semua = document.querySelector('input[name="ud-lingkup"]:checked')?.value === 'semua';
+      const p = siswaQs(semua
+        ? { kelas: null, cari: null, status: null, ortu: null, biaya: null }
+        : {});
+      if ($('#ud-arsip').checked) p.set('status', 'arsip');
+      const a = document.createElement('a');
+      a.href = '/api/siswa/unduh?' + p;
+      document.body.appendChild(a); a.click(); a.remove();
+      toast('⬇ Berkas sedang disiapkan…', 'ok');
+    }, 'Unduh');
+}
+
+async function loadSiswa() {
+  const p = siswaQs({ page: siswaState.page, limit: 20 });
+  const sdm = siswaState.sdm;
   const d = await api('/api/siswa?' + p);
   siswaState.rows = d.siswa;
   GOLONGAN = d.golongan || GOLONGAN;

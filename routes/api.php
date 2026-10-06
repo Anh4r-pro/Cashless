@@ -157,6 +157,9 @@ Route::middleware('peran:superadmin')->group(function () {
     // melayani layar Santri dan layar SDM sekaligus, dan lingkupnya baru
     // ketahuan setelah golongan yang diminta dibaca.
     Route::get('siswa', [SiswaController::class, 'index']);
+    // Unduhan memakai penyaring & urutan yang sama dengan daftarnya, jadi yang
+    // terunduh selalu yang terlihat di layar. Haknya ikut lingkup golongan.
+    Route::get('siswa/unduh', [SiswaController::class, 'unduh']);
     Route::post('siswa', [SiswaController::class, 'store']);
     Route::put('siswa/{id}', [SiswaController::class, 'update']);
     Route::delete('siswa/{id}', [SiswaController::class, 'destroy']);

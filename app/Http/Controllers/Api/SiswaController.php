@@ -16,6 +16,10 @@ use App\Services\Pengaturan;
 use App\Services\Pin;
 use App\Services\Rem;
 use App\Services\SesiKios;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
+use PhpOffice\PhpSpreadsheet\Cell\DataType;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -76,7 +80,38 @@ class SiswaController extends Controller
         // untuk daftar pemotongan kolektif.
         $limit = min(500, (int) $r->query('limit', 20) ?: 20);
 
+        $q = $this->saring($r);
+
+        $total = (clone $q)->count();
+        $jumlah = (clone $q)->selectRaw('COALESCE(SUM(saldo),0) s, COALESCE(SUM(saldo_titipan),0) t')->first();
+
+        $this->urutkan($q, $r);
+
+        // pin_kustom: santri sudah mengganti PIN kios sendiri. Yang dikirim hanya
+        // penanda ya/tidak — hash PIN tidak pernah keluar dari server.
+        $rows = $q->select('siswa.*')
+            ->selectRaw('EXISTS(SELECT 1 FROM siswa_pin p WHERE p.siswa_id = siswa.id) AS pin_kustom')
+            ->limit($limit)->offset(($page - 1) * $limit)->get();
+
+        return response()->json([
+            'siswa' => $rows, 'total' => $total, 'page' => $page, 'limit' => $limit,
+            'total_saldo' => (int) $jumlah->s, 'total_titipan' => (int) $jumlah->t,
+            'golongan' => Golongan::orderBy('urutan')->orderBy('id')->get(),
+        ]);
+    }
+
+    /**
+     * Penyaring daftar pemegang kartu — dipakai bersama oleh layar dan unduhan.
+     *
+     * Dipisah ke sini bukan demi kerapian: selama kedua jalur menyusun
+     * kuerinya masing-masing, cepat atau lambat keduanya berbeda, dan yang
+     * terunduh bukan lagi yang terlihat di layar. Admin yang menyerahkan
+     * berkasnya ke dinas tidak punya cara mengetahui bedanya.
+     */
+    private function saring(Request $r)
+    {
         $q = Siswa::query();
+
 
         if ($cari = $r->query('cari')) {
             // Kelas ikut dicari supaya admin bisa mengetik "7A" untuk menyaring sekelas.
@@ -147,9 +182,12 @@ class SiswaController extends Controller
             $q->where('golongan', 'siswa');
         }
 
-        $total = (clone $q)->count();
-        $jumlah = (clone $q)->selectRaw('COALESCE(SUM(saldo),0) s, COALESCE(SUM(saldo_titipan),0) t')->first();
+        return $q;
+    }
 
+    /** Urutan daftar — juga dipakai bersama, dengan alasan yang sama. */
+    private function urutkan($q, Request $r): void
+    {
         /*
          * Kolom urut dibatasi daftar putih: parameternya datang langsung dari
          * query string, dan `orderBy` tidak memparameterkan nama kolom — daftar
@@ -164,17 +202,123 @@ class SiswaController extends Controller
         if ($urut !== 'nama') {
             $q->orderBy('nama');
         }
+    }
 
-        // pin_kustom: santri sudah mengganti PIN kios sendiri. Yang dikirim hanya
-        // penanda ya/tidak — hash PIN tidak pernah keluar dari server.
-        $rows = $q->select('siswa.*')
-            ->selectRaw('EXISTS(SELECT 1 FROM siswa_pin p WHERE p.siswa_id = siswa.id) AS pin_kustom')
-            ->limit($limit)->offset(($page - 1) * $limit)->get();
+    /**
+     * Unduh daftar pemegang kartu sebagai .xlsx.
+     *
+     * Memakai penyaring dan urutan yang SAMA PERSIS dengan layar, jadi yang
+     * terunduh selalu yang terlihat — termasuk saringan kelas, status, dan
+     * kata pencarian yang sedang aktif. Tanpa jaminan itu, berkas yang
+     * diserahkan ke yayasan atau dinas bisa berbeda dari angka yang dibaca
+     * admin di layar, dan tidak ada yang punya cara mengetahuinya.
+     *
+     * Yang TIDAK pernah ikut terunduh: PIN kios (hanya tersimpan sebagai
+     * hash dan tidak pernah keluar dari server) dan foto.
+     */
+    public function unduh(Request $r)
+    {
+        $u = $this->wajibPeran($r, 'superadmin');
+        $gol = $r->query('golongan');
+        if ($gol === 'semua') {
+            if (! Izin::boleh($u, 'santri.lihat') && ! Izin::boleh($u, 'sdm.lihat')) {
+                throw new ApiError(403, 'Akun Anda tidak punya hak melihat data pemegang kartu');
+            }
+        } else {
+            Izin::wajib($u, $this->lingkup($gol) . '.lihat');
+        }
 
-        return response()->json([
-            'siswa' => $rows, 'total' => $total, 'page' => $page, 'limit' => $limit,
-            'total_saldo' => (int) $jumlah->s, 'total_titipan' => (int) $jumlah->t,
-            'golongan' => Golongan::orderBy('urutan')->orderBy('id')->get(),
+        $q = $this->saring($r);
+        $this->urutkan($q, $r);
+        $rows = $q->limit(5000)->get();
+        if ($rows->isEmpty()) {
+            throw new ApiError(404, 'Tidak ada data untuk diunduh dengan saringan ini');
+        }
+
+        $sdm = $gol && $gol !== 'siswa' && $gol !== 'semua';
+        $judul = ['No', $sdm ? 'NIY' : 'NIS', 'Nama', $sdm ? 'Unit' : 'Kelas', 'Golongan',
+            'Status', 'Saldo', 'Titipan', 'UID Kartu', 'NISN', 'Tanggal Lahir',
+            'HP Wali', 'Jabatan / Keterangan', 'Berlaku Sampai'];
+
+        $book = new Spreadsheet;
+        $sheet = $book->getActiveSheet();
+        $sheet->setTitle($sdm ? 'SDM' : 'Santri');
+        foreach ($judul as $i => $h) {
+            $sheet->setCellValue([$i + 1, 1], $h);
+            $sheet->getColumnDimensionByColumn($i + 1)->setWidth(max(10, min(32, strlen($h) + 8)));
+        }
+        $sheet->getStyle('A1:' . Coordinate::stringFromColumnIndex(count($judul)) . '1')
+            ->getFont()->setBold(true);
+        $sheet->freezePane('A2');
+
+        $baris = 2;
+        foreach ($rows as $i => $x) {
+            $sheet->setCellValueExplicit([1, $baris], $i + 1, DataType::TYPE_NUMERIC);
+            // NIS/NIY dan NISN ditulis TEKS: nol di depan hilang kalau Excel
+            // menganggapnya bilangan, dan nomor itulah kunci pencocokannya.
+            $sheet->setCellValueExplicit([2, $baris], (string) $x->nis, DataType::TYPE_STRING);
+            $sheet->setCellValue([3, $baris], $x->nama);
+            $sheet->setCellValue([4, $baris], $x->kelas);
+            $sheet->setCellValue([5, $baris], $x->golongan);
+            $sheet->setCellValue([6, $baris], $x->status);
+            $sheet->setCellValue([7, $baris], (int) $x->saldo);
+            $sheet->setCellValue([8, $baris], (int) $x->saldo_titipan);
+            $sheet->setCellValueExplicit([9, $baris], (string) $x->card_uid, DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([10, $baris], (string) $x->nisn, DataType::TYPE_STRING);
+            $sheet->setCellValue([11, $baris], $x->tgl_lahir);
+            $sheet->setCellValueExplicit([12, $baris], (string) $x->hp_ortu, DataType::TYPE_STRING);
+            $sheet->setCellValue([13, $baris], $x->jabatan);
+            $sheet->setCellValue([14, $baris], $x->berlaku_sampai);
+            $baris++;
+        }
+
+        // Baris jumlah di bawah tabel: angka inilah yang dicocokkan orang
+        // dengan yang terbaca di layar sebelum berkasnya diserahkan.
+        $sheet->setCellValue([3, $baris + 1], 'JUMLAH ' . $rows->count() . ' orang');
+        $sheet->setCellValue([7, $baris + 1], (int) $rows->sum('saldo'));
+        $sheet->setCellValue([8, $baris + 1], (int) $rows->sum('saldo_titipan'));
+        $sheet->getStyle('C' . ($baris + 1) . ':H' . ($baris + 1))->getFont()->setBold(true);
+        $sheet->getStyle('G2:H' . ($baris + 1))->getNumberFormat()->setFormatCode('#,##0');
+
+        $p = $book->createSheet();
+        $p->setTitle('Keterangan');
+        $p->getColumnDimension('A')->setWidth(110);
+        $saringan = array_filter([
+            $r->query('kelas') ? 'Kelas: ' . strtoupper((string) $r->query('kelas')) : null,
+            $r->query('status') ? 'Status: ' . $r->query('status') : 'Status: aktif & blokir (tanpa yang terarsip)',
+            $r->query('cari') ? 'Pencarian: "' . $r->query('cari') . '"' : null,
+            'Golongan: ' . ($gol ?: 'siswa'),
+        ]);
+        foreach (array_merge([
+            'Daftar ' . ($sdm ? 'SDM & personil' : 'santri') . ' — IMBOS Cashless',
+            'Diunduh ' . date('d/m/Y H:i') . ' oleh ' . $u->nama,
+            '',
+            'Saringan yang berlaku saat berkas ini dibuat:',
+        ], array_map(fn ($x) => '  · ' . $x, $saringan), [
+            '',
+            'Berkas ini memuat data pribadi (tanggal lahir, nomor HP wali, NISN).',
+            'Simpan dan bagikan seperlunya saja.',
+            '',
+            'PIN kios TIDAK ikut diunduh — ia hanya tersimpan sebagai sidik dan',
+            'tidak pernah keluar dari server, bahkan untuk admin.',
+        ]) as $i => $t) {
+            $p->setCellValue([1, $i + 1], $t);
+        }
+        $p->getStyle('A1')->getFont()->setBold(true)->setSize(14);
+        $book->setActiveSheetIndex(0);
+
+        $tmp = tempnam(sys_get_temp_dir(), 'daftar');
+        (new Xlsx($book))->save($tmp);
+        $isi = file_get_contents($tmp);
+        @unlink($tmp);
+
+        $namaFile = 'daftar-' . ($sdm ? 'sdm' : 'santri')
+            . ($r->query('kelas') ? '-' . preg_replace('/[^A-Za-z0-9]/', '', (string) $r->query('kelas')) : '-semua')
+            . '-' . date('Y-m-d') . '.xlsx';
+
+        return response($isi, 200, [
+            'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'Content-Disposition' => "attachment; filename=\"{$namaFile}\"",
         ]);
     }
 
