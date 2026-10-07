@@ -88,6 +88,7 @@ class Izin
             'ajuan.lihat' => 'Melihat usulan menu tenant',
             'ajuan.putuskan' => 'Menyetujui / menolak usulan menu',
             'produk.kategori' => 'Memindah kategori barang koperasi',
+            'produk.langsung' => 'Mengubah / menghapus menu tenant langsung tanpa pengajuan',
         ],
         'Donasi & Kios' => [
             'donasi.lihat' => 'Membuka menu Donasi & rekapnya',

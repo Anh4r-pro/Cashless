@@ -204,6 +204,8 @@ Route::middleware('peran:tenant')->group(function () {
 
 Route::middleware('peran:superadmin')->group(function () {
     Route::put('produk/{id}/kategori', [ProdukController::class, 'kategori'])->middleware('izin:produk.kategori');
+    Route::put('produk/{id}/langsung', [ProdukController::class, 'ubahLangsung'])->middleware('izin:produk.langsung');
+    Route::delete('produk/{id}/langsung', [ProdukController::class, 'hapusLangsung'])->middleware('izin:produk.langsung');
     Route::post('produk/ajuan/{id}/setujui', [ProdukController::class, 'setujui'])->middleware('izin:ajuan.putuskan');
     Route::post('produk/ajuan/{id}/tolak', [ProdukController::class, 'tolak'])->middleware('izin:ajuan.putuskan');
     Route::get('produk/ajuan/paket', [ProdukController::class, 'daftarPaket'])->middleware('izin:ajuan.lihat');

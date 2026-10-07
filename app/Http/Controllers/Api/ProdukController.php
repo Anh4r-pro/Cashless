@@ -75,6 +75,67 @@ class ProdukController extends Controller
         return response()->json(['ok' => true, 'produk' => $pr->fresh()]);
     }
 
+    /**
+     * Superadmin mengubah nama/harga menu LANGSUNG, tanpa menunggu ajuan
+     * tenant. Tetap meninggalkan jejak di produk_ajuan (sudah berstatus
+     * disetujui) supaya riwayat revisi harga tidak hilang hanya karena yang
+     * mengubah kali ini admin, bukan tenant.
+     */
+    public function ubahLangsung(Request $r, int $id)
+    {
+        $u = $this->wajibPeran($r, 'superadmin');
+        $pr = Produk::find($id);
+        if (! $pr) {
+            throw new ApiError(404, 'Menu tidak ditemukan');
+        }
+        $namaBaru = trim((string) ($r->input('nama') ?? $pr->nama));
+        [$nama, $harga] = $this->periksaNamaHarga($namaBaru, $r->input('harga') ?? $pr->harga);
+
+        if ($nama === $pr->nama && $harga === (int) $pr->harga) {
+            throw new ApiError(400, 'Tidak ada yang berubah dari menu ini');
+        }
+        if (mb_strtolower($nama) !== mb_strtolower($pr->nama)) {
+            $this->tolakNamaKembar($pr->tenant_id, $nama, $pr->id);
+        }
+        $namaLama = $pr->nama;
+        $hargaLama = (int) $pr->harga;
+        $pr->update(['nama' => $nama, 'harga' => $harga]);
+
+        $a = ProdukAjuan::create([
+            'tenant_id' => $pr->tenant_id, 'produk_id' => $pr->id, 'jenis' => 'ubah',
+            'nama' => $nama, 'harga' => $harga, 'nama_lama' => $namaLama, 'harga_lama' => $hargaLama,
+            'status' => 'disetujui', 'pengaju' => $u->nama, 'penilai' => $u->nama,
+            'catatan' => 'Diubah langsung oleh admin, tanpa menunggu ajuan',
+            'decided_at' => WaktuIso::sekarang(),
+        ]);
+
+        return response()->json(['ok' => true, 'produk' => $pr->fresh(), 'ajuan' => $a]);
+    }
+
+    /** Superadmin menghapus menu LANGSUNG, tanpa menunggu ajuan tenant. */
+    public function hapusLangsung(Request $r, int $id)
+    {
+        $u = $this->wajibPeran($r, 'superadmin');
+        $pr = Produk::find($id);
+        if (! $pr) {
+            throw new ApiError(404, 'Menu tidak ditemukan');
+        }
+        $namaLama = $pr->nama;
+        $hargaLama = (int) $pr->harga;
+        $tenantId = $pr->tenant_id;
+        $pr->delete();
+
+        $a = ProdukAjuan::create([
+            'tenant_id' => $tenantId, 'produk_id' => null, 'jenis' => 'hapus',
+            'nama_lama' => $namaLama, 'harga_lama' => $hargaLama,
+            'status' => 'disetujui', 'pengaju' => $u->nama, 'penilai' => $u->nama,
+            'catatan' => 'Dihapus langsung oleh admin, tanpa menunggu ajuan',
+            'decided_at' => WaktuIso::sekarang(),
+        ]);
+
+        return response()->json(['ok' => true, 'ajuan' => $a]);
+    }
+
     // ------------------------------------------------ tenant mengusulkan
 
     public function store(Request $r)
