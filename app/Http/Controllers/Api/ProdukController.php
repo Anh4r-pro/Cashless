@@ -8,6 +8,7 @@ use App\Models\ProdukAjuan;
 use App\Models\Tenant;
 use App\Models\User;
 use App\Services\FormAjuan;
+use App\Services\FormMenu;
 use App\Services\ImporMenu;
 use App\Services\ImporTopup;
 use App\Services\Pengaturan;
@@ -446,6 +447,96 @@ class ProdukController extends Controller
         HTML;
 
         return response($html, 200, ['Content-Type' => 'text/html; charset=utf-8']);
+    }
+
+    /**
+     * Daftar menu (bukan pengajuannya) — potret yang BERLAKU saat ini di
+     * kasir, untuk tenant tertentu atau seluruhnya kalau tidak disebut.
+     */
+    public function eksporProduk(Request $r)
+    {
+        [$rows, $meta] = $this->bahanFormProduk($r);
+        $stamp = date('Y-m-d');
+        $format = (string) $r->query('format', 'xls');
+
+        if ($format === 'csv') {
+            return response(FormMenu::csv($rows), 200, [
+                'Content-Type' => 'text/csv; charset=utf-8',
+                'Content-Disposition' => "attachment; filename=\"daftar-menu-{$stamp}.csv\"",
+            ]);
+        }
+
+        $html = '<style>' . FormMenu::gaya() . '</style>' . FormMenu::html($rows, $meta);
+
+        return response($html, 200, [
+            'Content-Type' => 'application/vnd.ms-excel',
+            'Content-Disposition' => "attachment; filename=\"daftar-menu-{$stamp}.xls\"",
+        ]);
+    }
+
+    /** Versi cetak dari daftar menu: peramban yang mengubahnya jadi PDF. */
+    public function cetakProduk(Request $r)
+    {
+        [$rows, $meta] = $this->bahanFormProduk($r);
+        $isi = FormMenu::html($rows, $meta);
+        $gaya = FormMenu::gaya();
+
+        $html = <<<HTML
+        <!DOCTYPE html><html lang="id"><head><meta charset="utf-8">
+        <title>Daftar Menu Kantin</title>
+        <style>{$gaya}</style></head><body>
+        <button class="noprint" onclick="window.print()"
+          style="padding:8px 16px;margin-bottom:14px">🖨 Cetak / Simpan PDF</button>
+        {$isi}
+        <script>window.addEventListener('load',()=>setTimeout(()=>window.print(),400))</script>
+        </body></html>
+        HTML;
+
+        return response($html, 200, ['Content-Type' => 'text/html; charset=utf-8']);
+    }
+
+    /**
+     * Penyaring dan meta yang dipakai bersama oleh ekspor dan cetak daftar
+     * menu. Superadmin menyaring per KATEGORI tenant, bukan per tenant satu
+     * per satu — unduhan ini untuk rapat/rekap, bukan untuk membetulkan satu
+     * tenant (itu sudah ada di dropdown layar "Semua Menu per Tenant").
+     *
+     * 'mart' = mode_kasir Swalayan IMBOS Mart (independen dari jenis tenant);
+     * 'koperasi' = jenis koperasi SELAIN mart; 'kantin' = jenis kantin biasa.
+     */
+    private function bahanFormProduk(Request $r): array
+    {
+        $u = $this->wajibPeran($r, 'tenant', 'superadmin');
+
+        $q = Produk::query()
+            ->join('tenant', 'tenant.id', '=', 'produk.tenant_id')
+            ->select('produk.*', 'tenant.nama as tenant_nama');
+
+        $label = 'Semua tenant';
+        if ($u->role === 'tenant') {
+            $q->where('produk.tenant_id', $u->tenant_id);
+            $label = $u->tenant?->nama ?? 'Tenant ini';
+        } else {
+            $kategori = (string) $r->query('kategori', 'semua');
+            if ($kategori === 'mart') {
+                $q->where('tenant.mode_kasir', 'mart');
+                $label = 'IMBOS Mart / Swalayan';
+            } elseif ($kategori === 'koperasi') {
+                $q->where('tenant.jenis', 'koperasi')->where('tenant.mode_kasir', '!=', 'mart');
+                $label = 'Koperasi';
+            } elseif ($kategori === 'kantin') {
+                $q->where('tenant.jenis', 'kantin')->where('tenant.mode_kasir', '!=', 'mart');
+                $label = 'Tenant / Kantin biasa';
+            }
+        }
+
+        $rows = $q->orderBy('tenant.nama')->orderBy('produk.nama')->get();
+
+        return [$rows, [
+            'sekolah' => FormAjuan::SEKOLAH,
+            'judul' => 'Daftar Menu Kantin',
+            'penyaring' => $label,
+        ]];
     }
 
     /** Penyaring dan meta yang dipakai bersama oleh ekspor dan cetak. */

@@ -189,6 +189,9 @@ Route::get('produk/ajuan', [ProdukController::class, 'daftarAjuan'])->middleware
 // lewat dialog cetak peramban. Hak aksesnya sama dengan melihat daftarnya.
 Route::get('produk/ajuan/ekspor', [ProdukController::class, 'eksporAjuan'])->middleware('peran:tenant,superadmin');
 Route::get('produk/ajuan/cetak', [ProdukController::class, 'cetakAjuan'])->middleware('peran:tenant,superadmin');
+// Daftar menu (bukan pengajuannya) — untuk dibawa keluar sistem per tenant.
+Route::get('produk/ekspor', [ProdukController::class, 'eksporProduk'])->middleware('peran:tenant,superadmin');
+Route::get('produk/cetak', [ProdukController::class, 'cetakProduk'])->middleware('peran:tenant,superadmin');
 
 Route::middleware('peran:tenant')->group(function () {
     Route::post('produk', [ProdukController::class, 'store']);

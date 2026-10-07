@@ -4138,9 +4138,25 @@ function menuAjuanView(el) {
       <h2 style="margin:0">📋 Semua Menu per Tenant</h2>
       <button class="linkbtn" id="mt-muat">muat ulang</button>
     </div>
-    <p class="muted">Daftar lengkap menu tiap tenant. Ubah/hapus di sini <b>langsung berlaku</b>
-      di kasir, tanpa menunggu ajuan — pakai untuk membetulkan data, bukan pengganti alur
-      pengajuan tenant sehari-hari. Perubahannya tetap tercatat di riwayat pengajuan di atas.</p>
+    <p class="muted">Ubah/hapus di sini <b>langsung berlaku</b> di kasir, tanpa menunggu ajuan —
+      pakai untuk membetulkan data, bukan pengganti alur pengajuan tenant sehari-hari.
+      Perubahannya tetap tercatat di riwayat pengajuan di atas.</p>
+    <div class="field" style="max-width:320px">
+      <label>Tenant</label>
+      <select id="mt-pilih-tenant"></select>
+    </div>
+    <div class="aju-unduh">
+      <span class="muted">Unduh daftar menu:</span>
+      <select id="mt-kategori">
+        <option value="semua">Semua tenant</option>
+        <option value="koperasi">Koperasi</option>
+        <option value="mart">IMBOS Mart / Swalayan</option>
+        <option value="kantin">Tenant / Kantin biasa</option>
+      </select>
+      <a class="linkbtn" id="mt-cetak" target="_blank" rel="noopener">🖨 Cetak / PDF</a>
+      <a class="linkbtn" id="mt-xls">⬇ Excel (.xls)</a>
+      <a class="linkbtn" id="mt-csv">⬇ CSV</a>
+    </div>
     <div id="mt-tenant"><p class="muted">memuat…</p></div>
   </div>`;
   /*
@@ -4164,6 +4180,18 @@ function menuAjuanView(el) {
     segarkanUnduh();
     loadAjuanSA();
   };
+
+  // Unduhan daftar menu disaring per KATEGORI tenant (koperasi/mart/kantin),
+  // terpisah dari dropdown tenant di atas yang hanya untuk ubah/hapus satu per satu.
+  const segarkanUnduhMenu = () => {
+    const q = 'kategori=' + encodeURIComponent($('#mt-kategori').value);
+    $('#mt-cetak').href = '/api/produk/cetak?' + q;
+    $('#mt-xls').href = '/api/produk/ekspor?format=xls&' + q;
+    $('#mt-csv').href = '/api/produk/ekspor?format=csv&' + q;
+  };
+  segarkanUnduhMenu();
+  $('#mt-kategori').onchange = segarkanUnduhMenu;
+
   $('#kat-muat').onclick = muatKategoriProduk;
   $('#mt-muat').onclick = muatMenuTenant;
   loadAjuanSA();
@@ -4217,50 +4245,59 @@ async function muatKategoriProduk() {
   });
 }
 
-/** Daftar SEMUA menu tiap tenant, dengan ubah/hapus LANGSUNG (superadmin). */
+let mtTenantId = null;
+
+/** Memuat daftar tenant ke dropdown, lalu tabel menu tenant yang terpilih. */
 async function muatMenuTenant() {
-  const box = $('#mt-tenant');
-  if (!box) return;
+  const sel = $('#mt-pilih-tenant');
+  if (!sel) return;
   const { tenants } = await api('/api/tenants');
   if (!tenants.length) {
-    box.innerHTML = '<p class="muted">Belum ada tenant.</p>';
+    sel.innerHTML = '';
+    $('#mt-tenant').innerHTML = '<p class="muted">Belum ada tenant.</p>';
     return;
   }
-  const daftar = await Promise.all(tenants.map((t) =>
-    api('/api/produk?tenant_id=' + t.id).then((d) => ({ t, produk: d.produk }))));
+  if (!mtTenantId || !tenants.some((t) => t.id === mtTenantId)) mtTenantId = tenants[0].id;
+  sel.innerHTML = tenants.map((t) =>
+    `<option value="${t.id}" ${t.id === mtTenantId ? 'selected' : ''}>${esc(t.nama)}</option>`).join('');
+  sel.onchange = () => { mtTenantId = Number(sel.value); muatMenuTenantTabel(); };
+  await muatMenuTenantTabel();
+}
 
-  box.innerHTML = daftar.map(({ t, produk }) => `
-    <h3 style="margin:14px 0 6px">${esc(t.nama)}
-      <span class="muted" style="font-weight:400">· ${produk.length} menu</span></h3>
-    <div class="tblwrap"><table>
-      <thead><tr><th>Menu</th><th class="num">Harga</th><th>Ketersediaan</th><th></th></tr></thead>
-      <tbody>${produk.map((p) => `
-        <tr>
-          <td><b>${esc(p.nama)}</b></td>
-          <td class="num rp">${rp(p.harga)}</td>
-          <td>${p.aktif ? '<span class="badge aktif">tersedia</span>' : '<span class="badge blokir">habis</span>'}</td>
-          <td style="white-space:nowrap">
-            <button class="linkbtn" data-mt-edit="${p.id}">ubah</button> ·
-            <button class="linkbtn danger" data-mt-hapus="${p.id}">hapus</button>
-          </td>
-        </tr>`).join('') || '<tr><td colspan="4" class="muted">Belum ada menu</td></tr>'}</tbody>
-    </table></div>`).join('');
+/** Tabel menu tenant yang sedang terpilih saja, dengan ubah/hapus LANGSUNG. */
+async function muatMenuTenantTabel() {
+  const box = $('#mt-tenant');
+  if (!box || !mtTenantId) return;
+  const { produk } = await api('/api/produk?tenant_id=' + mtTenantId);
 
-  const semuaProduk = daftar.flatMap((x) => x.produk);
+  box.innerHTML = `<div class="tblwrap"><table>
+    <thead><tr><th>Menu</th><th class="num">Harga</th><th>Ketersediaan</th><th></th></tr></thead>
+    <tbody>${produk.map((p) => `
+      <tr>
+        <td><b>${esc(p.nama)}</b></td>
+        <td class="num rp">${rp(p.harga)}</td>
+        <td>${p.aktif ? '<span class="badge aktif">tersedia</span>' : '<span class="badge blokir">habis</span>'}</td>
+        <td style="white-space:nowrap">
+          <button class="linkbtn" data-mt-edit="${p.id}">ubah</button> ·
+          <button class="linkbtn danger" data-mt-hapus="${p.id}">hapus</button>
+        </td>
+      </tr>`).join('') || '<tr><td colspan="4" class="muted">Belum ada menu</td></tr>'}</tbody>
+  </table></div>`;
+
   box.querySelectorAll('[data-mt-edit]').forEach((b) => {
-    const p = semuaProduk.find((x) => x.id === Number(b.dataset.mtEdit));
+    const p = produk.find((x) => x.id === Number(b.dataset.mtEdit));
     b.onclick = () => menuLangsungModal(p);
   });
   box.querySelectorAll('[data-mt-hapus]').forEach((b) => {
     const id = Number(b.dataset.mtHapus);
-    const p = semuaProduk.find((x) => x.id === id);
+    const p = produk.find((x) => x.id === id);
     b.onclick = () => {
       openModal(`<h2>Hapus menu?</h2>
         <p>Menu <b>${esc(p.nama)}</b> akan dihapus <b>langsung</b>, tanpa menunggu persetujuan.</p>`,
         async () => {
           await api(`/api/produk/${id}/langsung`, { method: 'DELETE' });
           toast('✔ Menu dihapus', 'ok');
-          muatMenuTenant();
+          muatMenuTenantTabel();
         }, 'Hapus');
     };
   });
@@ -4276,7 +4313,7 @@ function menuLangsungModal(p) {
       const body = { nama: $('#mt-nama').value, harga: nilaiUang('#mt-harga') };
       await api(`/api/produk/${p.id}/langsung`, { method: 'PUT', body });
       toast('✔ Menu diubah', 'ok');
-      muatMenuTenant();
+      muatMenuTenantTabel();
     });
 }
 
