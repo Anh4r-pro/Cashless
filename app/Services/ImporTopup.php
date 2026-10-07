@@ -178,7 +178,7 @@ class ImporTopup
         ['baris' => $baris, 'lembar' => $lembar] = self::barisDariBerkas($isi, $nama);
         ['peta' => $peta, 'barisKepala' => $barisKepala] = self::petakanKolom($baris);
 
-        $cfg = Pengaturan::sekolah();
+        $cfgSekolah = Pengaturan::sekolah();
         $hariIni = Kartu::hariIni();
         $paling = (new \DateTime($hariIni))->modify('-' . self::MUNDUR_MAKS_HARI . ' days')->format('Y-m-d');
 
@@ -234,6 +234,13 @@ class ImporTopup
             $b['siswa_id'] = $s->id;
             $b['nama_db'] = $s->nama;
             $b['kelas'] = $s->kelas;
+            // Batas DITIMPA golongan santrinya — persis seperti jalur top up
+            // satuan (Setoran::terima). Memakai angka sekolah untuk semua baris
+            // pernah membuat guru/SDM yang golongannya diberi plafon lebih besar
+            // (mis. max_topup_harian Rp1.000.000) tetap dipotong di angka
+            // sekolah (Rp300.000), dan kelebihannya nyasar ke titipan padahal
+            // golongannya mengizinkan seluruhnya masuk kartu.
+            $cfg = Pengaturan::untuk($s, $cfgSekolah);
 
             $jumlah = self::nominal($sel('nominal'));
             if ($jumlah === null || $jumlah <= 0) {
