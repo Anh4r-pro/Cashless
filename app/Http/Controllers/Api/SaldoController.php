@@ -325,14 +325,19 @@ class SaldoController extends Controller
     {
         $user = $this->wajibPeran($r, 'superadmin');
         $siswaId = (int) $r->input('siswa_id');
-        $cfg = Pengaturan::sekolah();
         $minta = $r->input('jumlah');
 
-        return response()->json(['ok' => true, ...DB::transaction(function () use ($siswaId, $cfg, $user, $minta) {
+        return response()->json(['ok' => true, ...DB::transaction(function () use ($siswaId, $user, $minta) {
             $s0 = Siswa::find($siswaId);
             if (! $s0) {
                 throw new ApiError(404, 'Santri tidak ditemukan');
             }
+            // Batas DITIMPA golongan santrinya — sama seperti Setoran::terima
+            // dan SmartTopup::jalankan(). Memakai angka sekolah di sini pernah
+            // membuat pencairan ke kartu untuk golongan berplafon lebih besar
+            // (mis. SDM) terhenti di angka sekolah yang jauh lebih kecil,
+            // padahal golongannya mengizinkan jauh lebih banyak.
+            $cfg = Pengaturan::untuk($s0);
             if ($s0->status !== 'aktif') {
                 throw new ApiError(403, 'Kartu diblokir — pulihkan dulu atau tarik titipannya');
             }
