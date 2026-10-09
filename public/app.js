@@ -715,16 +715,21 @@ async function doBayar() {
       tap_token: kasir.tapToken,
       tx_id: txId,
     }});
-    kasir.siswa = d.siswa;
-    kasir.tapToken = null;         // satu tap sudah terpakai
-    kasir.cart = [];
-    renderCart();
     const pesanSmart = d.smart
-      ? `<br>💡 Saldo terisi ulang otomatis <b>${rp(d.smart.isi)}</b> dari titipan
-         (sisa titipan ${rp(d.smart.sisa_titipan)}).`
+      ? ` 💡 Saldo terisi ulang otomatis ${rp(d.smart.isi)} dari titipan (sisa titipan ${rp(d.smart.sisa_titipan)}).`
       : '';
-    renderKasirSiswa('✔ Transaksi berhasil. Tempelkan kartu lagi untuk transaksi berikutnya.' + pesanSmart);
-    toast(`✔ Berhasil — sisa saldo ${rp(d.siswa.saldo)}`, 'ok');
+    toast(`✔ Berhasil — sisa saldo ${rp(d.siswa.saldo)}.${pesanSmart}`, 'ok');
+    // Satu tap = satu transaksi: begitu transaksinya selesai, identitas &
+    // saldo santri ini TIDAK ditampilkan lagi — layar kembali kosong seperti
+    // sebelum kartu ditap. Membiarkannya tertampil membuka peluang kasir
+    // (sengaja atau tidak) memproses transaksi susulan atas nama santri yang
+    // sama tanpa tap ulang kartunya.
+    kasir.siswa = null;
+    kasir.tapToken = null;
+    kasir.cart = [];
+    $('#stu-box').innerHTML = '';
+    renderCart();
+    updatePayBtn();
   } catch (e) {
     toast(e.message, 'err');
     updatePayBtn();               // token masih hidup jika transaksi gagal
