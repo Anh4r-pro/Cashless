@@ -4489,12 +4489,17 @@ async function loadAjuanSA() {
 // ║ RIWAYAT + EXPORT (kedua role)                             ║
 // ╚══════════════════════════════════════════════════════════╝
 let riwayatPage = 1;
+let riwayatPreselect = null;    // {id, nama} dioper dari tombol "riwayat" di tab Santri/SDM
+let riwayatSiswaFilter = null;  // orang yang sedang disaring presisi di layar ini, kalau ada
 
 function riwayatView(el) {
   riwayatPage = 1;
+  riwayatSiswaFilter = riwayatPreselect;
+  riwayatPreselect = null;
   const isSA = USER.role === 'superadmin';
   el.innerHTML = `<div class="panel">
     <h2>Riwayat Transaksi</h2>
+    <div id="rw-siswa-badge"></div>
     <div class="filterbar">
       <div class="field"><label>Dari</label><input type="date" id="f-dari"></div>
       <div class="field"><label>Sampai</label><input type="date" id="f-sampai"></div>
@@ -4545,12 +4550,32 @@ function riwayatView(el) {
     ['f-dari', 'f-sampai', 'f-cari'].forEach((id) => $('#' + id).value = '');
     ['f-tipe', 'f-kelas'].forEach((id) => $('#' + id).value = '');
     if (isSA) $('#f-tenant').value = '';
+    riwayatSiswaFilter = null;
+    renderRiwayatBadge();
     riwayatPage = 1;
     loadRiwayat();
   };
   $('#rw-prev').onclick = () => { if (riwayatPage > 1) { riwayatPage--; loadRiwayat(); } };
   $('#rw-next').onclick = () => { riwayatPage++; loadRiwayat(); };
+  renderRiwayatBadge();
   loadRiwayat();
+}
+
+/**
+ * Filter presisi 1 orang (dioper dari tombol "riwayat" di tab Santri/SDM)
+ * ditampilkan sebagai badge terkunci, BUKAN diisi ke kotak "Cari" bebas —
+ * kotak cari cocok sebagian nama/NIS dan bisa mencampur dua orang yang
+ * namanya mirip, padahal maksud tombol itu adalah riwayat SATU orang ini saja.
+ */
+function renderRiwayatBadge() {
+  const box = $('#rw-siswa-badge');
+  if (!box) return;
+  box.innerHTML = riwayatSiswaFilter
+    ? `<p class="muted" style="margin:0 0 10px">Menyaring riwayat: <b>${esc(riwayatSiswaFilter.nama)}</b>
+        <button class="linkbtn" id="rw-siswa-x" style="margin-left:6px">✕ lihat semua</button></p>`
+    : '';
+  const x = $('#rw-siswa-x');
+  if (x) x.onclick = () => { riwayatSiswaFilter = null; renderRiwayatBadge(); riwayatPage = 1; loadRiwayat(); };
 }
 
 function riwayatQs(extra) {
@@ -4564,6 +4589,7 @@ function riwayatQs(extra) {
   if ($('#f-cari').value.trim()) p.set('cari', $('#f-cari').value.trim());
   const ft = $('#f-tenant');
   if (ft && ft.value) p.set('tenant_id', ft.value);
+  if (riwayatSiswaFilter) p.set('siswa_id', riwayatSiswaFilter.id);
   for (const [k, v] of Object.entries(extra || {})) p.set(k, v);
   return p.toString();
 }
@@ -6925,6 +6951,7 @@ async function loadSiswa() {
           : `<span class="badge blokir">${esc(ISTILAH(sdm).nomorSingkat)} belum ada</span>`}</td>
       <td style="white-space:nowrap">${[
         boleh('saldo.lihat') ? `<button class="linkbtn" data-act="saldo" data-id="${s.id}">saldo</button>` : '',
+        boleh('riwayat.lihat') ? `<button class="linkbtn" data-act="riwayat" data-id="${s.id}">riwayat</button>` : '',
         boleh(`${sdm ? 'sdm' : 'santri'}.ubah`) ? `<button class="linkbtn" data-act="edit" data-id="${s.id}">ubah</button>` : '',
         boleh(`${sdm ? 'sdm' : 'santri'}.kartu`) ? `<button class="linkbtn" data-act="kartu" data-id="${s.id}">kartu</button>` : '',
         boleh(`${sdm ? 'sdm' : 'santri'}.reset_pin`) ? `<button class="linkbtn" data-act="pin" data-id="${s.id}">reset PIN</button>` : '',
@@ -6952,6 +6979,15 @@ async function loadSiswa() {
       tandaiAktif('saldo');
       location.hash = 'saldo';
       renderView('saldo');
+    };
+    // "riwayat" melompat ke tab Riwayat Transaksi dengan filter terkunci ke
+    // satu orang ini saja — berlaku untuk golongan apa pun (santri/sdm/tamu/vip),
+    // karena loadSiswa() ini sudah dipakai bersama oleh tab Santri & SDM.
+    if (b.dataset.act === 'riwayat') b.onclick = () => {
+      riwayatPreselect = { id: s.id, nama: s.nama };
+      tandaiAktif('riwayat');
+      location.hash = 'riwayat';
+      renderView('riwayat');
     };
     if (b.dataset.act === 'edit') b.onclick = () => siswaModal(s);
     if (b.dataset.act === 'kartu') b.onclick = () => assignCardModal(s);

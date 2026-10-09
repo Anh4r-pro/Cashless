@@ -41,6 +41,9 @@ class SaringTransaksi
         if (! empty($q['sampai'])) {
             $t->where('created_at', '<=', $q['sampai']);
         }
+        if (! empty($q['siswa_id'])) {
+            $t->where('siswa_id', (int) $q['siswa_id']);
+        }
         if (! empty($q['kelas'])) {
             $t->where('kelas', strtoupper((string) $q['kelas']));
         }
