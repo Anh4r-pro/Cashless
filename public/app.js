@@ -52,6 +52,8 @@ function debounce(fn, ms) {
 }
 
 // ========================================================== modal
+let modalKeydown = null;
+
 function openModal(html, onSave, saveLabel) {
   const root = $('#modal-root');
   root.innerHTML = `<div class="modal-bg"><div class="modal">${html}
@@ -69,8 +71,33 @@ function openModal(html, onSave, saveLabel) {
     try { await onSave(); closeModal(); }
     catch (e) { toast(e.message, 'err'); btn.disabled = false; }
   };
+  // Enter = tombol utama (OK/Lanjut/Setuju/dst), Esc = Batal — supaya popup
+  // bisa diputuskan dari keyboard eksternal, tanpa harus menyentuh mouse.
+  // Dikecualikan kalau fokus sedang di TEXTAREA (Enter tetap ganti baris,
+  // mis. alasan penolakan) atau di tombol modal sendiri (biarkan klik
+  // bawaan tombol itu bekerja, supaya tidak terpicu dua kali).
+  modalKeydown = (e) => {
+    if (e.key === 'Escape') { e.preventDefault(); closeModal(); return; }
+    if (e.key !== 'Enter') return;
+    const aktif = document.activeElement;
+    if (root.contains(aktif) && (aktif.tagName === 'TEXTAREA' || aktif.tagName === 'BUTTON')) return;
+    const simpan = $('#m-save');
+    if (simpan) {
+      // Sedang disabled = permintaan sebelumnya masih berjalan — jangan
+      // ditutup lewat Batal, nanti hasilnya (berhasil/gagal) tidak kelihatan.
+      if (!simpan.disabled) { e.preventDefault(); simpan.click(); }
+      return;
+    }
+    const batal = $('#m-cancel');
+    if (batal) { e.preventDefault(); batal.click(); }
+  };
+  document.addEventListener('keydown', modalKeydown);
 }
-function closeModal() { $('#modal-root').innerHTML = ''; cardHandler = null; }
+function closeModal() {
+  $('#modal-root').innerHTML = '';
+  cardHandler = null;
+  if (modalKeydown) { document.removeEventListener('keydown', modalKeydown); modalKeydown = null; }
+}
 
 // Palet grafik disetel ke warna tampilan admin (navy, emas redam, hijau).
 // VIZ milik charts.js; diubah di sini karena berkas ini hanya dimuat halaman
