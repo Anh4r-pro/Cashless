@@ -74,13 +74,19 @@ function openModal(html, onSave, saveLabel) {
   // Enter = tombol utama (OK/Lanjut/Setuju/dst), Esc = Batal — supaya popup
   // bisa diputuskan dari keyboard eksternal, tanpa harus menyentuh mouse.
   // Dikecualikan kalau fokus sedang di TEXTAREA (Enter tetap ganti baris,
-  // mis. alasan penolakan) atau di tombol modal sendiri (biarkan klik
-  // bawaan tombol itu bekerja, supaya tidak terpicu dua kali).
+  // mis. alasan penolakan), di tombol modal sendiri (biarkan klik bawaan
+  // tombol itu bekerja, supaya tidak terpicu dua kali), atau di kotak
+  // target pindai (data-scan, mis. UID kartu/barcode): reader keyboard-
+  // wedge kerap mengirim Enter susulan yang tidak sempat "ditelan" oleh
+  // buffer tap kartu (lihat listener HID di atas) — kalau tidak dikecualikan,
+  // Enter nyasar itu langsung menutup modal lewat tombol simpan sebelum
+  // penggunanya sempat memeriksa hasil pindaiannya.
   modalKeydown = (e) => {
     if (e.key === 'Escape') { e.preventDefault(); closeModal(); return; }
     if (e.key !== 'Enter') return;
     const aktif = document.activeElement;
-    if (root.contains(aktif) && (aktif.tagName === 'TEXTAREA' || aktif.tagName === 'BUTTON')) return;
+    if (root.contains(aktif) &&
+      (aktif.tagName === 'TEXTAREA' || aktif.tagName === 'BUTTON' || aktif.dataset.scan === '1')) return;
     const simpan = $('#m-save');
     if (simpan) {
       // Sedang disabled = permintaan sebelumnya masih berjalan — jangan
@@ -2140,7 +2146,7 @@ function martBarangModal(p) {
     <div class="field"><label>Nama barang</label>
       <input id="mb-nama" value="${esc(p?.nama || '')}" maxlength="120" placeholder="mis. Aqua 600ml"></div>
     <div class="field"><label>SKU / barcode <span class="muted">(opsional)</span></label>
-      <input id="mb-barcode" value="${esc(p?.barcode || '')}" maxlength="32" placeholder="pindai atau ketik">
+      <input id="mb-barcode" data-scan="1" value="${esc(p?.barcode || '')}" maxlength="32" placeholder="pindai atau ketik">
       <span class="muted set-hint">Boleh dikosongkan — barang tetap bisa dicari lewat nama di kasir.</span></div>
     <div class="field"><label>Kategori</label><select id="mb-kat">
       <option value="">— tanpa kategori —</option>
@@ -7106,7 +7112,7 @@ function siswaModal(s) {
       <input id="m-nis" value="${esc(s?.nis || '')}">
       <span class="muted set-hint" id="m-nis-hint"></span></div>
     <div class="field"><label>UID kartu (opsional — bisa juga tap kartu sekarang)</label>
-      <input id="m-uid" value="${esc(s?.card_uid || '')}" placeholder="tap kartu atau ketik manual"></div>
+      <input id="m-uid" data-scan="1" value="${esc(s?.card_uid || '')}" placeholder="tap kartu atau ketik manual"></div>
     <div class="field" id="m-khusus-wrap">
       <label>Jabatan / keterangan</label>
       <input id="m-jabatan" value="${esc(s?.jabatan || '')}" maxlength="120"
@@ -7456,7 +7462,7 @@ function assignCardModal(s, presetUid) {
              <input type="hidden" id="m-sid" value="">`}
     </div>
     <div class="field"><label>UID kartu — tempelkan kartu sekarang, atau ketik manual</label>
-      <input id="m-uid" value="${esc(presetUid || '')}" placeholder="menunggu tap kartu…"></div>`,
+      <input id="m-uid" data-scan="1" value="${esc(presetUid || '')}" placeholder="menunggu tap kartu…"></div>`,
     async () => {
       const sid = s ? s.id : Number($('#m-sid').value);
       if (!sid) throw new Error('Pilih santri dulu');
