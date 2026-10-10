@@ -176,10 +176,10 @@ class SaldoController extends Controller
             throw new ApiError(400, 'Alasan pemotongan wajib diisi (minimal 3 huruf)');
         }
         if (! $ids) {
-            throw new ApiError(400, 'Belum ada santri yang dipilih');
+            throw new ApiError(400, 'Belum ada yang dipilih');
         }
         if (count($ids) > self::MAX_BATCH) {
-            throw new ApiError(400, 'Maksimal ' . self::MAX_BATCH . ' santri sekali potong');
+            throw new ApiError(400, 'Maksimal ' . self::MAX_BATCH . ' orang sekali potong');
         }
 
         // batch_id menjaga idempotensi: tiap baris memakai tx_id
@@ -212,7 +212,7 @@ class SaldoController extends Controller
                 $s = Siswa::find($id);
                 if (! $s) {
                     $dilewati[] = ['id' => $id, 'nama' => '—', 'kelas' => '', 'saldo' => 0,
-                        'alasan' => 'Santri tidak ditemukan'];
+                        'alasan' => 'Tidak ditemukan'];
 
                     continue;
                 }

@@ -5806,11 +5806,12 @@ function sdRenderQuick() {
 // Panel kiri berganti isi mengikuti mode: satu santri (cari/tap) atau satu kelas.
 function sdRenderTarget() {
   const t = $('#sd-target');
-  $('#sd-target-title').textContent = sdKolektif() ? '1 · Pilih Kelas' : '1 · Pilih Santri';
+  $('#sd-target-title').textContent = sdKolektif() ? '1 · Pilih Kelas/Unit' : '1 · Pilih Orang';
   if (!sdKolektif()) {
     t.innerHTML = `
-      <p class="muted">Cari langsung tanpa kartu — ketik nama, NIS, kelas, atau UID.
-        Kalau reader tersedia, tap kartu di halaman ini juga memilih santri.</p>
+      <p class="muted">Cari langsung tanpa kartu — ketik nama, NIS/NIY, kelas/unit, atau UID.
+        Berlaku untuk santri maupun SDM/tamu/VIP. Kalau reader tersedia, tap kartu di
+        halaman ini juga memilih orangnya.</p>
       <div class="field"><input id="sd-cari" autocomplete="off"
         placeholder="mis. Andi · 2024001 · 7A · 04A1B2C3"></div>
       <div id="sd-hasil" class="reslist"></div>
@@ -5826,19 +5827,23 @@ function sdRenderTarget() {
     return;
   }
   t.innerHTML = `
-    <p class="muted">Pilih kelas — seluruh santrinya masuk daftar, lalu hilangkan centang
-      santri yang dikecualikan. Beberapa kelas boleh digabung dalam satu pemotongan.
-      Santri berstatus blokir tidak dicentang otomatis.</p>
+    <p class="muted">Pilih kelas atau unit SDM — seluruh isinya masuk daftar, lalu hilangkan
+      centang yang dikecualikan. Beberapa kelas/unit boleh digabung dalam satu pemotongan.
+      Yang berstatus blokir tidak dicentang otomatis.</p>
     <div class="filterbar">
-      <div class="field"><label>Kelas</label><select id="sd-kelas"><option value="">memuat…</option></select></div>
-      <button class="go" id="sd-tambah">+ Tambahkan kelas</button>
+      <div class="field"><label>Kelas / Unit</label><select id="sd-kelas"><option value="">memuat…</option></select></div>
+      <button class="go" id="sd-tambah">+ Tambahkan kelas/unit</button>
       <button id="sd-kosongkan">Kosongkan daftar</button>
     </div>
     <div id="sd-batch"></div>`;
   api('/api/kelas').then((d) => {
     const sel = $('#sd-kelas');
-    if (sel) sel.innerHTML = d.kelas.map((k) => `<option>${esc(k)}</option>`).join('')
-      || '<option value="">(belum ada kelas)</option>';
+    // Digabung dengan Unit SDM: Potong Kolektif sekarang berlaku untuk
+    // golongan apa pun, jadi admin juga harus bisa memilih unitnya, bukan
+    // cuma kelas santri.
+    const pilihan = (d.kelas || []).concat(d.unit_sdm || []);
+    if (sel) sel.innerHTML = pilihan.map((k) => `<option>${esc(k)}</option>`).join('')
+      || '<option value="">(belum ada kelas/unit)</option>';
   }).catch(() => {});
   $('#sd-tambah').onclick = sdTambahKelas;
   $('#sd-kosongkan').onclick = () => {
@@ -5854,13 +5859,16 @@ async function sdTambahKelas() {
   const btn = $('#sd-tambah');
   btn.disabled = true;
   try {
-    const d = await api('/api/siswa?limit=500&kelas=' + encodeURIComponent(kelas));
+    // golongan=semua: tanpa ini server hanya mengembalikan golongan siswa —
+    // "kelas" dipakai juga sebagai "unit" oleh golongan sdm/tamu/vip, jadi
+    // Potong Kolektif per kelas/unit ini berlaku untuk mereka juga.
+    const d = await api('/api/siswa?limit=500&golongan=semua&kelas=' + encodeURIComponent(kelas));
     const adaId = new Set(saldo.batch.map((s) => s.id));
-    // hanya santri yang benar-benar di kelas itu (parameter kelas dicocokkan persis di server)
+    // hanya yang benar-benar di kelas/unit itu (parameter kelas dicocokkan persis di server)
     const baru = d.siswa.filter((s) => !adaId.has(s.id));
     saldo.batch = saldo.batch.concat(baru);
     for (const s of baru) if (s.status === 'aktif') saldo.pilih.add(s.id);
-    toast(baru.length ? `${baru.length} santri kelas ${kelas} ditambahkan` : `Kelas ${kelas} sudah ada di daftar`,
+    toast(baru.length ? `${baru.length} orang di kelas/unit ${kelas} ditambahkan` : `Kelas/unit ${kelas} sudah ada di daftar`,
       baru.length ? 'ok' : '');
     sdRenderBatch();
     sdSync();
@@ -5911,7 +5919,7 @@ function sdKosongkan() {
   let n = 0;
   if (sdKolektif()) {
     const dipilih = saldo.batch.filter((x) => saldo.pilih.has(x.id));
-    if (!dipilih.length) { toast('Belum ada santri yang dicentang', 'err'); return; }
+    if (!dipilih.length) { toast('Belum ada yang dicentang', 'err'); return; }
     // Nominal disetel sebesar isi TERBANYAK, lalu "sebisanya" membuat tiap
     // santri terpotong sebesar isinya sendiri — bukan sebesar angka itu.
     n = Math.max(0, ...dipilih.map(punya));
@@ -5931,7 +5939,7 @@ function sdRenderBatch() {
   const box = $('#sd-batch');
   if (!box) return;
   if (!saldo.batch.length) {
-    box.innerHTML = '<p class="muted">Daftar masih kosong — pilih kelas lalu tekan “Tambahkan kelas”.</p>';
+    box.innerHTML = '<p class="muted">Daftar masih kosong — pilih kelas/unit lalu tekan “Tambahkan kelas/unit”.</p>';
     return;
   }
   const n = saldo.nominal || 0;
@@ -5958,7 +5966,7 @@ function sdRenderBatch() {
     <div class="batchbar">
       <label><input type="checkbox" id="sd-all" style="width:auto"
         ${dipilih.length === saldo.batch.length ? 'checked' : ''}> pilih semua</label>
-      <span class="muted">${dipilih.length} dari ${saldo.batch.length} santri dicentang</span>
+      <span class="muted">${dipilih.length} dari ${saldo.batch.length} dicentang</span>
     </div>
     <div class="tblwrap batchlist"><table>
       <thead><tr><th></th><th>Nama</th><th>Kelas</th><th class="num">Saldo</th><th class="num">Dipotong</th></tr></thead>
@@ -5984,9 +5992,12 @@ async function sdCari() {
   const box = $('#sd-hasil');
   if (q.length < 2) { box.innerHTML = ''; return; }
   let d;
-  try { d = await api('/api/siswa?limit=8&cari=' + encodeURIComponent(q)); }
+  // golongan=semua: tanpa ini server hanya mengembalikan golongan siswa (lihat
+  // SiswaController::saring) — kotak cari ini dipakai bersama mode Topup dan
+  // Potong satuan, jadi berlaku untuk SDM/tamu/VIP juga, bukan cuma santri.
+  try { d = await api('/api/siswa?limit=8&golongan=semua&cari=' + encodeURIComponent(q)); }
   catch (e) { box.innerHTML = `<p class="muted">${esc(e.message)}</p>`; return; }
-  if (!d.siswa.length) { box.innerHTML = '<p class="muted">Tidak ada santri cocok</p>'; return; }
+  if (!d.siswa.length) { box.innerHTML = '<p class="muted">Tidak ada yang cocok</p>'; return; }
   box.innerHTML = d.siswa.map((s) => `
     <button data-id="${s.id}">
       ${avatarHtml(s, true)}
@@ -6267,26 +6278,26 @@ function sdSyncKolektif(n, ket) {
   const r = sdRingkasBatch();
   const kelas = [...new Set(r.dipilih.map((s) => s.kelas).filter(Boolean))];
   let pesan = '', ok = false;
-  if (!saldo.batch.length) pesan = 'Tambahkan kelas dulu di panel sebelah kiri.';
-  else if (!r.dipilih.length) pesan = 'Belum ada santri yang dicentang.';
-  else if (!n || n <= 0) pesan = 'Isi nominal yang dipotong dari tiap santri.';
-  else if (r.total <= 0) pesan = '⚠️ Tidak ada saldo yang bisa dipotong — semua santri terpilih saldonya kurang.';
+  if (!saldo.batch.length) pesan = 'Tambahkan kelas/unit dulu di panel sebelah kiri.';
+  else if (!r.dipilih.length) pesan = 'Belum ada yang dicentang.';
+  else if (!n || n <= 0) pesan = 'Isi nominal yang dipotong dari tiap orang.';
+  else if (r.total <= 0) pesan = '⚠️ Tidak ada saldo yang bisa dipotong — semua yang terpilih saldonya kurang.';
   else if (ket.length < 3) pesan = 'Alasan pemotongan wajib diisi (minimal 3 huruf).';
   else {
     ok = true;
     const kartu = r.dipilih.reduce((x, s) => x + sdBagi(s).kartu, 0);
     const titipan = r.dipilih.reduce((x, s) => x + sdBagi(s).titipan, 0);
-    pesan = `<b>${r.dipilih.length} santri</b>${kelas.length ? ' · kelas ' + esc(kelas.join(', ')) : ''}<br>
-      ${rp(n)} × ${r.kena.length + r.sebagian.length} santri →
+    pesan = `<b>${r.dipilih.length} orang</b>${kelas.length ? ' · kelas/unit ' + esc(kelas.join(', ')) : ''}<br>
+      ${rp(n)} × ${r.kena.length + r.sebagian.length} orang →
       total <b class="minus">−${rp(r.total)}</b>` +
       (titipan > 0 ? `<br><b>${rp(kartu)}</b> dari kartu · <b>${rp(titipan)}</b> dari titipan` : '') +
-      (r.sebagian.length ? `<br><span class="muted">${r.sebagian.length} santri dipotong sebagian (saldo habis)</span>` : '') +
-      (r.lewat.length ? `<br><span class="muted">${r.lewat.length} santri dilewati karena saldonya kurang</span>` : '');
+      (r.sebagian.length ? `<br><span class="muted">${r.sebagian.length} orang dipotong sebagian (saldo habis)</span>` : '') +
+      (r.lewat.length ? `<br><span class="muted">${r.lewat.length} orang dilewati karena saldonya kurang</span>` : '');
   }
   $('#sd-preview').innerHTML = pesan;
   $('#sd-preview').className = 'preview' + (ok ? ' ok' : '');
   const btn = $('#btn-saldo');
-  btn.textContent = ok ? `Potong ${r.kena.length + r.sebagian.length} Santri · ${rp(r.total)}` : 'Potong Kolektif';
+  btn.textContent = ok ? `Potong ${r.kena.length + r.sebagian.length} Orang · ${rp(r.total)}` : 'Potong Kolektif';
   btn.classList.add('danger');
   btn.disabled = !ok;
 }
@@ -6349,13 +6360,13 @@ function doSaldoKolektif() {
   const alasan = $('#sd-ket').value.trim();
   const sebisanya = $('#sd-kurang').value === 'sebisanya';
   openModal(`
-    <h2>Potong saldo ${r.kena.length + r.sebagian.length} santri?</h2>
-    <p>${rp(n)} per santri${kelas.length ? ` · kelas <b>${esc(kelas.join(', '))}</b>` : ''} —
-       total <b class="minus">${rp(r.total)}</b> ditarik dari saldo santri.</p>
-    ${r.sebagian.length ? `<p class="muted">${r.sebagian.length} santri saldonya kurang dan dipotong sebagian (sampai saldo 0).</p>` : ''}
-    ${r.lewat.length ? `<p class="muted">${r.lewat.length} santri dilewati karena saldonya kurang — saldonya tidak berubah.</p>` : ''}
+    <h2>Potong saldo ${r.kena.length + r.sebagian.length} orang?</h2>
+    <p>${rp(n)} per orang${kelas.length ? ` · kelas/unit <b>${esc(kelas.join(', '))}</b>` : ''} —
+       total <b class="minus">${rp(r.total)}</b> ditarik dari saldonya.</p>
+    ${r.sebagian.length ? `<p class="muted">${r.sebagian.length} orang saldonya kurang dan dipotong sebagian (sampai saldo 0).</p>` : ''}
+    ${r.lewat.length ? `<p class="muted">${r.lewat.length} orang dilewati karena saldonya kurang — saldonya tidak berubah.</p>` : ''}
     <p class="muted">Alasan: “${esc(alasan)}”.<br>
-      Tercatat satu per satu atas nama <b>${esc(USER.nama)}</b> di riwayat tiap santri
+      Tercatat satu per satu atas nama <b>${esc(USER.nama)}</b> di riwayat tiap orang
       dan tidak bisa dihapus — pembetulan dilakukan dengan top up balik.</p>`,
     async () => {
       const d = await api('/api/koreksi-massal', { method: 'POST', body: {
@@ -6376,7 +6387,7 @@ function doSaldoKolektif() {
       sdRenderBatch();
       sdSync();
       loadPenyesuaian();
-      toast(`✔ ${d.berhasil.length} santri dipotong — total ${rp(d.total_dipotong)}`, 'ok');
+      toast(`✔ ${d.berhasil.length} orang dipotong — total ${rp(d.total_dipotong)}`, 'ok');
       setTimeout(() => hasilKolektifModal(d), 250);
     }, 'Ya, potong kolektif');
 }
@@ -6385,17 +6396,17 @@ function hasilKolektifModal(d) {
   openModal(`
     <h2>Hasil Pemotongan Kolektif</h2>
     <div class="cards" style="margin-bottom:12px">
-      <div class="statcard"><span class="muted">Berhasil dipotong</span><br><b>${d.berhasil.length} santri</b></div>
+      <div class="statcard"><span class="muted">Berhasil dipotong</span><br><b>${d.berhasil.length} orang</b></div>
       <div class="statcard"><span class="muted">Total ditarik</span><br><b class="rp">${rp(d.total_dipotong)}</b></div>
     </div>
     ${d.dilewati.length ? `
-      <p class="muted">${d.dilewati.length} santri dilewati — saldonya tidak berubah:</p>
+      <p class="muted">${d.dilewati.length} orang dilewati — saldonya tidak berubah:</p>
       <div class="tblwrap" style="max-height:220px; overflow:auto"><table>
-        <thead><tr><th>Nama</th><th>Kelas</th><th class="num">Saldo</th><th>Alasan</th></tr></thead>
+        <thead><tr><th>Nama</th><th>Kelas/Unit</th><th class="num">Saldo</th><th>Alasan</th></tr></thead>
         <tbody>${d.dilewati.map((s) => `<tr><td>${esc(s.nama)}</td><td>${esc(s.kelas)}</td>
           <td class="num rp">${rp(s.saldo)}</td><td class="muted">${esc(s.alasan)}</td></tr>`).join('')}</tbody>
       </table></div>`
-    : '<p class="muted">Semua santri terpilih berhasil dipotong.</p>'}`);
+    : '<p class="muted">Semua yang terpilih berhasil dipotong.</p>'}`);
   $('#m-cancel').textContent = 'Tutup';     // modal ini hanya melaporkan hasil
 }
 
