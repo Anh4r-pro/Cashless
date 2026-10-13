@@ -136,7 +136,7 @@ const VIEWS = {
   superadmin: [
     ['dashboard', 'Dashboard'],
     { grup: 'Saldo & Top Up', anak: [['saldo', 'Saldo Santri'], ['massal', 'Topup Massal'],
-                                     ['topup', 'Topup Ortu']] },
+                                     ['topup', 'Topup Ortu'], ['tabungan', 'Tabungan']] },
     { grup: 'Pemegang Kartu', anak: [['santri', 'Santri'], ['sdm', 'SDM & Personil']] },
     { grup: 'Kantin', anak: [['tenant', 'Tenant'], ['menu-ajuan', 'Menu Tenant'],
                              ['donasi', 'Donasi']] },
@@ -171,6 +171,7 @@ const IZIN_TAB = {
   saldo: ['saldo.lihat'],
   massal: ['massal.lihat'],
   topup: ['topup_ortu.lihat'],
+  tabungan: ['tabungan.lihat'],
   santri: ['santri.lihat'],
   sdm: ['sdm.lihat'],
   tenant: ['tenant.lihat'],
@@ -303,6 +304,7 @@ const IKON_TAB = {
   saldo: '<path d="M3 7a2 2 0 0 1 2-2h13v4"/><path d="M3 7v11a2 2 0 0 0 2 2h15V9H5a2 2 0 0 1-2-2"/><circle cx="16" cy="14.5" r="1.2"/>',
   massal: '<path d="M12 16V4M7 9l5-5 5 5"/><path d="M4 16v3a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-3"/>',
   topup: '<rect x="7" y="2.5" width="10" height="19" rx="2.5"/><path d="M11 18h2"/>',
+  tabungan: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1"/>',
   santri: '<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.5 3.3-5.5 6.5-5.5s5.7 2 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.8c1.9.7 3.1 2.4 3.5 5.2"/>',
   sdm: '<rect x="3" y="5" width="18" height="14" rx="2.5"/><circle cx="9" cy="11" r="2"/><path d="M6 16c.5-1.5 1.6-2.2 3-2.2s2.5.7 3 2.2M15 10h3M15 13.5h3"/>',
   tenant: '<path d="M4 9.5 5.5 4h13L20 9.5"/><path d="M4 9.5a2.7 2.7 0 0 0 5.3 0 2.7 2.7 0 0 0 5.4 0 2.7 2.7 0 0 0 5.3 0"/><path d="M5 12v8h14v-8M10 20v-5h4v5"/>',
@@ -447,6 +449,7 @@ function renderView(name) {
       : (USER?.tenant_mode === 'mart' ? martDashView : dashTenantView),
     saldo: saldoView, santri: siswaView, tenant: tenantView, analitik: analitikView,
     donasi: donasiView, topup: topupOrtuView, 'menu-ajuan': menuAjuanView, sdm: sdmView,
+    tabungan: tabunganView,
     massal: massalView, akun: akunView,
   }[name];
   if (render) render($('#main'));
@@ -6719,6 +6722,280 @@ async function muatRekapDonasi(hari) {
         <td class="num rp">${rp(-t.jumlah)}</td>
       </tr>`).join('') || '<tr><td colspan="5" class="muted">Belum ada donasi masuk</td></tr>';
   } catch (e) { toast(e.message, 'err'); }
+}
+
+// ╔══════════════════════════════════════════════════════════╗
+// ║ SUPERADMIN: TABUNGAN (jenis & target, setor/cairkan, rekap) ║
+// ╚══════════════════════════════════════════════════════════╝
+// Beda dari Donasi: uang di sini tetap milik santri yang sama dan harus bisa
+// kembali ke kartunya — menabung bisa santri sendiri lewat kios (kartu saja),
+// tapi menyetor besar & mencairkan SENGAJA hanya lewat admin di layar ini.
+let tabunganRows = [];
+let tabunganSantri = null;    // santri yang sedang dipilih di panel Setor & Cairkan
+
+function tabunganView(el) {
+  el.innerHTML = `
+  <div class="panel">
+    <div class="kat-head">
+      <h2>Rekap Tabungan</h2>
+    </div>
+    <div class="cards" id="tb-kartu"></div>
+    <div class="tblwrap"><table>
+      <thead><tr><th>Jenis tabungan</th><th class="num">Target</th><th class="num">Terkumpul</th>
+        <th class="num">Penabung</th></tr></thead>
+      <tbody id="tb-perjenis"></tbody>
+    </table></div>
+  </div>
+
+  <div class="row">
+    <div class="panel">
+      <div class="kat-head">
+        <h2>Jenis &amp; Target Tabungan</h2>
+        <button class="linkbtn" id="tb-tambah">+ Tambah jenis tabungan</button>
+      </div>
+      <p class="muted">Yang tampil di kios santri hanya yang dicentang <b>tampil</b>.
+        Target boleh dikosongkan (bebas tanpa batas) atau diisi (tampil progres
+        terkumpul/target di kios). Jenis yang sudah punya riwayat tidak bisa
+        dihapus, hanya disembunyikan.</p>
+      <div id="tb-baris"></div>
+      <button class="paybtn" id="tb-simpan">Simpan daftar tabungan</button>
+
+      <hr>
+      <h3>Pengaturan menabung lewat kios</h3>
+      <div class="field"><label>Nominal menabung terkecil (kios)</label>
+        ${inputUang({ id: 'tb-min' })}</div>
+      <div class="field"><label>Maksimal menabung per santri per hari (kios)</label>
+        ${inputUang({ id: 'tb-maks' })}</div>
+      <button class="paybtn" id="tb-simpan-set">Simpan pengaturan</button>
+    </div>
+
+    <div class="panel">
+      <h2>Setor &amp; Cairkan (dibantu admin)</h2>
+      <p class="muted">Untuk kontribusi besar sekali waktu (boleh diambil dari kartu
+        <i>dan</i> titipan), atau mencairkan tabungan kembali ke kartu. Menabung
+        rutin kecil-kecil cukup lewat kios — santri tap kartu sendiri.</p>
+      <div class="field"><input id="tb-cari" placeholder="cari nama/NIS santri…" autocomplete="off"></div>
+      <div id="tb-hasil-cari"></div>
+      <div id="tb-panel-santri"></div>
+    </div>
+  </div>`;
+
+  $('#tb-tambah').onclick = () => {
+    tabunganRows.push({ id: null, nama: '', deskripsi: '', target: '', aktif: true, terpakai: 0 });
+    tbGambarBaris();
+    const kotak = document.querySelectorAll('#tb-baris .tb-nama');
+    kotak[kotak.length - 1]?.focus();
+  };
+  $('#tb-simpan').onclick = simpanJenisTabungan;
+  $('#tb-simpan-set').onclick = simpanPengaturanTabungan;
+  $('#tb-cari').addEventListener('input', debounce(tbCariSantri, 300));
+
+  muatJenisTabungan();
+  muatPengaturanTabungan();
+  muatRekapTabungan();
+}
+
+async function muatJenisTabungan() {
+  try {
+    const d = await api('/api/tabungan/jenis?semua=1');
+    tabunganRows = d.jenis.map((j) => ({
+      id: j.id, nama: j.nama, deskripsi: j.deskripsi,
+      target: j.target === null ? '' : String(j.target), aktif: j.aktif === 1,
+      terpakai: j.terpakai, terkumpul: j.terkumpul,
+    }));
+    tbGambarBaris();
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+function tbGambarBaris() {
+  $('#tb-baris').innerHTML = tabunganRows.map((r, i) => `
+    <div class="dn-row">
+      <div class="dn-row-atas">
+        <input class="tb-nama" data-i="${i}" value="${esc(r.nama)}" maxlength="60" placeholder="nama jenis tabungan">
+        <label class="kat-aktif" title="Tampilkan di kios santri">
+          <input type="checkbox" class="tb-aktif" data-i="${i}" ${r.aktif ? 'checked' : ''}> tampil
+        </label>
+        <button class="linkbtn danger" data-hapus="${i}"
+          title="${r.terpakai ? 'sudah ada riwayat tabungan — tidak bisa dihapus' : 'hapus'}"
+          ${r.terpakai ? 'disabled' : ''}>✕</button>
+      </div>
+      <input class="tb-desk" data-i="${i}" value="${esc(r.deskripsi)}" maxlength="200"
+        placeholder="keterangan singkat (tampil di kios)">
+      <input class="tb-target uang-daftar" data-i="${i}" value="${esc(r.target)}" inputmode="numeric"
+        autocomplete="off" placeholder="target (opsional, mis. 500.000 — kosongkan untuk bebas)">
+      ${r.terpakai ? `<span class="muted">sudah dipakai ${r.terpakai} santri · terkumpul ${rp(r.terkumpul)}</span>` : ''}
+    </div>`).join('') || '<p class="muted">Belum ada jenis tabungan. Tambahkan di atas.</p>';
+
+  const ikat = (sel, isi) => $('#tb-baris').querySelectorAll(sel).forEach((inp) => {
+    inp.oninput = () => isi(tabunganRows[Number(inp.dataset.i)], inp);
+  });
+  ikat('.tb-nama', (r, inp) => { r.nama = inp.value; });
+  ikat('.tb-desk', (r, inp) => { r.deskripsi = inp.value; });
+  ikat('.tb-target', (r, inp) => { r.target = inp.value; });
+  $('#tb-baris').querySelectorAll('.tb-aktif').forEach((c) => {
+    c.onchange = () => { tabunganRows[Number(c.dataset.i)].aktif = c.checked; };
+  });
+  $('#tb-baris').querySelectorAll('[data-hapus]').forEach((b) => {
+    b.onclick = () => { tabunganRows.splice(Number(b.dataset.hapus), 1); tbGambarBaris(); };
+  });
+}
+
+async function simpanJenisTabungan() {
+  const btn = $('#tb-simpan');
+  btn.disabled = true;
+  try {
+    const kirim = tabunganRows
+      .filter((r) => r.nama.trim())
+      .map((r) => ({
+        id: r.id, nama: r.nama.trim(), deskripsi: r.deskripsi.trim(), aktif: r.aktif,
+        target: r.target.trim() === '' ? null : Number(digitUang(r.target)),
+      }));
+    for (const j of kirim) {
+      if (j.nama.length < 3) throw new Error('Nama jenis tabungan minimal 3 huruf');
+    }
+    await api('/api/tabungan/jenis', { method: 'PUT', body: { jenis: kirim } });
+    toast('✔ Daftar tabungan disimpan', 'ok');
+    muatJenisTabungan();
+    muatRekapTabungan();
+  } catch (e) { toast(e.message, 'err'); }
+  btn.disabled = false;
+}
+
+async function muatPengaturanTabungan() {
+  try {
+    const d = await api('/api/tabungan/pengaturan');
+    isiUang('#tb-min', d.pengaturan.tabungan_min);
+    isiUang('#tb-maks', d.pengaturan.tabungan_maks_harian);
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function simpanPengaturanTabungan() {
+  const btn = $('#tb-simpan-set');
+  btn.disabled = true;
+  try {
+    await api('/api/tabungan/pengaturan', { method: 'PUT', body: {
+      tabungan_min: nilaiUang('#tb-min'),
+      tabungan_maks_harian: nilaiUang('#tb-maks'),
+    } });
+    toast('✔ Pengaturan tabungan disimpan', 'ok');
+  } catch (e) { toast(e.message, 'err'); }
+  btn.disabled = false;
+}
+
+async function muatRekapTabungan() {
+  try {
+    const d = await api('/api/tabungan/rekap');
+    $('#tb-kartu').innerHTML = [
+      ['Terkumpul seluruhnya (semua jenis)', rp(d.total)],
+    ].map(([l, v]) => `<div class="statcard"><span class="muted">${l}</span><br><b class="rp">${v}</b></div>`).join('');
+
+    $('#tb-perjenis').innerHTML = d.per_jenis.map((j) => `
+      <tr>
+        <td><b>${esc(j.nama)}</b> ${j.aktif ? '' : '<span class="badge nonaktif">disembunyikan</span>'}</td>
+        <td class="num rp">${j.target === null ? '<span class="muted">bebas</span>' : rp(j.target)}</td>
+        <td class="num rp">${rp(j.total)}</td>
+        <td class="num">${j.n_penabung}</td>
+      </tr>`).join('') || '<tr><td colspan="4" class="muted">Belum ada jenis tabungan</td></tr>';
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function tbCariSantri() {
+  const q = $('#tb-cari').value.trim();
+  const box = $('#tb-hasil-cari');
+  if (q.length < 2) { box.innerHTML = ''; return; }
+  try {
+    const d = await api('/api/siswa?limit=8&golongan=semua&cari=' + encodeURIComponent(q));
+    box.innerHTML = d.siswa.map((s) => `
+      <button class="linkbtn" style="display:block; padding:3px 0" data-id="${s.id}">
+        ${esc(s.nama)} (${esc(s.kelas || '—')})</button>`).join('') || '<p class="muted">Tidak ada yang cocok</p>';
+    box.querySelectorAll('button').forEach((b) => {
+      b.onclick = () => {
+        tabunganSantri = d.siswa.find((s) => s.id === Number(b.dataset.id));
+        $('#tb-cari').value = '';
+        box.innerHTML = '';
+        tbRenderPanelSantri();
+      };
+    });
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function tbRenderPanelSantri() {
+  const box = $('#tb-panel-santri');
+  if (!tabunganSantri) { box.innerHTML = ''; return; }
+  box.innerHTML = '<p class="muted">memuat…</p>';
+  let d;
+  try { d = await api('/api/tabungan/saldo/' + tabunganSantri.id); }
+  catch (e) { toast(e.message, 'err'); return; }
+
+  const jenisAktif = tabunganRows.filter((r) => r.aktif && r.id);
+  box.innerHTML = `
+    <div class="stucard" style="margin:10px 0">
+      <div><b>${esc(d.siswa.nama)}</b><br><span class="muted">${esc(d.siswa.kelas || '—')}</span></div>
+      <div class="saldo"><span class="muted">Saldo kartu</span><br><b class="rp">${rp(d.siswa.saldo)}</b>
+        ${d.siswa.saldo_titipan > 0 ? `<br><span class="muted" style="font-size:11px">titipan ${rp(d.siswa.saldo_titipan)}</span>` : ''}</div>
+    </div>
+    ${d.tabungan.length ? `<div class="tblwrap"><table>
+      <thead><tr><th>Jenis</th><th class="num">Saldo tabungan</th><th></th></tr></thead>
+      <tbody>${d.tabungan.map((t) => `
+        <tr><td>${esc(t.nama)}</td><td class="num rp">${rp(t.saldo)}</td>
+          <td><button class="linkbtn danger" data-cairkan="${t.jenis_id}">cairkan</button></td></tr>`).join('')}</tbody>
+    </table></div>` : '<p class="muted">Belum punya saldo tabungan apa pun.</p>'}
+
+    <h3 style="margin-top:14px">Setor tabungan</h3>
+    <div class="field"><label>Jenis</label><select id="tb-s-jenis">
+      ${jenisAktif.map((r) => `<option value="${r.id}">${esc(r.nama)}</option>`).join('') || '<option value="">(belum ada jenis aktif)</option>'}
+    </select></div>
+    <div class="field">${inputUang({ id: 'tb-s-jumlah', placeholder: 'Nominal (Rp)' })}</div>
+    <div class="field"><label>Sumber</label><select id="tb-s-sumber">
+      <option value="kartu">Kartu saja — titipan tidak disentuh</option>
+      <option value="kartu_titipan">Kartu dulu, sisanya dari titipan</option>
+      <option value="titipan_kartu">Titipan dulu, sisanya dari kartu</option>
+    </select></div>
+    <div class="field"><input id="tb-s-ket" placeholder="keterangan (opsional)" maxlength="300"></div>
+    <button class="paybtn" id="tb-s-submit">Setor</button>`;
+
+  $('#tb-s-submit').onclick = async () => {
+    const btn = $('#tb-s-submit');
+    const jenisId = Number($('#tb-s-jenis').value);
+    const jumlah = nilaiUang('#tb-s-jumlah');
+    if (!jenisId) { toast('Belum ada jenis tabungan aktif', 'err'); return; }
+    if (!jumlah || jumlah <= 0) { toast('Isi nominal dulu', 'err'); return; }
+    btn.disabled = true;
+    try {
+      await api('/api/tabungan/setor', { method: 'POST', body: {
+        siswa_id: tabunganSantri.id, jenis_id: jenisId, jumlah,
+        sumber: $('#tb-s-sumber').value, keterangan: $('#tb-s-ket').value,
+        tx_id: 'tb-setor-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+      } });
+      toast('✔ Tabungan disetor', 'ok');
+      tbRenderPanelSantri();
+      muatRekapTabungan();
+    } catch (e) { toast(e.message, 'err'); }
+    btn.disabled = false;
+  };
+
+  box.querySelectorAll('[data-cairkan]').forEach((b) => {
+    b.onclick = () => tbCairkanModal(Number(b.dataset.cairkan));
+  });
+}
+
+function tbCairkanModal(jenisId) {
+  const nama = tabunganRows.find((r) => r.id === jenisId)?.nama || '';
+  openModal(`
+    <h2>Cairkan Tabungan</h2>
+    <p>Seluruh saldo tabungan <b>${esc(nama)}</b> milik <b>${esc(tabunganSantri.nama)}</b>
+      akan dicairkan ke kartu (sisanya ke titipan kalau melebihi plafon kartu).</p>
+    <div class="field"><label>Alasan pencairan (wajib)</label>
+      <input id="tb-c-ket" placeholder="mis. Study tour sudah berangkat" maxlength="300"></div>`,
+    async () => {
+      await api('/api/tabungan/cairkan', { method: 'POST', body: {
+        siswa_id: tabunganSantri.id, jenis_id: jenisId, keterangan: $('#tb-c-ket').value,
+        tx_id: 'tb-cair-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
+      } });
+      toast('✔ Tabungan dicairkan', 'ok');
+      tbRenderPanelSantri();
+      muatRekapTabungan();
+    }, 'Ya, cairkan');
 }
 
 // ╔══════════════════════════════════════════════════════════╗

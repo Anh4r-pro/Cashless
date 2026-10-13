@@ -32,6 +32,7 @@ use App\Http\Controllers\Api\PotongMassalController;
 use App\Http\Controllers\Api\ProdukController;
 use App\Http\Controllers\Api\SaldoController;
 use App\Http\Controllers\Api\SiswaController;
+use App\Http\Controllers\Api\TabunganController;
 use App\Http\Controllers\Api\TenantController;
 use App\Http\Controllers\Api\UnitSdmController;
 use Illuminate\Support\Facades\Route;
@@ -272,10 +273,23 @@ Route::middleware('peran:superadmin')->group(function () {
     Route::put('kios/sandi-layar', [KiosController::class, 'sandiLayar'])->middleware('izin:kios.pengaturan');
 });
 
+// --- tabungan: admin menentukan jenis & target; setor/cairkan dibantu admin -
+Route::middleware('peran:superadmin')->group(function () {
+    Route::get('tabungan/jenis', [TabunganController::class, 'jenis'])->middleware('izin:tabungan.lihat');
+    Route::put('tabungan/jenis', [TabunganController::class, 'simpanJenis'])->middleware('izin:tabungan.kelola');
+    Route::get('tabungan/pengaturan', [TabunganController::class, 'pengaturan'])->middleware('izin:tabungan.lihat');
+    Route::put('tabungan/pengaturan', [TabunganController::class, 'simpanPengaturan'])->middleware('izin:tabungan.kelola');
+    Route::get('tabungan/rekap', [TabunganController::class, 'rekap'])->middleware('izin:tabungan.lihat');
+    Route::get('tabungan/saldo/{siswaId}', [TabunganController::class, 'saldoSiswa'])->middleware('izin:tabungan.lihat');
+    Route::post('tabungan/setor', [TabunganController::class, 'setor'])->middleware('izin:tabungan.setor');
+    Route::post('tabungan/cairkan', [TabunganController::class, 'cairkan'])->middleware('izin:tabungan.cairkan');
+});
+
 // --- layar kios santri: tanpa login, dipagari tap kartu + PIN ---------------
 Route::get('kios/info', [KiosController::class, 'info']);
 Route::post('kios/tap', [KiosController::class, 'tap']);
 Route::post('kios/donasi', [KiosController::class, 'donasi']);
+Route::post('kios/tabungan', [KiosController::class, 'tabungan']);
 Route::post('kios/transfer/cari', [KiosController::class, 'cariPenerima']);
 Route::post('kios/transfer', [KiosController::class, 'transfer']);
 Route::post('kios/iuran', [KiosController::class, 'iuran']);

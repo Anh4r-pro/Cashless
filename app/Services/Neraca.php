@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Setting;
 use App\Models\Settlement;
 use App\Models\Siswa;
+use App\Models\TabunganSaldo;
 use App\Models\TitipanMutasi;
 use App\Models\TopupImporBaris;
 use App\Models\TopupRequest;
@@ -82,7 +83,13 @@ class Neraca
         $kas = $masuk - $keluar['tenant'] - $keluar['titipan'] - $keluar['koreksi'] - $keluar['dana_admin'];
 
         $hutangTenant = $t['belanja'] - $disetor;
-        $kewajiban = $posSaldo + $posTitipan + $hutangTenant + $t['donasi'];
+        // Tabungan dibaca LIVE dari saldo per-jenisnya, bukan dari tipe
+        // transaksi 'tabungan' — tipe itu sengaja TIDAK muncul di $masuk/$keluar
+        // (lihat komentar di Tabungan::setor/cairkan): ia cuma memindahkan
+        // kewajiban antara `saldo` dan `tabungan_saldo`, bukan uang baru atau
+        // uang pergi, jadi menjumlah live balance keduanya otomatis tetap pas.
+        $tabunganTotal = (int) TabunganSaldo::sum('saldo');
+        $kewajiban = $posSaldo + $posTitipan + $hutangTenant + $t['donasi'] + $tabunganTotal;
         // Dana Admin bukan kewajiban — ia milik sekolah — tetapi tetap sebuah
         // KLAIM atas kas yang dipegang, jadi ia berdiri sendiri di sebelah
         // kewajiban, bukan dilebur ke dalamnya.
@@ -97,6 +104,7 @@ class Neraca
 
         $drift = self::driftSaldo();
         $driftT = self::driftTitipan();
+        $driftTb = self::driftTabungan();
 
         return [
             'masuk' => [
@@ -109,7 +117,7 @@ class Neraca
             'kas' => $kas,
             'kewajiban' => [
                 'total' => $kewajiban, 'saldo_kartu' => $posSaldo, 'saldo_titipan' => $posTitipan,
-                'hutang_tenant' => $hutangTenant, 'donasi' => $t['donasi'],
+                'hutang_tenant' => $hutangTenant, 'donasi' => $t['donasi'], 'tabungan' => $tabunganTotal,
             ],
             'penjualan_tenant' => $t['belanja'],
             // Pendapatan sekolah dari biaya admin — bukan kewajiban, jadi
@@ -128,7 +136,7 @@ class Neraca
             'selisih' => $selisih,
             'cukup' => $kewajiban > 0 ? round(($kas + $awalDiakui) / $kewajiban * 1000) / 10 : null,
             'tertunda' => ['n' => (int) $antre->n, 'rp' => (int) $antre->rp],
-            'periksa' => self::periksa($cfg, $selisih, $awalDiakui, $awalTerukur, $drift, $driftT),
+            'periksa' => self::periksa($cfg, $selisih, $awalDiakui, $awalTerukur, $drift, $driftT, $driftTb),
         ];
     }
 
@@ -239,6 +247,21 @@ class Neraca
         return ['n' => (int) $r->n, 'selisih' => (int) $r->selisih];
     }
 
+    /** Sama seperti driftTitipan, tapi per (siswa, jenis) — satu santri bisa punya banyak baris. */
+    private static function driftTabungan(): array
+    {
+        $r = DB::selectOne("
+            WITH akhir AS (
+                SELECT siswa_id, jenis_id, saldo_sesudah,
+                       ROW_NUMBER() OVER (PARTITION BY siswa_id, jenis_id ORDER BY created_at DESC, id DESC) AS urut
+                  FROM tabungan_mutasi)
+            SELECT COUNT(*) AS n, COALESCE(SUM(b.saldo - a.saldo_sesudah),0) AS selisih
+              FROM akhir a JOIN tabungan_saldo b ON b.siswa_id = a.siswa_id AND b.jenis_id = a.jenis_id
+             WHERE a.urut = 1 AND b.saldo != a.saldo_sesudah");
+
+        return ['n' => (int) $r->n, 'selisih' => (int) $r->selisih];
+    }
+
     /** Rincian metode uang masuk — hanya untuk setoran yang metodenya tercatat. */
     private static function metodeUangMasuk(): array
     {
@@ -261,7 +284,7 @@ class Neraca
         return $out;
     }
 
-    private static function periksa(array $cfg, int $selisih, int $awalDiakui, int $awalTerukur, array $drift, array $driftT): array
+    private static function periksa(array $cfg, int $selisih, int $awalDiakui, int $awalTerukur, array $drift, array $driftT, array $driftTb): array
     {
         $lebihSetor = (int) DB::selectOne("
             SELECT COUNT(*) AS n FROM tenant t
@@ -281,7 +304,8 @@ class Neraca
                AND NOT EXISTS (SELECT 1 FROM transaksi t
                                 WHERE t.tx_id = CONCAT('impor-', i.batch_id, '-b', b.baris))")->n;
 
-        $saldoMinus = Siswa::where('saldo', '<', 0)->orWhere('saldo_titipan', '<', 0)->count();
+        $saldoMinus = Siswa::where('saldo', '<', 0)->orWhere('saldo_titipan', '<', 0)->count()
+            + TabunganSaldo::where('saldo', '<', 0)->count();
 
         /*
          * Setiap baris biaya admin harus menempel pada satu top up yang sah:
@@ -351,6 +375,8 @@ class Neraca
             ],
             ['kode' => 'drift_titipan', 'label' => 'Saldo titipan cocok dengan buku besar titipan',
                 'ok' => $driftT['n'] === 0, 'nilai' => $driftT['selisih'], 'jumlah_siswa' => $driftT['n'], 'catatan' => ''],
+            ['kode' => 'drift_tabungan', 'label' => 'Saldo tabungan cocok dengan buku besar tabungan',
+                'ok' => $driftTb['n'] === 0, 'nilai' => $driftTb['selisih'], 'jumlah_siswa' => $driftTb['n'], 'catatan' => ''],
             ['kode' => 'setoran_lebih', 'label' => 'Tidak ada tenant yang disetor melebihi penjualannya',
                 'ok' => $lebihSetor === 0, 'nilai' => $lebihSetor, 'catatan' => ''],
             ['kode' => 'beli_tanpa_tenant', 'label' => 'Semua transaksi belanja punya tenant',

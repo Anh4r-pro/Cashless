@@ -234,7 +234,7 @@ class OrtuController extends Controller
         $limit = min(50, (int) $r->query('limit', 20) ?: 20);
 
         $q = Transaksi::where('siswa_id', $s->id);
-        if (in_array($r->query('tipe'), ['topup', 'beli', 'koreksi', 'donasi',
+        if (in_array($r->query('tipe'), ['topup', 'beli', 'koreksi', 'donasi', 'tabungan',
             'transfer_keluar', 'transfer_masuk', 'iuran_keluar', 'iuran_masuk'], true)) {
             $q->where('tipe', $r->query('tipe'));
         }
@@ -320,6 +320,9 @@ class OrtuController extends Controller
             // banyak harus bisa melihat sisa uangnya masih tercatat, bukan
             // hilang entah ke mana.
             'saldo' => $s->saldo, 'saldo_titipan' => $s->saldo_titipan,
+            // Tabungan ikut ditampilkan per jenis — ini uang anak sendiri,
+            // disisihkan untuk dipakai nanti (bukan donasi yang sudah pergi).
+            'tabungan' => \App\Services\Tabungan::daftarSaldo($s->id),
             'status' => $s->status, 'foto' => $s->foto,
             'hp_ortu_samar' => KunciWali::samarkanHp($s->hp_ortu),
             'punya_kartu' => (bool) $s->card_uid,

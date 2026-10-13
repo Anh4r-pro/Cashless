@@ -287,6 +287,19 @@ async function muatRingkasan() {
   }
   $('#o-terakhir').textContent = 'Transaksi terakhir: ' + sejakKapan(d.terakhir);
 
+  const tabungan = s.tabungan || [];
+  $('#o-tabungan-panel').classList.toggle('hidden', tabungan.length === 0);
+  if (tabungan.length) {
+    $('#o-tabungan-list').innerHTML = tabungan.map((t) => `
+      <div class="o-tp">
+        <div class="o-tp-isi">
+          <b>${esc(t.nama || 'Tabungan')}</b>
+          <span class="muted">${t.target ? 'Target ' + rp(t.target) : 'Tanpa target'}</span>
+        </div>
+        <b>${rp(t.saldo)}</b>
+      </div>`).join('');
+  }
+
   const kartu = [['Jajan hari ini', rp(d.belanja_hari_ini), `${d.n_hari_ini}× transaksi`]];
   // Saat rentang yang dipilih memang 7 hari, kartu "7 hari terakhir" akan sama
   // persis dengan kartu rentang — tampilkan satu saja.
@@ -343,7 +356,7 @@ async function muatTransaksi() {
 
   const LABEL = { beli: 'Jajan', topup: 'Isi saldo', koreksi: 'Penyesuaian', donasi: 'Donasi',
     transfer_keluar: 'Kirim ke teman', transfer_masuk: 'Terima dari teman', biaya_admin: 'Biaya admin',
-    iuran_keluar: 'Bayar iuran', iuran_masuk: 'Terima iuran' };
+    iuran_keluar: 'Bayar iuran', iuran_masuk: 'Terima iuran', tabungan: 'Tabungan' };
   // [kelas warna, ikon] per jenis. Warna sendiri tidak pernah jadi satu-satunya
   // penanda: tanda +/− dan labelnya tetap tertulis di sebelahnya.
   const RUPA = { beli: ['beli', 'beli'], donasi: ['donasi', 'donasi'], transfer_keluar: ['keluar', 'kirim'],

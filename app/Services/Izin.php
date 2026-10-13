@@ -96,6 +96,15 @@ class Izin
             'donasi.pengaturan' => 'Mengubah batas donasi',
             'kios.pengaturan' => 'Mengatur kios & sandi layar',
         ],
+        'Tabungan' => [
+            'tabungan.lihat' => 'Membuka menu Tabungan & rekapnya',
+            'tabungan.kelola' => 'Mengubah jenis & target tabungan',
+            'tabungan.setor' => 'Menyetor tabungan santri (dibantu admin)',
+            // Dipisah dari tabungan.setor dengan sengaja: mencairkan menutup
+            // seluruh pos tabungan sekaligus, jadi sekolah bisa membatasi hak
+            // ini hanya ke bendahara tanpa ikut membatasi hak menyetor.
+            'tabungan.cairkan' => 'Mencairkan tabungan santri kembali ke kartu',
+        ],
         'Laporan' => [
             'riwayat.lihat' => 'Membuka Riwayat transaksi',
             'riwayat.ekspor' => 'Mengekspor & mencetak riwayat',

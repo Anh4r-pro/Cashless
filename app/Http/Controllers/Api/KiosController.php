@@ -7,6 +7,7 @@ use App\Models\DonasiNominal;
 use App\Models\DonasiProgram;
 use App\Models\KiosConfig;
 use App\Models\Siswa;
+use App\Models\TabunganJenis;
 use App\Models\Transaksi;
 use App\Services\BidangSiswa;
 use App\Services\Iuran;
@@ -18,6 +19,7 @@ use App\Services\Rupiah;
 use App\Services\SesiKios;
 use App\Services\SmartTopup;
 use App\Services\SqlWaktu;
+use App\Services\Tabungan;
 use App\Services\Transfer;
 use App\Support\WaktuIso;
 use Illuminate\Http\Request;
@@ -62,6 +64,7 @@ class KiosController extends Controller
             'aktif' => $aktif,
             'program' => $aktif ? DonasiController::daftar(false) : [],
             'maks_donasi_harian' => $cfg['donasi_maks_harian'] ?? 0,
+            'tabungan_jenis' => $aktif ? TabunganController::daftar(false) : [],
         ]);
     }
 
@@ -189,6 +192,67 @@ class KiosController extends Controller
             'sisa_donasi' => max(0, $cfg['donasi_maks_harian'] - ($sudah + $jumlah)),
         ];
         $this->tandaiSelesai($token, $sesi, $txId, $jawab);   // satu tap = satu donasi
+
+        return response()->json($jawab);
+    }
+
+    /**
+     * Menabung sendiri lewat kios — SELALU dari saldo kartu saja (tidak
+     * menyentuh titipan). Kontribusi besar yang perlu mengambil dari titipan
+     * dilakukan admin lewat TabunganController::setor(), bukan di sini.
+     */
+    public function tabungan(Request $r)
+    {
+        $this->harusAktif();
+        $txId = $r->input('tx_id') ? mb_substr((string) $r->input('tx_id'), 0, 80) : null;
+
+        if ($jawab = $this->jawabUlang($r, $txId, 'tabungan')) {
+            return $jawab;
+        }
+
+        ['token' => $token, 'sesi' => $sesi, 'siswa' => $s] = SesiKios::ambil($r->input('token'));
+
+        $jenis = TabunganJenis::where('id', (int) $r->input('jenis_id'))->where('aktif', true)->first();
+        if (! $jenis) {
+            throw new ApiError(404, 'Jenis tabungan tidak tersedia');
+        }
+        $cfg = Pengaturan::sekolah();
+        $jumlah = (int) floor((float) $r->input('jumlah'));
+        if ($jumlah < ($cfg['tabungan_min'] ?? 0)) {
+            throw new ApiError(400, 'Nominal menabung minimal ' . Rupiah::f($cfg['tabungan_min'] ?? 0));
+        }
+
+        Pin::verifikasi($s, $r->input('pin'), $r);
+        if ($s->status !== 'aktif') {
+            throw new ApiError(403, 'Kartu sedang diblokir — hubungi admin kantin');
+        }
+
+        if ($txId && $dupe = Transaksi::where('tx_id', $txId)->first()) {
+            $s2 = Siswa::find($s->id);
+            $baris = \App\Models\TabunganSaldo::where('siswa_id', $s->id)->where('jenis_id', $jenis->id)->first();
+
+            return response()->json([
+                'ok' => true, 'duplikat' => true, 'jenis' => $jenis->nama,
+                'jumlah' => -$dupe->jumlah, 'saldo' => $s2->saldo,
+                'saldo_tabungan' => $baris ? (int) $baris->saldo : 0, 'waktu' => $dupe->created_at,
+            ]);
+        }
+
+        $sudah = Tabungan::hariIni($s->id);
+        if ($sudah + $jumlah > ($cfg['tabungan_maks_harian'] ?? 0)) {
+            throw new ApiError(429, 'Melebihi batas menabung harian (hari ini sudah ' . Rupiah::f($sudah) .
+                ', batas ' . Rupiah::f($cfg['tabungan_maks_harian'] ?? 0) . ')');
+        }
+
+        $hasil = DB::transaction(fn () => Tabungan::setor($s, $jenis, $jumlah, 'kartu', 'Kios Santri',
+            'Tabungan ' . $jenis->nama, $txId));
+
+        $jawab = [
+            'ok' => true, 'jenis' => $jenis->nama, 'jumlah' => $jumlah,
+            'saldo' => $hasil['siswa']->saldo, 'saldo_tabungan' => $hasil['saldo_tabungan']->saldo,
+            'sisa_tabungan_harian' => max(0, ($cfg['tabungan_maks_harian'] ?? 0) - ($sudah + $jumlah)),
+        ];
+        $this->tandaiSelesai($token, $sesi, $txId, $jawab);   // satu tap = satu setoran
 
         return response()->json($jawab);
     }
@@ -705,6 +769,10 @@ class KiosController extends Controller
         $hariI = Iuran::hariIni($s->id);
         $sisaIuranHarian = max(0, $cfg['iuran_maks_harian'] - $hariI['kirim']);
 
+        $jenisTabungan = TabunganController::daftar(false);
+        $sudahTabungan = Tabungan::hariIni($s->id);
+        $sisaTabunganHarian = max(0, ($cfg['tabungan_maks_harian'] ?? 0) - $sudahTabungan);
+
         return [
             'token' => $token,
             'siswa' => ['nama' => $s->nama, 'kelas' => $s->kelas, 'saldo' => $s->saldo,
@@ -734,6 +802,16 @@ class KiosController extends Controller
                 'maks' => min($cfg['iuran_maks'], $sisaIuranHarian, $s->saldo),
                 'sisa_harian' => $sisaIuranHarian,
                 'sisa_kali' => max(0, $cfg['iuran_maks_kali_harian'] - $hariI['n_kirim']),
+            ],
+            'tabungan_jenis' => $jenisTabungan,
+            'tabungan_saldo' => Tabungan::daftarSaldo($s->id),
+            'tabungan' => [
+                'bisa' => count($jenisTabungan) > 0
+                    && $sisaTabunganHarian >= ($cfg['tabungan_min'] ?? 0)
+                    && $s->saldo >= ($cfg['tabungan_min'] ?? 0),
+                'min' => $cfg['tabungan_min'] ?? 0,
+                'maks' => min($cfg['tabungan_maks_harian'] ?? 0, $sisaTabunganHarian, $s->saldo),
+                'sisa_harian' => $sisaTabunganHarian,
             ],
             'sesi_detik' => SesiKios::detikSesi(),
             'transaksi' => Transaksi::where('siswa_id', $s->id)
