@@ -363,8 +363,16 @@ class MartKoreksiController extends Controller
         $hilang = [];
         $siap = [];
         foreach ($item as $i) {
-            $p = $i->produk_id ? Produk::where('id', $i->produk_id)
-                ->where('tenant_id', $t->id)->where('aktif', 1)->first() : null;
+            if ($i->produk_id === null) {
+                // Barang input manual: tidak ada katalog untuk dicek ulang —
+                // ia bukan "hilang", kembalikan apa adanya seperti saat ditahan.
+                $siap[] = ['manual' => true, 'nama' => $i->nama, 'harga' => (int) $i->harga,
+                    'kategori' => $i->kategori, 'qty' => (int) $i->qty];
+
+                continue;
+            }
+            $p = Produk::where('id', $i->produk_id)
+                ->where('tenant_id', $t->id)->where('aktif', 1)->first();
             if (! $p) {
                 $hilang[] = $i->nama;
 

@@ -843,6 +843,16 @@ function martView(el) {
       <div style="display:flex; gap:8px; margin-bottom:10px">
         <input id="mart-q" placeholder="Cari nama barang, SKU, atau scan barcode…" autocomplete="off">
         <button class="go" id="mart-cari" style="flex:none">Cari</button>
+        <button class="linkbtn hidden" id="mart-manual-toggle" style="flex:none">+ Input Manual</button>
+      </div>
+      <div id="mart-manual-box" class="hidden" style="display:flex; gap:8px; margin-bottom:10px">
+        <input id="mart-manual-desk" maxlength="60" autocomplete="off" placeholder="Nama barang (mis. kerupuk curah)">
+        ${inputUang({ id: 'mart-manual-harga', placeholder: 'Harga satuan (Rp)' })}
+        <select id="mart-manual-kat" class="hidden" style="flex:none; width:auto">
+          <option value="makanan">Makanan</option>
+          <option value="non_makanan">Non-makanan</option>
+        </select>
+        <button class="linkbtn" id="mart-manual-tambah" style="flex:none">+ Tambah</button>
       </div>
       <div class="k-chip-baris" id="mart-kat"></div>
       <div id="mart-hasil"></div>
@@ -880,6 +890,27 @@ function martView(el) {
     if (e.key === 'Enter') { e.preventDefault(); $('#mart-cari').click(); }
   });
   $('#mart-q').addEventListener('input', debounce(() => martGambarKatalog(), 250));
+  // Tersembunyi sampai diminta — supaya etalase barcode tidak selalu
+  // menampilkan jalan pintas yang bisa dipakai menginput harga sembarangan.
+  $('#mart-manual-toggle').onclick = () => $('#mart-manual-box').classList.toggle('hidden');
+  $('#mart-manual-desk').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); $('#mart-manual-harga').focus(); }
+  });
+  $('#mart-manual-harga').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); $('#mart-manual-tambah').click(); }
+  });
+  $('#mart-manual-tambah').onclick = () => {
+    const desk = $('#mart-manual-desk').value.replace(/\s+/g, ' ').trim();
+    const h = nilaiUang('#mart-manual-harga');
+    if (desk.length < 3) { toast('Tulis dulu nama barangnya (minimal 3 huruf)', 'err'); $('#mart-manual-desk').focus(); return; }
+    if (!h || h <= 0) { toast('Isi harga satuan dulu', 'err'); $('#mart-manual-harga').focus(); return; }
+    const kategori = mart.info?.tenant?.jenis === 'koperasi' ? $('#mart-manual-kat').value : 'makanan';
+    mart.cart.push({ manual: true, nama: desk, harga: h, kategori, qty: 1 });
+    $('#mart-manual-desk').value = '';
+    $('#mart-manual-harga').value = '';
+    $('#mart-manual-desk').focus();
+    martRender();
+  };
   $('#mart-kosong').onclick = () => { mart.cart = []; mart.metode = null; mart.uang = 0; mart.diskon = 0; martRender(); };
   $('#mart-m-kartu').onclick = () => martPilihMetode('kartu');
   $('#mart-m-tunai').onclick = () => martPilihMetode('tunai');
@@ -912,7 +943,7 @@ function martTerapkanMuatan() {
   const m = martMuatan;
   martMuatan = null;
   mart.cart = m.items.map((i) => ({ produk_id: i.produk_id, nama: i.nama,
-    harga: i.harga, kategori: i.kategori, qty: i.qty }));
+    harga: i.harga, kategori: i.kategori, qty: i.qty, manual: !!i.manual }));
   mart.diskon = m.diskon || 0;
   martRender();
   if (m.hilang?.length) {
@@ -984,6 +1015,11 @@ async function martMuatMember() {
 async function martMuatInfo() {
   try {
     mart.info = await api('/api/mart/info');
+    // Sakelar admin: tanpa input manual, kasir hanya boleh menjual barang
+    // yang sudah terdaftar di stok — tombolnya sendiri tidak ditampilkan
+    // sama sekali, bukan cuma dikosongkan.
+    $('#mart-manual-toggle')?.classList.toggle('hidden', mart.info.tenant?.input_manual === false);
+    $('#mart-manual-kat')?.classList.toggle('hidden', mart.info.tenant?.jenis !== 'koperasi');
     const h = mart.info.hari_ini;
     const box = $('#mart-ringkas');
     if (!box) return;
@@ -1262,7 +1298,9 @@ async function martBayarKartu() {
     if (mart.diskon > 0) throw new Error('Diskon hanya berlaku untuk tunai & transfer — kosongkan dulu diskonnya');
     const d = await api('/api/beli', { method: 'POST', body: {
       siswa_id: mart.siswa.id, jumlah: total,
-      items: mart.cart.map((p) => ({ produk_id: p.produk_id, qty: p.qty })),
+      items: mart.cart.map((p) => p.manual
+        ? { manual: true, nama: p.nama, harga: p.harga, kategori: p.kategori, qty: p.qty }
+        : { produk_id: p.produk_id, qty: p.qty }),
       tap_token: mart.tapToken,
       tx_id: 'mart-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
     }});
@@ -1290,7 +1328,9 @@ async function martBayarMart(metode) {
   try {
     const d = await api('/api/mart/jual-tunai', { method: 'POST', body: {
       metode,
-      items: mart.cart.map((p) => ({ produk_id: p.produk_id, qty: p.qty })),
+      items: mart.cart.map((p) => p.manual
+        ? { manual: true, nama: p.nama, harga: p.harga, kategori: p.kategori, qty: p.qty }
+        : { produk_id: p.produk_id, qty: p.qty }),
       diskon, uang_diterima: metode === 'tunai' ? mart.uang : total,
       bank, pengirim, member_id: mart.memberId || undefined,
       tx_id: 'mrt-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
@@ -1591,7 +1631,9 @@ async function martTahanSimpan() {
       <span class="muted set-hint">Supaya mudah dikenali saat dilanjutkan nanti.</span></div>`,
     async () => {
       await api('/api/mart/tahan', { method: 'POST', body: {
-        items: mart.cart.map((p) => ({ produk_id: p.produk_id, qty: p.qty })),
+        items: mart.cart.map((p) => p.manual
+        ? { manual: true, nama: p.nama, harga: p.harga, kategori: p.kategori, qty: p.qty }
+        : { produk_id: p.produk_id, qty: p.qty }),
         diskon: mart.diskon || 0, catatan: $('#th-catatan').value,
       }});
       toast('✔ Transaksi ditahan', 'ok');

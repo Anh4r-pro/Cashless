@@ -68,7 +68,8 @@ class MartController extends Controller
         $tgl = $this->hariIni();
 
         return response()->json([
-            'tenant' => ['id' => $t->id, 'nama' => $t->nama, 'jenis' => $t->jenis],
+            'tenant' => ['id' => $t->id, 'nama' => $t->nama, 'jenis' => $t->jenis,
+                'input_manual' => (bool) $t->input_manual],
             'tanggal' => $tgl,
             'hari_ini' => $this->ringkasHari($t, $tgl),
             'kas' => MartKas::where('tenant_id', $t->id)->where('tanggal', $tgl)->first(),
