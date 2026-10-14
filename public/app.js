@@ -2183,7 +2183,8 @@ function martBarangModal(p) {
       <input id="mb-nama" value="${esc(p?.nama || '')}" maxlength="120" placeholder="mis. Aqua 600ml"></div>
     <div class="field"><label>SKU / barcode <span class="muted">(opsional)</span></label>
       <input id="mb-barcode" data-scan="1" value="${esc(p?.barcode || '')}" maxlength="32" placeholder="pindai atau ketik">
-      <span class="muted set-hint">Boleh dikosongkan — barang tetap bisa dicari lewat nama di kasir.</span></div>
+      <span class="muted set-hint">Boleh dikosongkan — barang tetap bisa dicari lewat nama di kasir.</span>
+      <span class="minus set-hint hidden" id="mb-barcode-cek"></span></div>
     <div class="field"><label>Kategori</label><select id="mb-kat">
       <option value="">— tanpa kategori —</option>
       ${kat.map((k) => `<option value="${k.id}" ${p?.kategori_id === k.id ? 'selected' : ''}>${esc(k.nama)}</option>`).join('')}
@@ -2233,7 +2234,23 @@ function martBarangModal(p) {
   };
   ['#mb-hpp', '#mb-harga'].forEach((s) => $(s).addEventListener('input', hitungMargin));
   hitungMargin();
-  cardHandler = (uid) => { const f = $('#mb-barcode'); if (f) f.value = uid; };
+
+  // Cek dobel seketika dari martStok.produk (sudah di memori) — server
+  // tetap menolak saat simpan (409), ini cuma peringatan dini.
+  const cekBarcode = () => {
+    const kode = $('#mb-barcode').value.trim();
+    const el = $('#mb-barcode-cek');
+    const x = kode ? (martStok.produk || []).find((b) => b.barcode === kode && b.id !== p?.id) : null;
+    if (!x) { el.classList.add('hidden'); el.innerHTML = ''; return; }
+    el.innerHTML = `⚠ Sudah dipakai: <b>${esc(x.nama)}</b> (stok ${x.stok ?? '—'}) —
+      <button type="button" class="linkbtn danger" id="mb-barcode-ubah">ubah barang itu</button>`;
+    el.classList.remove('hidden');
+    $('#mb-barcode-ubah').onclick = () => { closeModal(); martBarangModal(x); };
+  };
+  $('#mb-barcode').addEventListener('input', debounce(cekBarcode, 250));
+  cekBarcode();
+
+  cardHandler = (uid) => { const f = $('#mb-barcode'); if (f) { f.value = uid; cekBarcode(); } };
 }
 
 function martStokModal(p) {
