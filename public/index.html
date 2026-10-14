@@ -63,10 +63,10 @@
     aria-controls="nav">☰</button>
   <nav id="nav"></nav>
   <span id="hd-user" class="hd-user"></span>
-  <!-- Sakelar bunyi pemberitahuan. Ditaruh di header, bukan di dalam salah satu
-       layar: bunyinya bisa berbunyi di layar mana pun, jadi cara mematikannya
-       harus terjangkau dari layar mana pun juga. -->
-  <button id="hd-suara" class="hd-suara hidden" type="button" aria-pressed="true"></button>
+  <!-- Pembuka panel Pengaturan Notifikasi. Ditaruh di header, bukan di dalam
+       salah satu layar: notifikasinya bisa muncul di layar mana pun, jadi
+       cara mengaturnya harus terjangkau dari layar mana pun juga. -->
+  <button id="hd-suara" class="hd-suara hidden" type="button" aria-haspopup="dialog"></button>
   <button id="btn-logout">Keluar</button>
 </header>
 <!-- Kepala halaman: kelompok, judul, dan tanggal — diisi gambarKepala() di app.js. -->

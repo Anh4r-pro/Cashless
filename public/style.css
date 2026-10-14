@@ -758,11 +758,20 @@ label.cek input { width: auto; margin: 0; }
 .aju-unduh .set-hint { flex-basis: 100%; margin: 2px 0 0; }
 
 /* Sakelar bunyi pemberitahuan di header. Ikonnya saja — labelnya ada di
-   title/aria supaya tidak memakan lebar di ponsel, tempat header paling sesak. */
+   title/aria supaya tidak memakan lebar di ponsel, tempat header paling sesak.
+   Klik membuka panel Pengaturan Notifikasi (lihat .segswitch), bukan langsung
+   menyalakan/mematikan. */
 .hd-suara { border: 0; background: none; cursor: pointer; font-size: 17px;
   line-height: 1; padding: 6px 8px; border-radius: 8px; }
 .hd-suara:hover { background: rgba(255, 255, 255, .14); }
 .hd-suara.mati { opacity: .55; }
+
+/* Dua/tiga pilihan berdampingan, satu yang dipilih — dipakai di panel
+   Pengaturan Notifikasi (gaya tampilan, bunyi, nada). */
+.segswitch { display: flex; gap: 8px; }
+.segswitch button { flex: 1; padding: 10px 8px; border: 1px solid var(--line); background: #fff;
+  border-radius: 10px; font-weight: 700; font-size: 13.5px; color: var(--muted); }
+.segswitch button.sel { background: var(--navy); border-color: var(--navy); color: var(--gold); }
 
 /* Jenjang Kelas di dalam panel Kenaikan Kelas */
 .kk-jenjang { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; margin: 8px 0 10px; background: var(--bg); }

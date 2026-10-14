@@ -280,16 +280,7 @@ function showApp() {
   if (USER.role === 'superadmin') {
     const tombol = $('#hd-suara');
     tombol.classList.remove('hidden');
-    tombol.onclick = () => {
-      const mati = suaraNyala();
-      localStorage.setItem(NOTIF_SUARA_KUNCI, mati ? 'mati' : 'nyala');
-      gambarTombolSuara();
-      // Dibunyikan saat DINYALAKAN supaya admin tahu seperti apa bunyinya dan
-      // bahwa perangkatnya memang bisa membunyikannya — sekaligus memenuhi
-      // syarat peramban yang baru mengizinkan audio sesudah ada klik.
-      if (mati === false) bunyiNotif();
-      toast(suaraNyala() ? '🔔 Bunyi pemberitahuan dinyalakan' : '🔕 Bunyi pemberitahuan dimatikan', 'ok');
-    };
+    tombol.onclick = () => bukaPengaturanNotif();
     gambarTombolSuara();
     mulaiNotif();
   }
@@ -4808,10 +4799,19 @@ async function periksaNotif() {
       const naikMenu = d.menu > notifTerakhir.menu;
       if (naikTopup || naikMenu) {
         bunyiNotif();
-        const bagian = [];
-        if (naikTopup) bagian.push(`${d.topup - notifTerakhir.topup} pengajuan top up`);
-        if (naikMenu) bagian.push(`${d.menu - notifTerakhir.menu} usulan menu`);
-        toast('🔔 Baru masuk: ' + bagian.join(' & '), 'ok');
+        const baruTopup = d.topup - notifTerakhir.topup;
+        const baruMenu = d.menu - notifTerakhir.menu;
+        // Modal notif bisa menimpa modal LAIN yang sedang diisi admin (form
+        // belum tersimpan) — jatuhkan ke toast kalau ada modal lain terbuka.
+        const modalLain = $('#modal-root').innerHTML.trim() !== '';
+        if (notifGaya() === 'modal' && !modalLain) {
+          tampilkanNotifModal({ topup: d.topup, menu: d.menu, baruTopup, baruMenu });
+        } else {
+          const bagian = [];
+          if (naikTopup) bagian.push(`${baruTopup} pengajuan top up`);
+          if (naikMenu) bagian.push(`${baruMenu} usulan menu`);
+          toast('🔔 Baru masuk: ' + bagian.join(' & '), 'ok');
+        }
       }
     }
     notifTerakhir = { topup: d.topup, menu: d.menu };
@@ -4841,32 +4841,44 @@ function mulaiNotif() {
   periksaNotif();
 }
 
-/* ---- bunyi ---------------------------------------------------------------
-   Dibangkitkan Web Audio, BUKAN berkas suara. Berkas berarti satu unduhan
-   lagi di sambungan yang sudah seadanya, untuk bunyi sepanjang sepertiga
-   detik. Dua nada naik supaya terdengar sebagai "ada yang datang", bukan
-   sebagai galat.                                                            */
+/* ---- bunyi, gaya & nada — Web Audio, bukan berkas. Tiga preferensi ini
+   PER PERANGKAT (localStorage), bukan server: HP & desktop bisa beda pola. */
 const NOTIF_SUARA_KUNCI = 'kantin-notif-suara';
+const NOTIF_GAYA_KUNCI = 'kantin-notif-gaya';
+const NOTIF_NADA_KUNCI = 'kantin-notif-nada';
 const suaraNyala = () => localStorage.getItem(NOTIF_SUARA_KUNCI) !== 'mati';
+const notifGaya = () => (localStorage.getItem(NOTIF_GAYA_KUNCI) === 'modal' ? 'modal' : 'toast');
+const notifNada = () => {
+  const v = localStorage.getItem(NOTIF_NADA_KUNCI);
+  return ['lembut', 'standar', 'tegas'].includes(v) ? v : 'standar';
+};
 
-function bunyiNotif() {
-  if (!suaraNyala()) return;
+// [hz, mulai detik, puncak volume, panjang detik]. "standar" = bunyi lama,
+// dipertahankan persis supaya tidak berubah tanpa dipilih.
+const POLA_NADA = {
+  lembut: [[660, 0, 0.11, 0.22]],
+  standar: [[880, 0, 0.18, 0.12], [1175, 0.12, 0.18, 0.12]],
+  tegas: [[740, 0, 0.22, 0.09], [988, 0.09, 0.22, 0.09], [1318, 0.18, 0.22, 0.1]],
+};
+
+/** Memutar nada tanpa melihat sakelar nyala/mati — dipakai tombol "Coba". */
+function putarNada(nada) {
   try {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
     const ac = new AC();
-    [[880, 0], [1175, 0.12]].forEach(([hz, mulai]) => {
+    (POLA_NADA[nada] || POLA_NADA.standar).forEach(([hz, mulai, puncak, panjang]) => {
       const osc = ac.createOscillator();
       const vol = ac.createGain();
       osc.type = 'sine';
       osc.frequency.value = hz;
       // Peredupan halus: nada yang dipotong mendadak berbunyi seperti "klik".
       vol.gain.setValueAtTime(0.0001, ac.currentTime + mulai);
-      vol.gain.exponentialRampToValueAtTime(0.18, ac.currentTime + mulai + 0.02);
-      vol.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + mulai + 0.11);
+      vol.gain.exponentialRampToValueAtTime(puncak, ac.currentTime + mulai + 0.02);
+      vol.gain.exponentialRampToValueAtTime(0.0001, ac.currentTime + mulai + panjang);
       osc.connect(vol).connect(ac.destination);
       osc.start(ac.currentTime + mulai);
-      osc.stop(ac.currentTime + mulai + 0.12);
+      osc.stop(ac.currentTime + mulai + panjang);
     });
     setTimeout(() => ac.close().catch(() => {}), 600);
   } catch {
@@ -4875,16 +4887,104 @@ function bunyiNotif() {
   }
 }
 
+function bunyiNotif() {
+  if (suaraNyala()) putarNada(notifNada());
+}
+
 function gambarTombolSuara() {
   const el = $('#hd-suara');
   if (!el) return;
   const on = suaraNyala();
   el.textContent = on ? '🔔' : '🔕';
-  el.title = on ? 'Bunyi pemberitahuan menyala — klik untuk mematikan'
-                : 'Bunyi pemberitahuan mati — klik untuk menyalakan';
+  el.title = 'Pengaturan notifikasi — bunyi ' + (on ? 'menyala' : 'mati');
   el.setAttribute('aria-label', el.title);
-  el.setAttribute('aria-pressed', String(on));
   el.classList.toggle('mati', !on);
+}
+
+/** Panel preferensi notifikasi admin: gaya tampilan, bunyi, nada — per perangkat. */
+function bukaPengaturanNotif() {
+  let gaya = notifGaya();
+  let suara = suaraNyala();
+  let nada = notifNada();
+
+  const gambar = () => {
+    $('#notif-g-toast').classList.toggle('sel', gaya === 'toast');
+    $('#notif-g-modal').classList.toggle('sel', gaya === 'modal');
+    $('#notif-s-nyala').classList.toggle('sel', suara);
+    $('#notif-s-mati').classList.toggle('sel', !suara);
+    ['lembut', 'standar', 'tegas'].forEach((n) => $('#notif-n-' + n).classList.toggle('sel', nada === n));
+    $('#notif-nada-wrap').classList.toggle('hidden', !suara);
+  };
+
+  openModal(`
+    <h2>Pengaturan Notifikasi</h2>
+    <p class="muted">Pengajuan top up wali &amp; usulan menu tenant. Berlaku di perangkat ini saja.</p>
+    <div class="field"><label>Saat pengajuan baru masuk</label>
+      <div class="segswitch">
+        <button type="button" id="notif-g-toast">Toast sekilas</button>
+        <button type="button" id="notif-g-modal">Jendela popup</button>
+      </div>
+    </div>
+    <div class="field"><label>Bunyi</label>
+      <div class="segswitch">
+        <button type="button" id="notif-s-nyala">🔔 Nyala</button>
+        <button type="button" id="notif-s-mati">🔕 Mati</button>
+      </div>
+    </div>
+    <div class="field" id="notif-nada-wrap"><label>Nada</label>
+      <div class="segswitch">
+        <button type="button" id="notif-n-lembut">Lembut</button>
+        <button type="button" id="notif-n-standar">Standar</button>
+        <button type="button" id="notif-n-tegas">Tegas</button>
+      </div>
+      <button type="button" class="linkbtn" id="notif-coba" style="margin-top:8px">🔊 Coba nada ini</button>
+    </div>`,
+    async () => {
+      localStorage.setItem(NOTIF_GAYA_KUNCI, gaya);
+      localStorage.setItem(NOTIF_SUARA_KUNCI, suara ? 'nyala' : 'mati');
+      localStorage.setItem(NOTIF_NADA_KUNCI, nada);
+      gambarTombolSuara();
+    }, 'Simpan');
+
+  $('#notif-g-toast').onclick = () => { gaya = 'toast'; gambar(); };
+  $('#notif-g-modal').onclick = () => { gaya = 'modal'; gambar(); };
+  $('#notif-s-nyala').onclick = () => { suara = true; gambar(); };
+  $('#notif-s-mati').onclick = () => { suara = false; gambar(); };
+  ['lembut', 'standar', 'tegas'].forEach((n) => {
+    $('#notif-n-' + n).onclick = () => { nada = n; gambar(); };
+  });
+  $('#notif-coba').onclick = () => putarNada(nada);
+  gambar();
+}
+
+/** Jendela popup saat ada pengajuan baru (gaya "modal") — baris hanya tampil
+ *  untuk kategori yang NAIK. */
+function tampilkanNotifModal({ topup, menu, baruTopup, baruMenu }) {
+  const baris = (tipe, judul, total, baru, warna, svg) => baru > 0 ? `
+    <div style="display:flex; align-items:center; gap:12px; padding:10px 0; border-top:1px solid var(--line)">
+      <div style="width:34px; height:34px; border-radius:10px; flex:none; display:flex; align-items:center;
+        justify-content:center; background:${warna === 'ok' ? '#e3f4ea' : '#fff6e0'};
+        color:${warna === 'ok' ? 'var(--ok)' : '#92650a'}">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">${svg}</svg>
+      </div>
+      <div style="flex:1; display:flex; flex-direction:column">
+        <b style="font-size:13.5px">${esc(judul)}</b>
+        <span class="muted">${total} menunggu diperiksa · ${baru} baru</span>
+      </div>
+      <button type="button" class="linkbtn" onclick="location.hash='${tipe}'; closeModal();">Lihat</button>
+    </div>` : '';
+
+  openModal(`
+    <div style="text-align:center; margin-bottom:6px">
+      <div style="width:52px; height:52px; border-radius:14px; background:#fff6e0; margin:0 auto 10px;
+        display:flex; align-items:center; justify-content:center; font-size:24px">🔔</div>
+      <h2 style="margin-bottom:2px">Ada pengajuan baru</h2>
+      <p class="muted">Menunggu diperiksa sejak terakhir Anda buka</p>
+    </div>
+    ${baris('topup', 'Pengajuan top up', topup, baruTopup, 'ok',
+      '<path d="M12 19V5M5 12l7-7 7 7"/>')}
+    ${baris('menu-ajuan', 'Usulan menu baru', menu, baruMenu, 'warn',
+      '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 15h4"/>')}`);
 }
 
 async function dashSAView(el) {
