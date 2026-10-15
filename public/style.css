@@ -422,14 +422,18 @@ tr.tp-menunggu > td:first-child { border-left: 3px solid var(--gold); }
 /* ================================================== KIOS SANTRI (/kios) ==
    Layar disentuh santri sambil berdiri, sering dari jarak satu lengan: huruf
    dan tombol sengaja jauh lebih besar daripada panel admin. */
-body.kios { background: var(--navy-dark); color: var(--ink); }
+body.kios {
+  --navy: #0c1f33; --navy-dark: #070e1e; --bg: #e5ecef; --mint: #34d399;
+  --k-gradasi: linear-gradient(115deg, #070e1e 0%, #0c1f33 42%, #16384a 78%, #1d4a56 100%);
+  background: var(--bg); color: var(--ink); font-family: 'Manrope', system-ui, sans-serif;
+}
 body.kios * { user-select: none; -webkit-tap-highlight-color: transparent; }
 
 .k-head { display: flex; align-items: center; gap: 14px; padding: 12px 20px;
-  background: var(--navy); color: #fff; }
+  background: var(--k-gradasi); color: #fff; }
 .k-head img { width: 44px; height: 44px; object-fit: contain; }
 .k-head-judul { display: flex; flex-direction: column; line-height: 1.25; }
-.k-head-judul b { font-family: 'Roboto Slab', serif; font-size: 20px; }
+.k-head-judul b { font-family: 'Space Grotesk', sans-serif; font-size: 20px; }
 .k-head-judul span { font-size: 12.5px; color: #c8d0e6; }
 .k-mundur { margin-left: auto; font-size: 13px; color: var(--gold); }
 .k-keluar { background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.3);
@@ -442,7 +446,8 @@ body.kios .k-sub { color: var(--muted); font-size: 14px; }
 
 /* --- layar menganggur --- */
 .k-idle { min-height: 100vh; display: flex; flex-direction: column; align-items: center;
-  justify-content: center; gap: 16px; text-align: center; padding: 24px; color: #fff; }
+  justify-content: center; gap: 16px; text-align: center; padding: 24px; color: #fff;
+  background: var(--k-gradasi); }
 .k-logo { width: 120px; height: 120px; object-fit: contain; }
 .k-idle h1 { font-size: 30px; color: #fff; }
 .k-idle .k-sub { color: #c8d0e6; }
@@ -464,10 +469,10 @@ body.kios .k-sub { color: var(--muted); font-size: 14px; }
 .k-kartu { background: var(--card); border-radius: 16px; padding: 20px; display: flex;
   align-items: center; gap: 18px; border-top: 5px solid var(--gold); flex-wrap: wrap; }
 .k-avatar { width: 96px; height: 96px; border-radius: 16px; object-fit: cover; flex: none;
-  background: var(--navy); color: var(--gold); display: flex; align-items: center;
+  background: var(--mint); color: #063b2a; display: flex; align-items: center;
   justify-content: center; font-size: 34px; font-weight: 800; }
 .k-kartu-id { display: flex; flex-direction: column; gap: 3px; }
-.k-kartu-id b { font-size: 26px; font-family: 'Roboto Slab', serif; color: var(--navy); }
+.k-kartu-id b { font-size: 26px; font-family: 'Space Grotesk', sans-serif; color: var(--navy); }
 .k-kartu-saldo { margin-left: auto; text-align: right; display: flex; flex-direction: column; }
 .k-kartu-saldo b { font-size: 40px; color: var(--navy); font-variant-numeric: tabular-nums; }
 .k-badge-blokir { align-self: flex-start; background: #fbe4e2; color: var(--err);
@@ -527,7 +532,7 @@ body.kios .k-sub { color: var(--muted); font-size: 14px; }
   font-size: 18px; font-weight: 700; color: var(--navy); cursor: pointer; }
 .k-ktuts:active { background: var(--gold); }
 .k-ktuts-lain, .k-ktuts-ok { width: auto; padding-left: 22px; padding-right: 22px; }
-.k-ktuts-ok { background: var(--ok); color: #fff; }
+.k-ktuts-ok { background: var(--k-gradasi); color: var(--gold); }
 
 /* --- riwayat transaksi (kios) --- */
 .k-kartu-ringkas { padding-top: 14px; padding-bottom: 14px; }
@@ -602,7 +607,7 @@ body.kios .k-sub { color: var(--muted); font-size: 14px; }
 .k-tuts { background: var(--card); border: 0; border-radius: 16px; padding: 22px 0;
   font-size: 28px; font-weight: 700; color: var(--navy); }
 .k-tuts:active { background: var(--gold); }
-.k-tuts-ok { background: var(--ok); color: #fff; font-size: 22px; }
+.k-tuts-ok { background: var(--k-gradasi); color: var(--gold); font-size: 22px; }
 .k-tuts-lain { background: #d8dee9; }
 
 /* --- kios: transfer ke teman --- */
@@ -622,10 +627,10 @@ body.kios .k-sub { color: var(--muted); font-size: 14px; }
 /* --- hasil --- */
 .k-hasil { background: var(--card); border-radius: 18px; padding: 32px 24px; text-align: center;
   display: flex; flex-direction: column; align-items: center; gap: 10px; }
-.k-hasil > b { font-size: 26px; font-family: 'Roboto Slab', serif; color: var(--ok); }
+.k-hasil > b { font-size: 26px; font-family: 'Space Grotesk', sans-serif; color: var(--ok); }
 .k-hasil.gagal > b { color: var(--err); }
-.k-hasil-ikon { width: 84px; height: 84px; border-radius: 50%; background: #e3f4ea;
-  color: var(--ok); display: flex; align-items: center; justify-content: center; }
+.k-hasil-ikon { width: 84px; height: 84px; border-radius: 50%; background: #dcfbee; color: var(--mint);
+  display: flex; align-items: center; justify-content: center; }
 .k-hasil-ikon svg { width: 44px; height: 44px; }
 .k-hasil.gagal .k-hasil-ikon { background: #fbe4e2; color: var(--err); }
 .k-hasil-saldo b { font-size: 26px; color: var(--navy); }
