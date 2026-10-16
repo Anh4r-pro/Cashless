@@ -26,6 +26,7 @@
   --ink: #141B2D; --ink-2: #4A5268; --ink-3: #6E7489;
   --ok: #0F7A5F; --ok-soft: #E3F3EE; --err: #B4233F; --err-soft: #FBE9EC;
   --warn: #9A5B00; --warn-soft: #FDF1DC; --vio: #5B45B8; --vio-soft: #EEEAFB;
+  --teal: #0E7490; --teal-soft: #E1F2F6;
   --r: 18px;
   --shadow: 0 1px 2px rgba(17,29,66,.04), 0 8px 24px -10px rgba(17,29,66,.14);
 }
@@ -214,6 +215,7 @@ img.avatar { object-fit: cover; background: #33406B; }
 .o-tx-ikon.masuk { background: var(--ok-soft); color: var(--ok); }
 .o-tx-ikon.keluar { background: var(--err-soft); color: var(--err); }
 .o-tx-ikon.donasi { background: var(--vio-soft); color: var(--vio); }
+.o-tx-ikon.tabungan { background: var(--teal-soft); color: var(--teal); }
 .o-tx-isi { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.35; }
 .o-tx-isi > b { font-size: 13.5px; }
 .o-tx-isi .muted { font-size: 12px; }

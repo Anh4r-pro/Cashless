@@ -29,6 +29,7 @@ const IKON = {
   donasi: '<path d="M12 20s-7.5-4.5-7.5-10A4.3 4.3 0 0 1 12 7.3 4.3 4.3 0 0 1 19.5 10c0 5.5-7.5 10-7.5 10z"/>',
   kirim: '<path d="M21 3 10 14M21 3l-7 18-4-7-7-4z"/>',
   admin: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>',
+  tabungan: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1"/>',
 };
 const ikon = (k) => `<svg class="i" viewBox="0 0 24 24">${IKON[k] || IKON.masuk}</svg>`;
 
@@ -361,7 +362,12 @@ async function muatTransaksi() {
   // penanda: tanda +/− dan labelnya tetap tertulis di sebelahnya.
   const RUPA = { beli: ['beli', 'beli'], donasi: ['donasi', 'donasi'], transfer_keluar: ['keluar', 'kirim'],
     transfer_masuk: ['masuk', 'kirim'], biaya_admin: ['keluar', 'admin'],
-    iuran_keluar: ['keluar', 'kirim'], iuran_masuk: ['masuk', 'kirim'] };
+    iuran_keluar: ['keluar', 'kirim'], iuran_masuk: ['masuk', 'kirim'],
+    // Uang Tabungan tetap milik santri sendiri (cuma pindah kantong), bukan
+    // dibelanjakan — ikonnya sengaja beda dari "keluar" (merah, minus) supaya
+    // wali tidak salah kira itu pengeluaran. Tanda +/− pada nominalnya tetap
+    // apa adanya (setor keluar dari kartu, cair masuk ke kartu).
+    tabungan: ['tabungan', 'tabungan'] };
   $('#o-tx').innerHTML = d.transaksi.map((t) => {
     const masuk = t.jumlah > 0;
     const [kelas, bentuk] = RUPA[t.tipe] || (masuk ? ['masuk', 'masuk'] : ['keluar', 'keluar']);
