@@ -10143,7 +10143,11 @@ async function muatDanaAdmin() {
       </tr>`).join('')}</tbody>
     </table></div>` : ''}
 
-    <h2 style="margin-top:14px">Mutasi terakhir</h2>
+    <div class="kat-head" style="margin-top:14px">
+      <h2 style="margin:0">Mutasi terakhir</h2>
+      <button class="linkbtn" id="mt-toggle">▾ Tampilkan mutasi</button>
+    </div>
+    <div id="mt-box" class="hidden">
     <div class="tblwrap"><table>
       <thead><tr><th>Waktu</th><th>Jenis</th><th class="num">Jumlah</th>
         <th class="num">Sisa dana</th><th>Keterangan</th><th>Oleh</th></tr></thead>
@@ -10156,9 +10160,14 @@ async function muatDanaAdmin() {
         <td>${esc(m.operator)}</td>
       </tr>`).join('') || '<tr><td colspan="6" class="muted">Belum ada mutasi — biaya admin belum pernah dipungut</td></tr>'}</tbody>
     </table></div>
+    </div>
   </div>`;
 
   if ($('#dn-tarik')) $('#dn-tarik').onclick = tarikDanaModal;
+  $('#mt-toggle').onclick = () => {
+    const tersembunyi = $('#mt-box').classList.toggle('hidden');
+    $('#mt-toggle').textContent = tersembunyi ? '▾ Tampilkan mutasi' : '▴ Sembunyikan mutasi';
+  };
 }
 
 function tarikDanaModal() {
