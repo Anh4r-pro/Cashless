@@ -390,7 +390,7 @@ class MartBeliController extends Controller
 
             $exp = trim((string) ($it['expired'] ?? ''));
             if ($exp !== '' && (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $exp) || ! strtotime($exp))) {
-                throw new ApiError(400, "Tanggal kedaluwarsa \"{$p->nama}\" tidak valid (YYYY-MM-DD)");
+                throw new ApiError(400, "Tanggal expired \"{$p->nama}\" tidak valid (YYYY-MM-DD)");
             }
 
             $baris[] = ['produk' => $p, 'qty' => $qty, 'harga' => $harga,
@@ -537,7 +537,7 @@ class MartBeliController extends Controller
                 if ($it->hpp_lama !== null) {
                     Produk::where('id', $it->produk_id)->update(['hpp' => $it->hpp_lama]);
                 }
-                // Begitu juga tanggal kedaluwarsanya: nota yang dibatalkan
+                // Begitu juga tanggal expired-nya: nota yang dibatalkan
                 // tidak boleh meninggalkan tanggal dari barang yang ternyata
                 // tidak pernah jadi datang.
                 if ($it->expired !== null) {

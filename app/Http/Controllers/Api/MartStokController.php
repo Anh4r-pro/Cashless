@@ -226,7 +226,7 @@ class MartStokController extends Controller
         ]);
     }
 
-    /** Sisa hari menuju kedaluwarsa; null kalau tanggalnya tidak diisi. */
+    /** Sisa hari menuju tanggal expired; null kalau tanggalnya tidak diisi. */
     public static function sisaHariExpired(?string $tgl): ?int
     {
         if (! $tgl || ! strtotime($tgl)) {
@@ -238,7 +238,7 @@ class MartStokController extends Controller
     }
 
     /**
-     * Lampu kedaluwarsa, ambangnya dari rapat tim kasir:
+     * Lampu expired, ambangnya dari rapat tim kasir:
      * kuning mulai H-50, merah mulai H-30, dan "lewat" setelah tanggalnya.
      *
      * Dihitung di SERVER supaya layar, unduhan, dan cetakan memberi warna yang
@@ -381,7 +381,7 @@ class MartStokController extends Controller
         // Tanggal kedaluwarsa: satu per barang, boleh dikosongkan.
         $expired = trim((string) ($b['expired'] ?? ''));
         if ($expired !== '' && (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $expired) || ! strtotime($expired))) {
-            throw new ApiError(400, 'Tanggal kedaluwarsa tidak valid (format YYYY-MM-DD)');
+            throw new ApiError(400, 'Tanggal expired tidak valid (format YYYY-MM-DD)');
         }
 
         $barcode = preg_replace('/[^0-9A-Za-z]/', '', (string) ($b['barcode'] ?? ''));

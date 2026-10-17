@@ -2165,7 +2165,7 @@ function martStokView(el) {
     <div class="tblwrap"><table>
       <thead><tr><th>Barang</th><th>SKU</th><th>Kategori</th><th class="num">Harga beli</th>
         <th class="num">Harga jual</th><th class="num">Margin</th><th class="num">Stok</th>
-        <th>Status</th><th>Kedaluwarsa</th><th></th></tr></thead>
+        <th>Status</th><th>Expired</th><th></th></tr></thead>
       <tbody id="ms-body"></tbody>
     </table></div>
   </div>`;
@@ -2389,7 +2389,7 @@ function martCetakPersediaan() {
 }
 
 /**
- * Lampu kedaluwarsa. Warnanya datang dari SERVER (expired_status), bukan
+ * Lampu expired. Warnanya datang dari SERVER (expired_status), bukan
  * dihitung ulang di sini: ambang 50/30 hari yang disalin ke layar, unduhan,
  * dan cetakan pasti akan berbeda suatu hari.
  */
@@ -2438,7 +2438,7 @@ function martBarangModal(p) {
         <input type="number" id="mb-min" min="0" value="${p?.stok_min ?? 5}">
         <span class="muted set-hint">Stok di bawah/sama dengan angka ini ditandai kuning.</span></div>
     </div>
-    <div class="field"><label>Tanggal kedaluwarsa <span class="muted">(opsional)</span></label>
+    <div class="field"><label>Tanggal expired <span class="muted">(opsional)</span></label>
       <input type="date" id="mb-exp" value="${esc(p?.expired || '')}">
       <span class="muted set-hint">Ditandai kuning mulai 50 hari sebelum tanggalnya, merah mulai 30 hari.
         Diperbarui sendiri setiap nota pembelian yang menyebut tanggalnya.</span></div>
@@ -2622,9 +2622,14 @@ async function martKategoriModal() {
 function martUnduhBarang() {
   const d = martStok.produk || [];
   unduhCsv(`barang-mart-${new Date().toISOString().slice(0, 10)}.csv`,
-    ['Nama', 'SKU', 'Kategori', 'Jatah santri', 'Harga beli', 'Harga jual', 'Untung', 'Margin %', 'Stok', 'Status'],
+    // Expired ikut diunduh: layar sudah punya kolomnya, dan unduhan yang
+    // tertinggal dari layar adalah persis cacat yang diperbaiki di Laporan
+    // Keuangan (angka layar vs unduhan tidak sama).
+    ['Nama', 'SKU', 'Kategori', 'Jatah santri', 'Harga beli', 'Harga jual', 'Untung', 'Margin %',
+      'Stok', 'Status', 'Expired', 'Sisa hari'],
     d.map((p) => [p.nama, p.barcode || '', p.kategori_nama || '', p.kategori,
-      p.hpp || '', p.harga, p.untung ?? '', p.margin ?? '', p.stok ?? '', p.status]));
+      p.hpp || '', p.harga, p.untung ?? '', p.margin ?? '', p.stok ?? '', p.status,
+      p.expired || '', p.expired_hari ?? '']));
 }
 
 function martCetakBarang() {
@@ -2636,11 +2641,14 @@ function martCetakBarang() {
     <h1>Daftar Barang &amp; Stok — ${esc(USER?.tenant_nama || 'IMBOS Mart')}</h1>
     <div>${new Date().toLocaleString('id-ID')} · ${d.length} barang</div>
     <table><thead><tr><th>Nama</th><th>SKU</th><th>Kategori</th><th class="n">Beli</th>
-      <th class="n">Jual</th><th class="n">Margin</th><th class="n">Stok</th></tr></thead>
+      <th class="n">Jual</th><th class="n">Margin</th><th class="n">Stok</th>
+      <th>Expired</th></tr></thead>
     <tbody>${d.map((p) => `<tr><td>${esc(p.nama)}</td><td>${esc(p.barcode || '-')}</td>
       <td>${esc(p.kategori_nama || '-')}</td><td class="n">${p.hpp ? rp(p.hpp) : '-'}</td>
       <td class="n">${rp(p.harga)}</td><td class="n">${p.margin ?? '-'}%</td>
-      <td class="n">${p.stok ?? '-'}</td></tr>`).join('')}</tbody></table>`);
+      <td class="n">${p.stok ?? '-'}</td>
+      <td>${esc(p.expired || '-')}${p.expired_hari !== null && p.expired_hari !== undefined
+        ? ` (${p.expired_hari} hr)` : ''}</td></tr>`).join('')}</tbody></table>`);
 }
 
 // ------------------------------------------------- DASHBOARD & LAPORAN
@@ -2773,7 +2781,7 @@ function martDaftarStok(judul, daftar, warna) {
 }
 
 const MART_METODE_LABEL = { tunai: '💵 Tunai', transfer: '🏦 Transfer',
-  hutang: '📒 Hutang', kartu: '💳 Kartu', pelunasan: '🧾 Pelunasan hutang' };
+  hutang: '📒 Hutang', kartu: '💳 Cashless', pelunasan: '🧾 Pelunasan hutang' };
 
 function martTabelRiwayat(tx) {
   return `<div class="tblwrap"><table>
@@ -3385,7 +3393,7 @@ function martRiwayatView(el) {
       <div class="field"><label>Metode</label><select id="rwm-metode">
         <option value="">semua</option><option value="tunai">tunai</option>
         <option value="transfer">transfer</option><option value="hutang">hutang (member)</option>
-        <option value="kartu">kartu (RFID)</option>
+        <option value="kartu">cashless (kartu RFID)</option>
         <option value="pelunasan">pelunasan hutang</option>
       </select></div>
       <div class="field"><label>Cari</label>
@@ -3455,7 +3463,9 @@ async function martMuatRiwayat() {
         sebelum biaya operasional</span></div>
     <div class="statcard"><span class="muted">💵 Tunai</span><br><b class="rp">${rp(r.tunai)}</b></div>
     <div class="statcard"><span class="muted">🏦 Transfer</span><br><b class="rp">${rp(r.transfer)}</b></div>
-    <div class="statcard"><span class="muted">💳 Kartu (kas sekolah)</span><br><b class="rp">${rp(r.kartu)}</b></div>
+    <div class="statcard"><span class="muted">💳 Cashless</span><br><b class="rp">${rp(r.kartu)}</b>
+      <span class="muted" style="display:block; font-size:11.5px">dibayar saldo kartu —
+        uangnya di kas sekolah</span></div>
     ${r.hutang ? `<div class="statcard"><span class="muted">📒 Hutang (belum dibayar)</span><br>
       <b class="rp" style="color:var(--brand)">${rp(r.hutang)}</b></div>` : ''}
     ${r.pelunasan ? `<div class="statcard"><span class="muted">🧾 Hutang (dibayar)</span><br>
