@@ -10,6 +10,7 @@ use App\Models\MartJualUbah;
 use App\Models\MartKas;
 use App\Models\MartKategori;
 use App\Models\MartMember;
+use App\Models\MartMemberKategori;
 use App\Models\MartPiutangBayar;
 use App\Models\Produk;
 use App\Models\Tenant;
@@ -179,7 +180,13 @@ class MartController extends Controller
     private function ringkasProduk(Produk $p): array
     {
         return ['id' => $p->id, 'nama' => $p->nama, 'harga' => (int) $p->harga,
-            'kategori' => $p->kategori, 'barcode' => $p->barcode];
+            'kategori' => $p->kategori, 'barcode' => $p->barcode,
+            // Stok & grosir ikut dibawa: hasil pindaian masuk keranjang
+            // langsung, jadi layar perlu tahu sisanya dan apakah barang ini
+            // bisa dijual per kemasan — tanpa memuat ulang seluruh katalog.
+            'stok' => $p->stok === null ? null : (int) $p->stok,
+            'isi_grosir' => $p->isi_grosir === null ? null : (int) $p->isi_grosir,
+            'harga_grosir' => $p->harga_grosir === null ? null : (int) $p->harga_grosir];
     }
 
     /**
@@ -252,6 +259,11 @@ class MartController extends Controller
 
         $bank = '';
         $pengirim = '';
+        // Catatan bebas — terutama berguna pada hutang: saat menagih berminggu
+        // kemudian, "hutang Rp150.000" tanpa keterangan apa pun sering berakhir
+        // jadi perdebatan tentang untuk apa dan atas nama siapa barang diambil.
+        $catatan = mb_substr(trim(preg_replace('/\s+/u', ' ', (string) $r->input('catatan', ''))), 0, 200);
+
         $member = null;
         if ($metode === 'hutang') {
             // Hutang hanya atas nama member terdaftar: piutang tanpa identitas
@@ -263,6 +275,24 @@ class MartController extends Controller
             }
             if (! $member->aktif) {
                 throw new ApiError(409, "Member \"{$member->nama}\" sedang nonaktif");
+            }
+            /*
+             * Kategori menyaring lebih dulu daripada plafon.
+             *
+             * Urutannya disengaja: kalau kategorinya memang tidak boleh
+             * berhutang, kasir harus mendengar ALASAN ITU — bukan dikirim
+             * mengurus plafon yang tidak akan menolong.
+             *
+             * Member tanpa kategori (kategori_id NULL) tidak tersentuh aturan
+             * ini sama sekali: itu keadaan seluruh member yang sudah ada.
+             */
+            if ($member->kategori_id) {
+                $kat = MartMemberKategori::where('id', $member->kategori_id)
+                    ->where('tenant_id', $t->id)->first();
+                if ($kat && ! $kat->boleh_hutang) {
+                    throw new ApiError(409, "Member \"{$member->nama}\" masuk kategori " .
+                        "\"{$kat->nama}\" yang tidak boleh berhutang. Pilih metode bayar lain.");
+                }
             }
             if ($member->batas_hutang <= 0) {
                 throw new ApiError(409, "Member \"{$member->nama}\" belum diberi plafon hutang — " .
@@ -299,13 +329,13 @@ class MartController extends Controller
         $op = $this->operator;
         $memberId = $member?->id;
         $hasil = DB::transaction(function () use ($t, $x, $uang, $kembalian, $txId, $metode,
-            $bank, $pengirim, $diskon, $subtotal, $total, $op, $memberId) {
+            $bank, $pengirim, $diskon, $subtotal, $total, $op, $memberId, $catatan) {
             $jual = MartJual::create([
                 'tenant_id' => $t->id, 'member_id' => $memberId,
                 'tx_id' => $txId, 'metode' => $metode,
                 'subtotal' => $subtotal, 'diskon' => $diskon, 'total' => $total,
                 'uang_diterima' => $uang, 'kembalian' => $kembalian,
-                'bank' => $bank, 'pengirim' => $pengirim,
+                'bank' => $bank, 'pengirim' => $pengirim, 'catatan' => $catatan,
                 'n_item' => array_sum(array_map(fn ($b) => (int) ($b['qty'] ?? 1), $x['rincian'])),
                 'operator' => $op,
                 'created_at' => WaktuIso::sekarang(),
@@ -315,10 +345,18 @@ class MartController extends Controller
                     'jual_id' => $jual->id, 'produk_id' => $b['produk_id'] ?? null,
                     'nama' => $b['nama'], 'kategori' => $b['kategori'] ?? 'makanan',
                     'harga' => (int) $b['harga'], 'hpp' => $b['hpp'] ?? null,
-                    'qty' => (int) ($b['qty'] ?? 1), 'subtotal' => (int) $b['subtotal'],
+                    'qty' => (int) ($b['qty'] ?? 1),
+                    // Satuan & isi DIPOTRET: kemasan pemasok bisa berubah, dan
+                    // nota yang sudah tercatat tidak boleh ikut berubah.
+                    'satuan' => $b['satuan'] ?? 'ecer', 'isi' => (int) ($b['isi'] ?? 1),
+                    'subtotal' => (int) $b['subtotal'],
                 ]);
                 if (! empty($b['produk_id'])) {
-                    Stok::jual((int) $b['produk_id'], (int) ($b['qty'] ?? 1), (string) $txId, $op);
+                    // Stok selalu dalam satuan ECERAN: menjual 2 dus berisi 12
+                    // memotong 24 pcs. Hanya ada satu stok, jadi tidak ada dua
+                    // angka yang bisa saling menyimpang.
+                    Stok::jual((int) $b['produk_id'],
+                        (int) ($b['qty'] ?? 1) * max(1, (int) ($b['isi'] ?? 1)), (string) $txId, $op);
                 }
             }
 
@@ -637,16 +675,21 @@ class MartController extends Controller
     /** Keterangan satu baris penjualan: lawan bicaranya, siapa pun ia. */
     private function ketJual(MartJual $j): string
     {
+        // Catatan kasir disertakan apa pun metodenya — ia ditulis justru supaya
+        // terbaca di riwayat, bukan hanya tersimpan di basis data.
+        $catatan = trim((string) $j->catatan);
+
         if ($j->metode === 'transfer') {
-            return trim($j->bank . ' · ' . $j->pengirim);
+            return trim(trim($j->bank . ' · ' . $j->pengirim) . ($catatan ? ' — ' . $catatan : ''));
         }
         if ($j->metode === 'hutang') {
             $m = $j->member_id ? MartMember::find($j->member_id) : null;
 
-            return 'Hutang · ' . ($m ? $m->nama : 'member terhapus');
+            return 'Hutang · ' . ($m ? $m->nama : 'member terhapus')
+                . ($catatan ? ' — ' . $catatan : '');
         }
 
-        return '';
+        return $catatan;
     }
 
     /** Nomor struk yang dilihat manusia. Dua buku, dua awalan, tidak pernah bentrok. */

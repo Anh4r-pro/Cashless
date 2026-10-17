@@ -30,7 +30,7 @@ class MartJual extends Model
     // Setiap kolom baru di mart_jual harus ikut ditambahkan ke daftar ini.
     protected $fillable = [
         'tenant_id', 'member_id', 'tx_id', 'metode', 'status', 'subtotal', 'diskon', 'total',
-        'uang_diterima', 'kembalian', 'bank', 'pengirim',
+        'uang_diterima', 'kembalian', 'bank', 'pengirim', 'catatan',
         'n_item', 'operator', 'n_ubah', 'diubah_oleh', 'diubah_pada', 'created_at',
     ];
 

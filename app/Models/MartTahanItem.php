@@ -11,7 +11,7 @@ class MartTahanItem extends Model
 
     protected $table = 'mart_tahan_item';
 
-    protected $fillable = ['tahan_id', 'produk_id', 'nama', 'kategori', 'harga', 'qty', 'subtotal'];
+    protected $fillable = ['tahan_id', 'produk_id', 'nama', 'kategori', 'harga', 'qty', 'satuan', 'isi', 'subtotal'];
 
     protected $casts = ['harga' => 'int', 'qty' => 'int', 'subtotal' => 'int'];
 }

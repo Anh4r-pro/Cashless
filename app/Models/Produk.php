@@ -30,6 +30,14 @@ class Produk extends Model
         'hpp',
         'stok',
         'stok_min',
+        // Grosir: satu barcode, dua satuan. `isi_grosir` NULL = tidak dijual
+        // grosir, dan itu keadaan seluruh barang lama (termasuk barang kantin
+        // biasa, yang memakai tabel ini juga).
+        'isi_grosir',
+        'hpp_grosir',
+        'harga_grosir',
+        // Satu tanggal kedaluwarsa per barang, diperbarui saat nota masuk.
+        'expired',
     ];
 
     protected $casts = [

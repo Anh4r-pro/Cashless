@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api;
 use App\Exceptions\ApiError;
 use App\Models\MartJual;
 use App\Models\MartMember;
+use App\Models\MartMemberKategori;
+use App\Models\MartMemberKet;
 use App\Models\MartPiutangBayar;
 use App\Models\Tenant;
 use App\Services\Rupiah;
@@ -48,6 +50,127 @@ class MartMemberController extends Controller
 
     // -------------------------------------------------------------- member
 
+    /**
+     * Kategori member & pilihan keterangan — dua daftar kecil yang dikelola
+     * admin toko sendiri.
+     *
+     * Digabung dalam satu endpoint karena keduanya dipakai oleh layar yang
+     * sama (formulir member), dan memisahkannya hanya menambah satu perjalanan
+     * jaringan tanpa menambah kejelasan apa pun.
+     */
+    public function daftarKategori(Request $r)
+    {
+        $t = $this->martKu($r);
+
+        return response()->json([
+            'kategori' => MartMemberKategori::where('tenant_id', $t->id)
+                ->orderBy('urutan')->orderBy('nama')->get(),
+            'keterangan' => MartMemberKet::where('tenant_id', $t->id)
+                ->orderBy('urutan')->orderBy('teks')->get(),
+        ]);
+    }
+
+    public function kategoriSimpan(Request $r, ?int $id = null)
+    {
+        $t = $this->martKu($r);
+        $nama = mb_substr(trim(preg_replace('/\s+/u', ' ', (string) $r->input('nama', ''))), 0, 40);
+        if (mb_strlen($nama) < 2) {
+            throw new ApiError(400, 'Nama kategori minimal 2 huruf');
+        }
+        $kembar = MartMemberKategori::where('tenant_id', $t->id)
+            ->whereRaw('LOWER(nama) = ?', [mb_strtolower($nama)])
+            ->when($id, fn ($q) => $q->where('id', '!=', $id))->first();
+        if ($kembar) {
+            throw new ApiError(409, "Kategori \"{$nama}\" sudah ada");
+        }
+
+        $isi = [
+            'nama' => $nama,
+            // Bawaannya BOLEH berhutang: kategori dibuat untuk mengelompokkan,
+            // dan diam-diam melarang orang berhutang karena lupa mencentang
+            // adalah kejutan yang muncul di depan pembeli.
+            'boleh_hutang' => $r->input('boleh_hutang') === null ? true : (bool) $r->input('boleh_hutang'),
+            'urutan' => (int) $r->input('urutan', 0),
+            'aktif' => $r->input('aktif') === null ? true : (bool) $r->input('aktif'),
+        ];
+
+        if ($id) {
+            $k = MartMemberKategori::where('id', $id)->where('tenant_id', $t->id)->first();
+            if (! $k) {
+                throw new ApiError(404, 'Kategori tidak ditemukan');
+            }
+            $k->update($isi);
+        } else {
+            $k = MartMemberKategori::create(array_merge($isi, [
+                'tenant_id' => $t->id, 'created_at' => WaktuIso::sekarang(),
+            ]));
+        }
+
+        return response()->json(['ok' => true, 'kategori' => $k->fresh()]);
+    }
+
+    public function kategoriHapus(Request $r, int $id)
+    {
+        $t = $this->martKu($r);
+        $k = MartMemberKategori::where('id', $id)->where('tenant_id', $t->id)->first();
+        if (! $k) {
+            throw new ApiError(404, 'Kategori tidak ditemukan');
+        }
+        // Membernya TIDAK ikut terhapus — kunci asingnya nullOnDelete, jadi
+        // mereka kembali ke keadaan "belum dikategorikan", bukan hilang.
+        $n = MartMember::where('tenant_id', $t->id)->where('kategori_id', $k->id)->count();
+        $k->delete();
+
+        return response()->json(['ok' => true, 'n_member_terlepas' => $n]);
+    }
+
+    public function ketSimpan(Request $r, ?int $id = null)
+    {
+        $t = $this->martKu($r);
+        $teks = mb_substr(trim(preg_replace('/\s+/u', ' ', (string) $r->input('teks', ''))), 0, 160);
+        if (mb_strlen($teks) < 2) {
+            throw new ApiError(400, 'Keterangan minimal 2 huruf');
+        }
+        $kembar = MartMemberKet::where('tenant_id', $t->id)
+            ->whereRaw('LOWER(teks) = ?', [mb_strtolower($teks)])
+            ->when($id, fn ($q) => $q->where('id', '!=', $id))->first();
+        if ($kembar) {
+            throw new ApiError(409, "Pilihan keterangan \"{$teks}\" sudah ada");
+        }
+
+        $isi = ['teks' => $teks, 'urutan' => (int) $r->input('urutan', 0),
+            'aktif' => $r->input('aktif') === null ? true : (bool) $r->input('aktif')];
+
+        if ($id) {
+            $k = MartMemberKet::where('id', $id)->where('tenant_id', $t->id)->first();
+            if (! $k) {
+                throw new ApiError(404, 'Pilihan keterangan tidak ditemukan');
+            }
+            $k->update($isi);
+        } else {
+            $k = MartMemberKet::create(array_merge($isi, [
+                'tenant_id' => $t->id, 'created_at' => WaktuIso::sekarang(),
+            ]));
+        }
+
+        return response()->json(['ok' => true, 'keterangan' => $k->fresh()]);
+    }
+
+    public function ketHapus(Request $r, int $id)
+    {
+        $t = $this->martKu($r);
+        $k = MartMemberKet::where('id', $id)->where('tenant_id', $t->id)->first();
+        if (! $k) {
+            throw new ApiError(404, 'Pilihan keterangan tidak ditemukan');
+        }
+        // Keterangan member disimpan sebagai TEKS, jadi menghapus pilihannya
+        // tidak mengosongkan keterangan siapa pun — ia hanya berhenti
+        // ditawarkan pada formulir berikutnya.
+        $k->delete();
+
+        return response()->json(['ok' => true]);
+    }
+
     public function index(Request $r)
     {
         $t = $this->martKu($r);
@@ -61,11 +184,17 @@ class MartMemberController extends Controller
             ->orderBy('nama')->get();
 
         $sisa = $this->sisaPerMember($t);
+        $kat = MartMemberKategori::where('tenant_id', $t->id)->get()->keyBy('id');
 
         return response()->json([
             'member' => $q->map(fn ($m) => array_merge($m->toArray(), [
                 'sisa_piutang' => (int) ($sisa[$m->id] ?? 0),
                 'sisa_plafon' => max(0, (int) $m->batas_hutang - (int) ($sisa[$m->id] ?? 0)),
+                'kategori_nama' => $m->kategori_id ? ($kat[$m->kategori_id]->nama ?? null) : null,
+                // Dipakai layar kasir untuk mematikan tombol Hutang sejak awal,
+                // bukan menunggu penolakan muncul saat tombolnya ditekan.
+                'boleh_hutang' => $m->kategori_id
+                    ? (bool) ($kat[$m->kategori_id]->boleh_hutang ?? true) : true,
             ])),
             'ringkas' => [
                 'n_member' => MartMember::where('tenant_id', $t->id)->count(),
@@ -110,8 +239,15 @@ class MartMemberController extends Controller
                 'bedakan namanya supaya piutangnya tidak tertukar');
         }
 
+        // Kategori boleh kosong — itu keadaan seluruh member yang sudah ada,
+        // dan mereka tetap berperilaku seperti sebelum kategori ini ada.
+        $katId = $r->input('kategori_id') ?: null;
+        if ($katId && ! MartMemberKategori::where('id', $katId)->where('tenant_id', $t->id)->exists()) {
+            throw new ApiError(400, 'Kategori member tidak dikenal');
+        }
+
         $isi = [
-            'nama' => $nama, 'hp' => mb_substr($hp, 0, 25),
+            'nama' => $nama, 'kategori_id' => $katId, 'hp' => mb_substr($hp, 0, 25),
             'keterangan' => mb_substr(trim((string) $r->input('keterangan', '')), 0, 160),
             'batas_hutang' => $batas,
             'aktif' => $r->input('aktif') === null ? true : (bool) $r->input('aktif'),

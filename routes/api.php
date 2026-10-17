@@ -80,6 +80,15 @@ Route::middleware('peran:tenant')->group(function () {
     Route::post('mart/member', [MartMemberController::class, 'simpan']);
     Route::put('mart/member/{id}', [MartMemberController::class, 'simpan']);
     Route::delete('mart/member/{id}', [MartMemberController::class, 'hapus']);
+    // Kategori member & pilihan keterangan — didaftarkan sebelum
+    // mart/member/{id} supaya "kategori" tidak terbaca sebagai id.
+    Route::get('mart/member-kategori', [MartMemberController::class, 'daftarKategori']);
+    Route::post('mart/member-kategori', [MartMemberController::class, 'kategoriSimpan']);
+    Route::put('mart/member-kategori/{id}', [MartMemberController::class, 'kategoriSimpan']);
+    Route::delete('mart/member-kategori/{id}', [MartMemberController::class, 'kategoriHapus']);
+    Route::post('mart/member-ket', [MartMemberController::class, 'ketSimpan']);
+    Route::put('mart/member-ket/{id}', [MartMemberController::class, 'ketSimpan']);
+    Route::delete('mart/member-ket/{id}', [MartMemberController::class, 'ketHapus']);
     Route::get('mart/piutang', [MartMemberController::class, 'piutang']);
     Route::post('mart/piutang/{id}/bayar', [MartMemberController::class, 'bayar']);
     Route::get('mart/piutang/bayar', [MartMemberController::class, 'riwayatBayar']);

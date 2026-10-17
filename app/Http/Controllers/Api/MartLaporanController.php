@@ -411,6 +411,14 @@ class MartLaporanController extends Controller
     }
 
     /** Barang terlaris — qty dari dua buku penjualan digabung. */
+    /**
+     * Barang terlaris, dihitung dalam SATUAN ECERAN.
+     *
+     * qty dikalikan isi kemasan karena dua buku penjualan digabung di sini dan
+     * keduanya bisa berisi baris grosir: tanpa perkalian itu, satu dus berisi
+     * dua belas akan terhitung sama banyaknya dengan satu pcs, dan urutan
+     * "terlaris" jadi mengurutkan hal yang tidak sebanding.
+     */
     private function terlaris(Tenant $t, string $periode, int $limit, string $arah)
     {
         $sejak = $this->sejak($periode);
@@ -418,13 +426,13 @@ class MartLaporanController extends Controller
         $mart = DB::table('mart_jual_item as i')->join('mart_jual as j', 'j.id', '=', 'i.jual_id')
             ->where('j.tenant_id', $t->id)->where('j.status', 'sah')->whereNotNull('i.produk_id')
             ->when($sejak, fn ($q) => $q->where('j.created_at', '>=', $sejak))
-            ->selectRaw('i.produk_id, SUM(i.qty) qty, SUM(i.subtotal) nilai')
+            ->selectRaw('i.produk_id, SUM(i.qty * GREATEST(i.isi, 1)) qty, SUM(i.subtotal) nilai')
             ->groupBy('i.produk_id')->get();
 
         $kartu = DB::table('transaksi_item as i')->where('i.tenant_id', $t->id)
             ->whereNotNull('i.produk_id')
             ->when($sejak, fn ($q) => $q->where('i.created_at', '>=', $sejak))
-            ->selectRaw('i.produk_id, SUM(i.qty) qty, SUM(i.subtotal) nilai')
+            ->selectRaw('i.produk_id, SUM(i.qty * GREATEST(i.isi, 1)) qty, SUM(i.subtotal) nilai')
             ->groupBy('i.produk_id')->get();
 
         $gabung = [];

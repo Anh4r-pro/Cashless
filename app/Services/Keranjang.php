@@ -58,6 +58,11 @@ class Keranjang
         $total = 0;
         $nonmakanan = 0;
         $rincian = [];
+        // Kebutuhan stok dijumlahkan PER BARANG, bukan diperiksa per baris:
+        // satu keranjang bisa memuat barang yang sama dalam dua satuan (3 pcs
+        // + 1 dus), dan keduanya memakan stok yang sama.
+        $butuh = [];
+        $barang = [];
 
         foreach ($items as $it) {
             $qty = isset($it['qty']) ? (int) floor((float) $it['qty']) : 1;
@@ -65,6 +70,9 @@ class Keranjang
                 throw new ApiError(400, 'Jumlah barang harus 1–' . self::MAKS_QTY);
             }
 
+            // Disetel ulang tiap putaran: tanpa ini, barang ketikan bebas yang
+            // menyusul sebuah barang katalog akan terbaca sebagai barang itu.
+            $pr = null;
             if (isset($it['produk_id']) && $it['produk_id'] !== null) {
                 $pr = Produk::where('id', (int) $it['produk_id'])
                     ->where('tenant_id', $tenant->id)->first();
@@ -75,12 +83,43 @@ class Keranjang
                     throw new ApiError(409, "\"{$pr->nama}\" sedang ditandai habis — hapus dari keranjang");
                 }
                 $nama = $pr->nama;
-                $harga = (int) $pr->harga;
                 $kategori = $pr->kategori;
-                // Harga modal ikut dibawa untuk DIPOTRET pada baris penjualan.
-                // Tanpa potret, laba bulan lalu ikut berubah setiap kali harga
-                // beli hari ini naik.
-                $hpp = $pr->hpp === null ? null : (int) $pr->hpp;
+
+                /*
+                 * Satuan: eceran (pcs) atau grosir (dus/karton).
+                 *
+                 * Keduanya satu barang dengan satu stok — yang berbeda hanya
+                 * kemasan saat dijual. Harga & modalnya diambil dari kolom
+                 * grosirnya sendiri, BUKAN dikalikan dari harga eceran: justru
+                 * itu inti grosir, harganya per pcs lebih murah.
+                 *
+                 * `isi` dibawa keluar supaya pemanggil tahu berapa pcs yang
+                 * harus dipotong dari stok, dan supaya bisa DIPOTRET di baris
+                 * penjualan — kemasan pemasok bisa berubah kelak, dan nota
+                 * yang sudah tercatat tidak boleh ikut berubah angkanya.
+                 */
+                $satuan = ($it['satuan'] ?? 'ecer') === 'grosir' ? 'grosir' : 'ecer';
+                $isi = 1;
+                if ($satuan === 'grosir') {
+                    $isiMaster = (int) ($pr->isi_grosir ?? 0);
+                    if ($isiMaster < 1 || $pr->harga_grosir === null) {
+                        throw new ApiError(409, "\"{$pr->nama}\" belum disiapkan untuk dijual grosir — " .
+                            'isi per grosir dan harga grosirnya belum diisi di Barang & Stok.');
+                    }
+                    $isi = $isiMaster;
+                    $harga = (int) $pr->harga_grosir;
+                    // Modal grosir dipakai apa adanya kalau diisi; kalau tidak,
+                    // diturunkan dari modal eceran supaya labanya tetap terhitung.
+                    $hpp = $pr->hpp_grosir !== null
+                        ? (int) $pr->hpp_grosir
+                        : ($pr->hpp === null ? null : (int) $pr->hpp * $isi);
+                } else {
+                    $harga = (int) $pr->harga;
+                    // Harga modal ikut dibawa untuk DIPOTRET pada baris penjualan.
+                    // Tanpa potret, laba bulan lalu ikut berubah setiap kali harga
+                    // beli hari ini naik.
+                    $hpp = $pr->hpp === null ? null : (int) $pr->hpp;
+                }
             } else {
                 // Input manual: kasir menyebut kategorinya sendiri, dan
                 // non-makanan hanya boleh di tenant koperasi.
@@ -109,6 +148,8 @@ class Keranjang
                 $nama = $deskripsi !== '' ? $deskripsi : 'Input manual';
                 $kategori = (($it['kategori'] ?? '') === 'non_makanan') ? 'non_makanan' : 'makanan';
                 $hpp = null;        // barang ketikan bebas tidak punya harga modal
+                $satuan = 'ecer';   // ketikan bebas tidak punya kemasan
+                $isi = 1;
                 if ($kategori === 'non_makanan' && $tenant->jenis !== 'koperasi') {
                     throw new ApiError(400, 'Hanya tenant koperasi yang boleh menjual barang non-makanan');
                 }
@@ -122,17 +163,49 @@ class Keranjang
                 $nonmakanan += $subtotal;
             }
 
+            if ($pr && $pr->stok !== null) {
+                $butuh[$pr->id] = ($butuh[$pr->id] ?? 0) + $qty * $isi;
+                $barang[$pr->id] = $pr;
+            }
+
             $rincian[] = [
                 'produk_id' => isset($it['produk_id']) && $it['produk_id'] !== null ? (int) $it['produk_id'] : null,
                 'nama' => $nama, 'harga' => $harga, 'hpp' => $hpp, 'qty' => $qty,
+                'satuan' => $satuan, 'isi' => $isi,
                 'subtotal' => $subtotal, 'kategori' => $kategori,
             ];
         }
 
+        /*
+         * Stok diperiksa DI SERVER, bukan hanya di layar kasir.
+         *
+         * Layar memang sudah menahan lebih dulu — dan memang harus, supaya
+         * kasir tahu sebelum pembeli menunggu. Tetapi layar bukan pagar:
+         * halaman yang sudah lama terbuka memegang angka stok yang basi, dan
+         * kiriman ke /api bisa disusun siapa pun yang memegang sesi kasir.
+         * Tanpa pemeriksaan ini stok bisa menjadi MINUS tanpa ada satu pun
+         * jejak yang menjelaskan sebabnya.
+         *
+         * Hanya berlaku untuk barang yang stoknya memang dilacak — kantin yang
+         * tidak memakai stok sama sekali tidak tersentuh.
+         */
+        foreach ($butuh as $pid => $perlu) {
+            $pr = $barang[$pid];
+            if ($perlu > (int) $pr->stok) {
+                throw new ApiError(409, "Stok \"{$pr->nama}\" tinggal " . (int) $pr->stok .
+                    ", sedangkan yang diminta {$perlu}. Perbarui layar kasirnya, " .
+                    'lalu ulangi transaksinya.');
+            }
+        }
+
         // Keterangan disusun di SERVER dari nama produk yang benar-benar terpakai,
         // jadi baris riwayat tidak bisa menyebut barang yang tidak dibeli.
+        // Satuan grosir disebut di keterangan: "Teh ×2" dan "Teh ×2 dus" adalah
+        // dua hal yang sangat berbeda nilainya, dan riwayat harus bisa dibaca
+        // tanpa membuka rinciannya.
         $keterangan = mb_substr(implode(', ', array_map(
-            fn ($r) => $r['qty'] > 1 ? "{$r['nama']} ×{$r['qty']}" : $r['nama'],
+            fn ($r) => ($r['qty'] > 1 ? "{$r['nama']} ×{$r['qty']}" : $r['nama'])
+                . ($r['satuan'] === 'grosir' ? ' (grosir)' : ''),
             $rincian,
         )), 0, 300);
 

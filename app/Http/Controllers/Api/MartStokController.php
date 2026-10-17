@@ -7,9 +7,10 @@ use App\Models\MartKategori;
 use App\Models\MartStokMutasi;
 use App\Models\Produk;
 use App\Models\Tenant;
+use App\Services\Ekspor;
 use App\Services\ImporBarangMart;
 use App\Services\ImporTopup;
-use App\Services\Ekspor;
+use App\Services\Kartu;
 use App\Services\Rupiah;
 use App\Services\Stok;
 use App\Support\WaktuIso;
@@ -225,6 +226,37 @@ class MartStokController extends Controller
         ]);
     }
 
+    /** Sisa hari menuju kedaluwarsa; null kalau tanggalnya tidak diisi. */
+    public static function sisaHariExpired(?string $tgl): ?int
+    {
+        if (! $tgl || ! strtotime($tgl)) {
+            return null;
+        }
+        $hariIni = strtotime(Kartu::hariIni());
+
+        return (int) floor((strtotime($tgl) - $hariIni) / 86400);
+    }
+
+    /**
+     * Lampu kedaluwarsa, ambangnya dari rapat tim kasir:
+     * kuning mulai H-50, merah mulai H-30, dan "lewat" setelah tanggalnya.
+     *
+     * Dihitung di SERVER supaya layar, unduhan, dan cetakan memberi warna yang
+     * sama — ambang yang disalin ke tiga tempat pasti akan berbeda suatu hari.
+     */
+    public static function statusExpired(?string $tgl): ?string
+    {
+        $sisa = self::sisaHariExpired($tgl);
+        if ($sisa === null) {
+            return null;
+        }
+        if ($sisa < 0) {
+            return 'lewat';
+        }
+
+        return $sisa <= 30 ? 'merah' : ($sisa <= 50 ? 'kuning' : 'hijau');
+    }
+
     private function baris(Produk $p, $kat): array
     {
         $hpp = (int) ($p->hpp ?? 0);
@@ -242,6 +274,13 @@ class MartStokController extends Controller
             'stok' => $p->stok, 'stok_min' => (int) $p->stok_min,
             'status' => Stok::status($p->stok, $p->stok_min),
             'aktif' => (int) $p->aktif,
+            // Grosir (NULL = barang ini tidak dijual per kemasan).
+            'isi_grosir' => $p->isi_grosir === null ? null : (int) $p->isi_grosir,
+            'hpp_grosir' => $p->hpp_grosir === null ? null : (int) $p->hpp_grosir,
+            'harga_grosir' => $p->harga_grosir === null ? null : (int) $p->harga_grosir,
+            'expired' => $p->expired,
+            'expired_status' => self::statusExpired($p->expired),
+            'expired_hari' => self::sisaHariExpired($p->expired),
         ];
     }
 
@@ -298,6 +337,53 @@ class MartStokController extends Controller
                 'Betulkan salah satunya dulu.');
         }
 
+        /*
+         * Grosir: satu barcode, dua satuan.
+         *
+         * Diisi bertiga atau tidak sama sekali. Setengah terisi adalah keadaan
+         * yang paling berbahaya: kasir melihat pilihan "grosir" di layar, lalu
+         * ditolak saat menjual karena harganya belum ada — di depan pembeli.
+         */
+        $isiGrosir = ($b['isi_grosir'] ?? null) === null || $b['isi_grosir'] === ''
+            ? null : (int) floor((float) $b['isi_grosir']);
+        $hppGrosir = ($b['hpp_grosir'] ?? null) === null || $b['hpp_grosir'] === ''
+            ? null : (int) floor((float) $b['hpp_grosir']);
+        $hargaGrosir = ($b['harga_grosir'] ?? null) === null || $b['harga_grosir'] === ''
+            ? null : (int) floor((float) $b['harga_grosir']);
+
+        if ($isiGrosir !== null || $hargaGrosir !== null) {
+            if ($isiGrosir === null || $isiGrosir < 2) {
+                throw new ApiError(400, 'Isi per grosir minimal 2 — kalau isinya satu, ' .
+                    'itu bukan kemasan grosir, cukup dijual eceran saja.');
+            }
+            if ($hargaGrosir === null || $hargaGrosir <= 0) {
+                throw new ApiError(400, 'Harga jual grosir harus diisi kalau barang ini dijual per kemasan');
+            }
+            // Pagar yang sama dengan eceran (keputusan rapat): tidak boleh rugi.
+            if ($hppGrosir !== null && $hppGrosir > $hargaGrosir) {
+                throw new ApiError(400, 'Harga beli grosir (' . Rupiah::f($hppGrosir) .
+                    ') lebih tinggi daripada harga jual grosirnya (' . Rupiah::f($hargaGrosir) . ')');
+            }
+            /*
+             * Grosir yang TIDAK lebih murah per satuan bukan grosir.
+             *
+             * Ditolak, bukan sekadar diperingatkan: pembeli yang memborong satu
+             * dus justru membayar lebih mahal daripada membeli satuan, dan itu
+             * kekeliruan yang tidak pernah ketahuan sampai ada yang menghitung.
+             */
+            if ($hargaGrosir >= $harga * $isiGrosir) {
+                throw new ApiError(400, 'Harga grosir (' . Rupiah::f($hargaGrosir) . ' per ' .
+                    $isiGrosir . ') tidak lebih murah daripada membeli satuan (' .
+                    Rupiah::f($harga * $isiGrosir) . '). Periksa lagi angkanya.');
+            }
+        }
+
+        // Tanggal kedaluwarsa: satu per barang, boleh dikosongkan.
+        $expired = trim((string) ($b['expired'] ?? ''));
+        if ($expired !== '' && (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $expired) || ! strtotime($expired))) {
+            throw new ApiError(400, 'Tanggal kedaluwarsa tidak valid (format YYYY-MM-DD)');
+        }
+
         $barcode = preg_replace('/[^0-9A-Za-z]/', '', (string) ($b['barcode'] ?? ''));
         if ($barcode !== '') {
             if (strlen($barcode) < 4 || strlen($barcode) > 32) {
@@ -329,6 +415,8 @@ class MartStokController extends Controller
             'tenant_id' => $t->id, 'nama' => $nama, 'harga' => $harga, 'hpp' => $hpp,
             'barcode' => $barcode ?: null, 'kategori_id' => $katId ?: null, 'kategori' => $jatah,
             'stok_min' => max(0, (int) ($b['stok_min'] ?? 5)),
+            'isi_grosir' => $isiGrosir, 'hpp_grosir' => $hppGrosir, 'harga_grosir' => $hargaGrosir,
+            'expired' => $expired ?: null,
             'aktif' => array_key_exists('aktif', $b) ? (bool) $b['aktif'] : true,
         ];
 

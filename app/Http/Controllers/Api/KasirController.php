@@ -265,7 +265,8 @@ class KasirController extends Controller
                 'tenant_id' => $trx->tenant_id, 'tenant_nama' => $tenantNama,
                 'nama' => $b['nama'], 'kategori' => $b['kategori'],
                 'harga' => $b['harga'], 'hpp' => $b['hpp'] ?? null,
-                'qty' => $b['qty'], 'subtotal' => $b['subtotal'],
+                'qty' => $b['qty'], 'satuan' => $b['satuan'] ?? 'ecer',
+                'isi' => (int) ($b['isi'] ?? 1), 'subtotal' => $b['subtotal'],
                 'siswa_id' => $trx->siswa_id, 'kelas' => $s->kelas,
                 'golongan' => $s->golongan, 'created_at' => $trx->created_at,
             ]);
@@ -273,7 +274,9 @@ class KasirController extends Controller
             // (lihat Services\Stok). Kantin yang tidak memakai stok sama
             // sekali tidak tersentuh — barangnya berstok NULL.
             if ($b['produk_id']) {
-                Stok::jual((int) $b['produk_id'], (int) $b['qty'],
+                // Dikali isi kemasan: stok disimpan dalam satuan eceran, jadi
+                // satu dus berisi 12 memotong 12 pcs (lihat Services\Keranjang).
+                Stok::jual((int) $b['produk_id'], (int) $b['qty'] * max(1, (int) ($b['isi'] ?? 1)),
                     (string) ($trx->tx_id ?? ''), 'Kasir ' . $tenantNama);
             }
         }

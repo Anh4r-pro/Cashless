@@ -15,7 +15,8 @@ class MartJualItem extends Model
     // satu kenaikan harga beli hari ini akan diam-diam mengubah laba yang
     // dilaporkan bulan lalu.
     protected $fillable = ['jual_id', 'produk_id', 'nama', 'kategori', 'harga', 'hpp',
-        'qty', 'subtotal'];
+        'qty', 'satuan', 'isi', 'subtotal'];
 
-    protected $casts = ['harga' => 'int', 'hpp' => 'int', 'qty' => 'int', 'subtotal' => 'int'];
+    protected $casts = ['harga' => 'int', 'hpp' => 'int', 'qty' => 'int', 'isi' => 'int',
+        'subtotal' => 'int'];
 }

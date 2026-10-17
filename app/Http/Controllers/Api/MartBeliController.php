@@ -369,7 +369,32 @@ class MartBeliController extends Controller
             if ($harga < 0) {
                 throw new ApiError(400, "Harga beli \"{$p->nama}\" tidak boleh negatif");
             }
-            $baris[] = ['produk' => $p, 'qty' => $qty, 'harga' => $harga];
+            /*
+             * Satuan barang yang DATANG: eceran (pcs) atau grosir (dus/karton).
+             *
+             * Harga yang diketik petugas adalah harga PER SATUAN YANG DATANG —
+             * satu dus, bukan satu pcs. Isinya diambil dari master barang, dan
+             * di sanalah pagarnya: barang yang belum disiapkan grosir tidak
+             * bisa diterima per dus, karena isinya tidak diketahui dan stoknya
+             * akan salah hitung tanpa ada yang menyadarinya.
+             */
+            $satuan = (($it['satuan'] ?? 'ecer') === 'grosir') ? 'grosir' : 'ecer';
+            $isi = 1;
+            if ($satuan === 'grosir') {
+                $isi = (int) ($p->isi_grosir ?? 0);
+                if ($isi < 2) {
+                    throw new ApiError(409, "\"{$p->nama}\" belum punya isi per grosir — " .
+                        'isi dulu di Barang & Stok, atau catat notanya dalam satuan eceran.');
+                }
+            }
+
+            $exp = trim((string) ($it['expired'] ?? ''));
+            if ($exp !== '' && (! preg_match('/^\d{4}-\d{2}-\d{2}$/', $exp) || ! strtotime($exp))) {
+                throw new ApiError(400, "Tanggal kedaluwarsa \"{$p->nama}\" tidak valid (YYYY-MM-DD)");
+            }
+
+            $baris[] = ['produk' => $p, 'qty' => $qty, 'harga' => $harga,
+                'satuan' => $satuan, 'isi' => $isi, 'expired' => $exp ?: null];
             $subtotal += $harga * $qty;
         }
 
@@ -407,19 +432,45 @@ class MartBeliController extends Controller
                 $p = $b['produk'];
                 MartBeliItem::create([
                     'beli_id' => $beli->id, 'produk_id' => $p->id, 'nama' => $p->nama,
-                    'qty' => $b['qty'], 'harga' => $b['harga'],
+                    'qty' => $b['qty'], 'satuan' => $b['satuan'], 'isi' => $b['isi'],
+                    'harga' => $b['harga'],
                     'subtotal' => $b['harga'] * $b['qty'],
                     'hpp_lama' => $p->hpp === null ? null : (int) $p->hpp,
+                    'expired' => $b['expired'],
+                    // Nilai SEBELUM nota ini, supaya pembatalan bisa
+                    // memulihkannya — pola yang sama dengan hpp_lama.
+                    'expired_lama' => $p->expired,
                 ]);
                 // Stok NULL berarti barang itu tidak dilacak. Nota pembelian
                 // adalah saat yang tepat untuk mulai melacaknya.
                 if ($p->stok === null) {
                     $p->update(['stok' => 0]);
                 }
-                Stok::masuk($p->id, $b['qty'], 'nota ' . ($beli->no_nota ?: '#' . $beli->id) .
-                    ' · ' . $supplier->nama, $op);
+                // Stok selalu dalam satuan eceran: 3 dus berisi 12 menambah 36 pcs.
+                Stok::masuk($p->id, $b['qty'] * $b['isi'],
+                    'nota ' . ($beli->no_nota ?: '#' . $beli->id) . ' · ' . $supplier->nama .
+                    ($b['satuan'] === 'grosir' ? " ({$b['qty']} grosir × {$b['isi']})" : ''), $op);
+                if ($b['expired']) {
+                    $p->update(['expired' => $b['expired']]);
+                }
                 if ($b['harga'] > 0) {
-                    $p->update(['hpp' => $b['harga']]);
+                    /*
+                     * Harga modal diperbarui dari harga beli di nota ini.
+                     *
+                     * Nota grosir memperbarui DUA kolom sekaligus: modal
+                     * grosirnya apa adanya, dan modal ecerannya dibagi isi.
+                     * Membiarkan modal eceran tetap pada angka lama akan
+                     * membuat laba penjualan satuan dihitung dengan harga beli
+                     * yang sudah tidak berlaku.
+                     */
+                    if ($b['satuan'] === 'grosir') {
+                        $p->update([
+                            'hpp_grosir' => $b['harga'],
+                            'hpp' => (int) round($b['harga'] / max(1, $b['isi'])),
+                        ]);
+                    } else {
+                        $p->update(['hpp' => $b['harga']]);
+                    }
                 }
             }
 
@@ -477,12 +528,20 @@ class MartBeliController extends Controller
                 if (! $it->produk_id) {
                     continue;
                 }
-                Stok::koreksi((int) $it->produk_id, -(int) $it->qty,
+                // Ditarik sebanyak yang DULU masuk: 3 dus berisi 12 menambah
+                // 36 pcs, jadi pembatalannya juga 36 — bukan 3.
+                Stok::koreksi((int) $it->produk_id, -(int) $it->qty * max(1, (int) $it->isi),
                     'batal nota #' . $b->id . ': ' . $alasan, $op);
                 // Harga modal dikembalikan ke angka SEBELUM nota ini, bukan
                 // dihitung mundur — angka lamanya memang sudah disimpan.
                 if ($it->hpp_lama !== null) {
                     Produk::where('id', $it->produk_id)->update(['hpp' => $it->hpp_lama]);
+                }
+                // Begitu juga tanggal kedaluwarsanya: nota yang dibatalkan
+                // tidak boleh meninggalkan tanggal dari barang yang ternyata
+                // tidak pernah jadi datang.
+                if ($it->expired !== null) {
+                    Produk::where('id', $it->produk_id)->update(['expired' => $it->expired_lama]);
                 }
             }
             $b->update(['status' => 'batal',

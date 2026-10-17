@@ -20,7 +20,7 @@ class MartMember extends Model
 
     protected $table = 'mart_member';
 
-    protected $fillable = ['tenant_id', 'kode', 'nama', 'hp', 'keterangan',
+    protected $fillable = ['tenant_id', 'kode', 'nama', 'kategori_id', 'hp', 'keterangan',
         'batas_hutang', 'aktif', 'created_at'];
 
     protected $casts = ['batas_hutang' => 'int', 'aktif' => 'bool'];

@@ -202,7 +202,9 @@ class MartKoreksiController extends Controller
                     // Stok ikut bergeser. Qty NAIK berarti barang keluar lagi,
                     // jadi stoknya berkurang — tandanya kebalikan dari qty.
                     if ($it->produk_id) {
-                        Stok::koreksi((int) $it->produk_id, -$bedaQty,
+                        // Dikali isi kemasan: satu baris grosir berisi 12 yang
+                        // dikoreksi naik satu dus mengembalikan 12 pcs, bukan 1.
+                        Stok::koreksi((int) $it->produk_id, -$bedaQty * max(1, (int) $it->isi),
                             'koreksi transaksi ' . $j->id . ': ' . $alasan, $op);
                     }
                 }
@@ -260,7 +262,8 @@ class MartKoreksiController extends Controller
         DB::transaction(function () use ($j, $alasan, $sebelum, $op, $t) {
             foreach (MartJualItem::where('jual_id', $j->id)->get() as $it) {
                 if ($it->produk_id) {
-                    Stok::batal((int) $it->produk_id, (int) $it->qty,
+                    // Sama seperti saat menjualnya: stok dalam satuan eceran.
+                    Stok::batal((int) $it->produk_id, (int) $it->qty * max(1, (int) $it->isi),
                         'batal transaksi ' . $j->id, $op);
                 }
             }
@@ -331,6 +334,7 @@ class MartKoreksiController extends Controller
                     'tahan_id' => $h->id, 'produk_id' => $b['produk_id'] ?? null,
                     'nama' => $b['nama'], 'kategori' => $b['kategori'] ?? 'makanan',
                     'harga' => (int) $b['harga'], 'qty' => (int) ($b['qty'] ?? 1),
+                    'satuan' => $b['satuan'] ?? 'ecer', 'isi' => (int) ($b['isi'] ?? 1),
                     'subtotal' => (int) $b['subtotal'],
                 ]);
             }
@@ -367,7 +371,7 @@ class MartKoreksiController extends Controller
                 // Barang input manual: tidak ada katalog untuk dicek ulang —
                 // ia bukan "hilang", kembalikan apa adanya seperti saat ditahan.
                 $siap[] = ['manual' => true, 'nama' => $i->nama, 'harga' => (int) $i->harga,
-                    'kategori' => $i->kategori, 'qty' => (int) $i->qty];
+                    'kategori' => $i->kategori, 'qty' => (int) $i->qty, 'satuan' => 'ecer', 'isi' => 1];
 
                 continue;
             }
@@ -378,8 +382,16 @@ class MartKoreksiController extends Controller
 
                 continue;
             }
-            $siap[] = ['produk_id' => $p->id, 'nama' => $p->nama, 'harga' => (int) $p->harga,
-                'kategori' => $p->kategori, 'qty' => (int) $i->qty];
+            // Satuannya ikut kembali. Harganya dibaca ulang dari katalog
+            // (harga bisa berubah selagi ditahan), tetapi dari KOLOM yang
+            // sesuai satuannya — grosir tidak boleh kembali sebagai eceran.
+            $grosir = $i->satuan === 'grosir' && (int) ($p->isi_grosir ?? 0) >= 1
+                && $p->harga_grosir !== null;
+            $siap[] = ['produk_id' => $p->id, 'nama' => $p->nama,
+                'harga' => $grosir ? (int) $p->harga_grosir : (int) $p->harga,
+                'kategori' => $p->kategori, 'qty' => (int) $i->qty,
+                'satuan' => $grosir ? 'grosir' : 'ecer',
+                'isi' => $grosir ? (int) $p->isi_grosir : 1];
         }
 
         $diskon = (int) $h->diskon;
