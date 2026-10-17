@@ -31,7 +31,11 @@ class MartOpnameController extends Controller
 {
     private string $operator = 'Kasir Mart';
 
-    private const ALASAN = ['sesuai', 'rusak', 'hilang', 'kedaluwarsa', 'salah catat', 'lainnya'];
+    // "expired" (dulu "kedaluwarsa") — diseragamkan dengan istilah Expired yang
+    // sudah dipakai di layar Barang & Stok (permintaan tim kasir, 17 Okt 2026).
+    // Murni label teks bebas (kolom string biasa, bukan ENUM basis data), jadi
+    // tidak perlu migrasi — dan belum ada baris opname yang memakai nilai lama.
+    private const ALASAN = ['sesuai', 'rusak', 'hilang', 'expired', 'salah catat', 'lainnya'];
 
     private function martKu(Request $r): Tenant
     {
