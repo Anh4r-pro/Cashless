@@ -406,23 +406,53 @@ class MartController extends Controller
      * dan menggabungkan dua tabel di tingkat SQL menukar keterbacaan dengan
      * kecepatan yang tidak akan pernah terasa di ukuran segini.
      */
+    /**
+     * Nomor struk yang diketik kasir dicari sebagai ID.
+     *
+     * Yang dipegang pembeli saat protes adalah kertas bertuliskan "MRT-000123",
+     * bukan id basis data — dan nomor itu tidak pernah disimpan, ia disusun saat
+     * ditampilkan (lihat noStruk). Dicari apa adanya sebagai teks, ia tidak akan
+     * pernah ketemu.
+     *
+     * Tiga bentuk yang sama-sama wajar diketik diterima: "MRT-000123", "000123",
+     * dan "123". Awalannya menentukan buku mana yang dicari; tanpa awalan,
+     * dua-duanya — kasir tidak harus hafal struk mana milik buku yang mana.
+     */
+    private static function idDariStruk(string $cari): array
+    {
+        if (! preg_match('/^\s*(mrt|krt)?[\s-]*0*(\d{1,12})\s*$/i', $cari, $m)) {
+            return ['jual' => null, 'kartu' => null];
+        }
+        $id = (int) $m[2];
+        $awalan = strtolower($m[1] ?? '');
+
+        return [
+            'jual' => $awalan === 'krt' ? null : $id,
+            'kartu' => $awalan === 'mrt' ? null : $id,
+        ];
+    }
+
     public function riwayat(Request $r)
     {
         $t = $this->martKu($r);
         $hal = max(1, (int) $r->query('hal', 1));
         $per = min(100, max(10, (int) $r->query('per', 25)));
-        $metode = in_array($r->query('metode'), ['tunai', 'transfer', 'hutang', 'kartu'], true)
+        $metode = in_array($r->query('metode'), ['tunai', 'transfer', 'hutang', 'kartu', 'pelunasan'], true)
             ? $r->query('metode') : null;
         $cari = mb_substr(trim((string) $r->query('cari', '')), 0, 60);
         $dari = $r->query('dari');
         $sampai = $r->query('sampai');
         $like = '%' . $cari . '%';
+        $struk = self::idDariStruk($cari);
 
         $baris = [];
         $ringkas = ['tunai' => 0, 'transfer' => 0, 'hutang' => 0, 'kartu' => 0,
-            'diskon' => 0, 'n' => 0];
+            'pelunasan' => 0, 'diskon' => 0, 'hpp' => 0, 'n' => 0];
+        // Dihitung terpisah dari $ringkas['n'] — lihat alasannya di bawah,
+        // di tempat n_halaman disusun.
+        $nSemua = 0;
 
-        if ($metode !== 'kartu') {
+        if ($metode !== 'kartu' && $metode !== 'pelunasan') {
             // Yang dibatalkan TETAP tampil di riwayat — justru di sinilah ia
             // harus terlihat — tetapi tidak pernah ikut dijumlahkan.
             $q = MartJual::where('tenant_id', $t->id)
@@ -433,6 +463,7 @@ class MartController extends Controller
                     ->where('bank', 'like', $like)
                     ->orWhere('pengirim', 'like', $like)
                     ->orWhere('operator', 'like', $like)
+                    ->when($struk['jual'], fn ($y) => $y->orWhere('mart_jual.id', $struk['jual']))
                     ->orWhereExists(fn ($s) => $s->from('mart_jual_item')
                         ->whereColumn('mart_jual_item.jual_id', 'mart_jual.id')
                         ->where('mart_jual_item.nama', 'like', $like))));
@@ -447,6 +478,17 @@ class MartController extends Controller
             $ringkas['hutang'] = (int) $agg->hutang;
             $ringkas['diskon'] = (int) $agg->diskon;
             $ringkas['n'] += (int) $agg->n;
+            $nSemua += (clone $q)->count();
+
+            // Modal barang yang benar-benar terjual pada rentang & saringan yang
+            // SAMA dengan daftarnya. Memakai potret `i.hpp` lebih dulu: harga
+            // modal di master berubah tiap nota masuk, dan laba hari lalu tidak
+            // boleh ikut bergerak karenanya.
+            $ringkas['hpp'] += (int) DB::table('mart_jual_item as i')
+                ->joinSub((clone $q)->where('status', 'sah')->select('mart_jual.id'),
+                    'j', 'j.id', '=', 'i.jual_id')
+                ->leftJoin('produk as p', 'p.id', '=', 'i.produk_id')
+                ->selectRaw('COALESCE(SUM(i.qty * COALESCE(i.hpp, p.hpp, 0)),0) n')->value('n');
 
             foreach ((clone $q)->orderByDesc('id')->limit($hal * $per)->get() as $j) {
                 $baris[] = [
@@ -468,11 +510,18 @@ class MartController extends Controller
                     ->where('siswa_nama', 'like', $like)
                     ->orWhere('kelas', 'like', $like)
                     ->orWhere('keterangan', 'like', $like)
-                    ->orWhere('operator', 'like', $like)));
+                    ->orWhere('operator', 'like', $like)
+                    ->when($struk['kartu'], fn ($y) => $y->orWhere('transaksi.id', $struk['kartu']))));
 
             $agg = (clone $q)->selectRaw('COALESCE(SUM(-jumlah),0) total, COUNT(*) n')->first();
             $ringkas['kartu'] = (int) $agg->total;
             $ringkas['n'] += (int) $agg->n;
+            $nSemua += (int) $agg->n;
+
+            $ringkas['hpp'] += (int) DB::table('transaksi_item as i')
+                ->joinSub((clone $q)->select('transaksi.id'), 'x', 'x.id', '=', 'i.transaksi_id')
+                ->leftJoin('produk as p', 'p.id', '=', 'i.produk_id')
+                ->selectRaw('COALESCE(SUM(i.qty * COALESCE(i.hpp, p.hpp, 0)),0) n')->value('n');
 
             foreach ((clone $q)->orderByDesc('id')->limit($hal * $per)->get() as $x) {
                 $baris[] = [
@@ -485,16 +534,77 @@ class MartController extends Controller
             }
         }
 
+        /*
+         * Buku ketiga: CICILAN PIUTANG yang masuk hari itu.
+         *
+         * Sebelumnya uang ini tidak pernah muncul di Riwayat sama sekali —
+         * padahal ia uang sungguhan yang masuk ke laci dan ikut dihitung saat
+         * tutup kas. Kasir yang mencocokkan laci dengan layar Riwayat selalu
+         * menemukan lebih, tanpa penjelasan di layar mana pun.
+         *
+         * Yang TIDAK boleh terjadi: ikut dijumlahkan ke omzet. Barangnya sudah
+         * keluar rak (dan sudah dihitung) pada hari penjualan hutangnya; yang
+         * datang belakangan hanya uangnya. Karena itu ia punya pos sendiri.
+         */
+        if ($metode === null || $metode === 'pelunasan') {
+            $q = MartPiutangBayar::where('mart_piutang_bayar.tenant_id', $t->id)
+                ->leftJoin('mart_member as m', 'm.id', '=', 'mart_piutang_bayar.member_id')
+                ->when($dari, fn ($w) => $w->where('mart_piutang_bayar.created_at', '>=', $dari))
+                ->when($sampai, fn ($w) => $w->where('mart_piutang_bayar.created_at', '<=', $sampai))
+                ->when($cari !== '', fn ($w) => $w->where(fn ($x) => $x
+                    ->where('m.nama', 'like', $like)
+                    ->orWhere('mart_piutang_bayar.catatan', 'like', $like)
+                    ->orWhere('mart_piutang_bayar.operator', 'like', $like)
+                    ->orWhere('mart_piutang_bayar.bank', 'like', $like)
+                    ->orWhere('mart_piutang_bayar.pengirim', 'like', $like)
+                    ->when($struk['jual'], fn ($y) => $y
+                        ->orWhere('mart_piutang_bayar.jual_id', $struk['jual']))));
+
+            $agg = (clone $q)->selectRaw('COALESCE(SUM(mart_piutang_bayar.jumlah),0) total, COUNT(*) n')->first();
+            $ringkas['pelunasan'] = (int) $agg->total;
+            $ringkas['n'] += (int) $agg->n;
+            $nSemua += (int) $agg->n;
+
+            foreach ((clone $q)->select('mart_piutang_bayar.*', 'm.nama as member_nama')
+                ->orderByDesc('mart_piutang_bayar.id')->limit($hal * $per)->get() as $b) {
+                $noAsal = self::noStruk('jual', (int) $b->jual_id);
+                $baris[] = [
+                    'jenis' => 'pelunasan', 'id' => (int) $b->id, 'jual_id' => (int) $b->jual_id,
+                    'no' => $noAsal, 'waktu' => $b->created_at, 'metode' => 'pelunasan',
+                    'total' => (int) $b->jumlah, 'diskon' => 0, 'n_item' => null,
+                    'operator' => $b->operator, 'status' => 'sah', 'n_ubah' => 0, 'terkunci' => true,
+                    'ket' => trim(($b->member_nama ?: 'member terhapus') . ' · bayar hutang ' . $noAsal
+                        . ($b->catatan ? ' — ' . $b->catatan : '')),
+                ];
+            }
+        }
+
         usort($baris, fn ($a, $b) => strcmp((string) $b['waktu'], (string) $a['waktu'])
             ?: ($b['id'] <=> $a['id']));
+
+        $omzet = $ringkas['tunai'] + $ringkas['transfer'] + $ringkas['hutang'] + $ringkas['kartu'];
 
         return response()->json([
             'baris' => array_slice($baris, ($hal - 1) * $per, $per),
             // Omzet menghitung penjualan hutang juga: barangnya memang sudah
-            // keluar dari rak. Yang belum datang hanya uangnya.
-            'ringkas' => array_merge($ringkas, ['omzet' => $ringkas['tunai']
-                + $ringkas['transfer'] + $ringkas['hutang'] + $ringkas['kartu']]),
-            'hal' => $hal, 'per' => $per, 'n_halaman' => (int) max(1, ceil($ringkas['n'] / $per)),
+            // keluar dari rak. Yang belum datang hanya uangnya. Cicilan piutang
+            // sengaja TIDAK ikut — ia bukan barang keluar yang baru.
+            'ringkas' => array_merge($ringkas, [
+                'omzet' => $omzet,
+                // Laba kotor: omzet (sudah bersih diskon) dikurangi modal barang
+                // yang terjual. Belum dikurangi biaya operasional.
+                'laba' => $omzet - $ringkas['hpp'],
+            ]),
+            'hal' => $hal, 'per' => $per,
+            /*
+             * Jumlah halaman dihitung dari SELURUH baris yang tampil, bukan dari
+             * $ringkas['n'] yang hanya menghitung baris sah.
+             *
+             * Dulu keduanya dipakai bergantian, dan akibatnya nyata: begitu ada
+             * satu transaksi batal, n_halaman kurang satu baris dari isi
+             * sebenarnya, dan halaman terakhir tidak bisa dibuka sama sekali.
+             */
+            'n_halaman' => (int) max(1, ceil($nSemua / $per)),
         ]);
     }
 

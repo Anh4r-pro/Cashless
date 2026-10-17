@@ -70,7 +70,10 @@ class MartLaporanController extends Controller
             'stok' => $this->stokPeringatan($t),
             'terlaris' => $this->terlaris($t, 'bulan', 8, 'desc'),
             'tidak_laku' => $this->tidakLaku($t, 8),
-            'transaksi' => $this->riwayatGabungan($t, 15),
+            // 'transaksi' dilepas bersama panel "Riwayat Transaksi Terakhir"
+            // (keputusan rapat: riwayat tempatnya di menu Riwayat). Kueri
+            // gabungan dua buku itu tidak murah, jadi jangan dijalankan untuk
+            // data yang tidak digambar siapa pun.
             'kas_terakhir' => MartKas::where('tenant_id', $t->id)->orderByDesc('tanggal')->limit(7)->get(),
         ]);
     }

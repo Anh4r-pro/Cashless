@@ -9,6 +9,7 @@ use App\Models\Produk;
 use App\Models\Tenant;
 use App\Services\ImporBarangMart;
 use App\Services\ImporTopup;
+use App\Services\Rupiah;
 use App\Services\Stok;
 use App\Support\WaktuIso;
 use Illuminate\Http\Request;
@@ -190,9 +191,23 @@ class MartStokController extends Controller
         if ($hpp !== null && $hpp < 0) {
             throw new ApiError(400, 'Harga beli tidak boleh negatif');
         }
-        // Rugi per penjualan hampir selalu salah ketik, tetapi kadang memang
-        // disengaja (barang promo). Ditolak keras akan menghalangi yang kedua,
-        // jadi cukup dibiarkan — laporan laba yang akan menunjukkannya.
+        /*
+         * Harga beli DI ATAS harga jual ditolak (keputusan rapat tim kasir).
+         *
+         * Sebelumnya ini hanya diperingatkan di layar dengan alasan barang
+         * promo sesekali memang dijual rugi. Yang terjadi di lapangan justru
+         * sebaliknya: peringatan terlewat, barang tersimpan rugi, dan baru
+         * ketahuan dari laporan laba berminggu-minggu kemudian.
+         *
+         * Batasnya SENGAJA "lebih tinggi", bukan "lebih tinggi atau sama":
+         * menjual pas di harga modal (laba nol) masih sah dan tetap boleh
+         * disimpan — yang ditolak hanya yang benar-benar rugi per penjualan.
+         */
+        if ($hpp !== null && $hpp > $harga) {
+            throw new ApiError(400, 'Harga beli (' . Rupiah::f($hpp) . ') lebih tinggi daripada harga jual (' .
+                Rupiah::f($harga) . ') — barang ini akan rugi tiap kali terjual. ' .
+                'Betulkan salah satunya dulu.');
+        }
 
         $barcode = preg_replace('/[^0-9A-Za-z]/', '', (string) ($b['barcode'] ?? ''));
         if ($barcode !== '') {

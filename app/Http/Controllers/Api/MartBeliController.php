@@ -108,13 +108,13 @@ class MartBeliController extends Controller
         $t = $this->martKu($r);
         $nama = mb_substr(trim(preg_replace('/\s+/u', ' ', (string) $r->input('nama', ''))), 0, 120);
         if (mb_strlen($nama) < 3) {
-            throw new ApiError(400, 'Nama pemasok minimal 3 huruf');
+            throw new ApiError(400, 'Nama sales minimal 3 huruf');
         }
         $kembar = MartSupplier::where('tenant_id', $t->id)
             ->whereRaw('LOWER(nama) = ?', [mb_strtolower($nama)])
             ->when($id, fn ($q) => $q->where('id', '!=', $id))->first();
         if ($kembar) {
-            throw new ApiError(409, "Pemasok bernama \"{$nama}\" sudah ada");
+            throw new ApiError(409, "Sales bernama \"{$nama}\" sudah ada");
         }
 
         $isi = [
@@ -128,7 +128,7 @@ class MartBeliController extends Controller
         if ($id) {
             $s = MartSupplier::where('id', $id)->where('tenant_id', $t->id)->first();
             if (! $s) {
-                throw new ApiError(404, 'Pemasok tidak ditemukan');
+                throw new ApiError(404, 'Sales tidak ditemukan');
             }
             $s->update($isi);
         } else {
@@ -148,7 +148,7 @@ class MartBeliController extends Controller
         $t = $this->martKu($r);
         $s = MartSupplier::where('id', $id)->where('tenant_id', $t->id)->first();
         if (! $s) {
-            throw new ApiError(404, 'Pemasok tidak ditemukan');
+            throw new ApiError(404, 'Sales tidak ditemukan');
         }
         $hutang = $this->hutangPerSupplier($t)[$s->id] ?? 0;
         if ($hutang > 0) {
@@ -159,7 +159,7 @@ class MartBeliController extends Controller
             $s->update(['aktif' => false]);
 
             return response()->json(['ok' => true, 'dinonaktifkan' => true,
-                'pesan' => 'Pemasok punya riwayat nota, jadi dinonaktifkan — riwayatnya tetap utuh.']);
+                'pesan' => 'Sales punya riwayat nota, jadi dinonaktifkan — riwayatnya tetap utuh.']);
         }
         $s->delete();
 
@@ -248,7 +248,7 @@ class MartBeliController extends Controller
         $supplier = MartSupplier::where('id', (int) $r->input('supplier_id'))
             ->where('tenant_id', $t->id)->first();
         if (! $supplier) {
-            throw new ApiError(400, 'Pilih dulu pemasoknya');
+            throw new ApiError(400, 'Pilih dulu sales-nya');
         }
         $metode = in_array($r->input('metode'), ['tunai', 'transfer', 'tempo'], true)
             ? $r->input('metode') : 'tunai';
