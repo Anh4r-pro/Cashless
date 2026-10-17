@@ -9,6 +9,7 @@ use App\Models\Produk;
 use App\Models\Tenant;
 use App\Services\ImporBarangMart;
 use App\Services\ImporTopup;
+use App\Services\Ekspor;
 use App\Services\Rupiah;
 use App\Services\Stok;
 use App\Support\WaktuIso;
@@ -133,6 +134,94 @@ class MartStokController extends Controller
             'produk' => $q->orderBy('nama')->get()->map(fn ($p) => $this->baris($p, $kat)),
             'kategori' => $this->daftarKategori($t),
             'ringkas' => $this->ringkasStok($t),
+        ]);
+    }
+
+    /**
+     * Laporan persediaan: nilai barang di rak menurut HARGA MODAL.
+     *
+     * Dinilai dengan modal, bukan harga jual — yang ditanyakan bendahara adalah
+     * "uang sekolah yang sedang berwujud barang", dan menilainya dengan harga
+     * jual akan memasukkan laba yang belum terjadi ke dalam neraca.
+     *
+     * Barang yang stoknya TIDAK dilacak dilewati: ia tidak punya nilai
+     * persediaan, dan membariskannya sebagai nol hanya memanjangkan daftar.
+     * Barang nonaktif tetap dihitung — ia berhenti dijual, tetapi barangnya
+     * masih ada di rak dan uangnya masih tertanam di sana.
+     */
+    public function persediaan(Request $r)
+    {
+        $t = $this->martKu($r);
+        $kat = MartKategori::where('tenant_id', $t->id)->pluck('nama', 'id');
+
+        $produk = Produk::where('tenant_id', $t->id)->whereNotNull('stok')
+            ->orderBy('nama')->get();
+
+        $baris = $produk->map(function (Produk $p) use ($kat) {
+            $hpp = (int) ($p->hpp ?? 0);
+            $stok = (int) $p->stok;
+
+            return [
+                'id' => $p->id, 'nama' => $p->nama, 'barcode' => $p->barcode,
+                'kategori_nama' => $kat[$p->kategori_id] ?? '',
+                'stok' => $stok, 'hpp' => $hpp, 'nilai' => $stok * $hpp,
+                'aktif' => (int) $p->aktif,
+                'status' => Stok::status($p->stok, $p->stok_min),
+            ];
+        })->sortByDesc('nilai')->values()->all();
+
+        $tanpaHpp = array_values(array_filter($baris, fn ($b) => $b['hpp'] <= 0 && $b['stok'] > 0));
+        $total = [
+            'n_barang' => count($baris),
+            'stok' => array_sum(array_column($baris, 'stok')),
+            'nilai' => array_sum(array_column($baris, 'nilai')),
+            // Barang bertstok yang modalnya belum diisi menyumbang NOL ke nilai
+            // persediaan. Tanpa angka ini, laporannya tampak lengkap padahal
+            // ada rak yang nilainya tidak pernah masuk hitungan.
+            'n_tanpa_hpp' => count($tanpaHpp),
+            'stok_tanpa_hpp' => array_sum(array_column($tanpaHpp, 'stok')),
+        ];
+
+        if ($r->query('format')) {
+            return $this->persediaanUnduhan($t, $baris, $total, Ekspor::formatSah($r->query('format')));
+        }
+
+        return response()->json([
+            'tenant' => ['id' => $t->id, 'nama' => $t->nama],
+            'baris' => $baris, 'total' => $total,
+        ]);
+    }
+
+    /** Persediaan sebagai berkas unduhan (.xls / .doc / .csv). */
+    private function persediaanUnduhan(Tenant $t, array $baris, array $total, string $format)
+    {
+        $kepala = ['Barang', 'SKU/Barcode', 'Kategori', 'Stok', 'Harga modal (Rp)',
+            'Nilai persediaan (Rp)', 'Status'];
+        $isi = array_map(fn ($b) => [
+            $b['nama'] . ($b['aktif'] ? '' : ' (nonaktif)'), $b['barcode'] ?: '', $b['kategori_nama'],
+            $b['stok'], $b['hpp'], $b['nilai'], $b['status'],
+        ], $baris);
+        $isi[] = ['TOTAL', '', '', $total['stok'], '', $total['nilai'], $total['n_barang'] . ' barang'];
+
+        $judul = 'Laporan Persediaan (nilai modal) — ' . $t->nama;
+        $catatan = ['Dinilai dengan HARGA MODAL (HPP), bukan harga jual.',
+            'Dicetak: ' . WaktuIso::tanggalLokal(WaktuIso::sekarang())];
+        if ($total['n_tanpa_hpp'] > 0) {
+            $catatan[] = "Perhatian: {$total['n_tanpa_hpp']} barang (total {$total['stok_tanpa_hpp']} "
+                . 'satuan) belum punya harga modal, sehingga menyumbang nol ke nilai di atas — '
+                . 'nilai persediaan sebenarnya LEBIH BESAR daripada angka ini.';
+        }
+        $nama = 'persediaan-mart-' . WaktuIso::tanggalLokal(WaktuIso::sekarang()) . '.' . $format;
+        [$tipe] = Ekspor::TIPE[$format];
+
+        $badan = $format === 'csv'
+            ? Ekspor::csvUmum($kepala, array_merge($isi, [[]], [[$judul]],
+                array_map(fn ($c) => [$c], $catatan)))
+            : Ekspor::tabelUmum($judul, $kepala, $isi, $catatan, [3, 4, 5]);
+
+        return response($badan, 200, [
+            'Content-Type' => $tipe,
+            'Content-Disposition' => "attachment; filename=\"{$nama}\"",
         ]);
     }
 

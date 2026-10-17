@@ -88,6 +88,7 @@ Route::middleware('peran:tenant')->group(function () {
     // kewajiban ke pemasok lahir (lihat MartBeliController).
     Route::get('mart/supplier', [MartBeliController::class, 'supplier']);
     Route::post('mart/supplier', [MartBeliController::class, 'supplierSimpan']);
+    Route::get('mart/supplier/{id}/barang', [MartBeliController::class, 'barangSales']);
     Route::put('mart/supplier/{id}', [MartBeliController::class, 'supplierSimpan']);
     Route::delete('mart/supplier/{id}', [MartBeliController::class, 'supplierHapus']);
     Route::get('mart/beli', [MartBeliController::class, 'index']);
@@ -112,6 +113,9 @@ Route::middleware('peran:tenant')->group(function () {
     Route::post('mart/barang', [MartStokController::class, 'simpan']);
     // Didaftarkan sebelum rute ber-{id} supaya "impor" tidak pernah terbaca
     // sebagai nomor barang.
+    // Didaftarkan SEBELUM mart/barang/{id} supaya "persediaan" tidak terbaca
+    // sebagai id — pola yang sama dengan mart/barang/impor/* di bawahnya.
+    Route::get('mart/persediaan', [MartStokController::class, 'persediaan']);
     Route::get('mart/barang/impor/template', [MartStokController::class, 'imporTemplate']);
     Route::post('mart/barang/impor/pratinjau', [MartStokController::class, 'imporPratinjau']);
     Route::post('mart/barang/impor/terapkan', [MartStokController::class, 'imporTerapkan']);
@@ -134,6 +138,9 @@ Route::middleware('peran:tenant')->group(function () {
 Route::middleware('peran:tenant,superadmin')->group(function () {
     Route::get('mart/dashboard', [MartLaporanController::class, 'dashboard']);
     Route::get('mart/keuangan', [MartLaporanController::class, 'keuangan']);
+    // Laporan closing harian (SPD). Tanpa ?format= ia menjawab JSON untuk layar;
+    // dengan ?format=xls|doc|csv ia menjawab berkas unduhan.
+    Route::get('mart/spd', [MartLaporanController::class, 'spd']);
 });
 
 // --- uang masuk & keluar di luar kasir (eksklusif superadmin) --------------

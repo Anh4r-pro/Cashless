@@ -67,6 +67,72 @@ class Ekspor
 </table>';
     }
 
+    /**
+     * Format unduhan yang dikenali, beserta tipe isi & akhiran berkasnya.
+     *
+     * .xls dan .doc sama-sama TABEL HTML — lihat keterangan kelas di atas.
+     * PDF sengaja tidak ada: tidak ada pembangkit PDF di server ini, dan yang
+     * dipakai layar adalah dialog cetak peramban (yang juga bisa "Simpan
+     * sebagai PDF"). Menambahkan pustaka PDF hanya untuk itu tidak sebanding.
+     */
+    public const TIPE = [
+        'csv' => ['text/csv; charset=utf-8', 'csv'],
+        'doc' => ['application/msword', 'doc'],
+        'xls' => ['application/vnd.ms-excel', 'xls'],
+    ];
+
+    public static function formatSah(?string $f): string
+    {
+        return array_key_exists((string) $f, self::TIPE) ? (string) $f : 'xls';
+    }
+
+    /**
+     * Tabel APA PUN sebagai satu berkas unduhan.
+     *
+     * Ada karena tiga laporan Mart (closing harian, persediaan, barang per
+     * sales) butuh unduhan yang bentuknya sama. Disalin tiga kali, ketiganya
+     * pasti saling menyimpang begitu salah satunya diperbaiki — persis yang
+     * sudah pernah terjadi antara layar dan unduhan Laporan Keuangan.
+     *
+     * $kanan = indeks kolom yang dirata-kanan (kolom angka).
+     */
+    public static function tabelUmum(string $judul, array $kepala, array $baris,
+        array $catatan = [], array $kanan = []): string
+    {
+        $head = implode('', array_map(fn ($h) => '<th>' . e($h) . '</th>', $kepala));
+        $body = '';
+        foreach ($baris as $b) {
+            $sel = '';
+            foreach (array_values($b) as $i => $c) {
+                $sel .= in_array($i, $kanan, true)
+                    ? '<td style="text-align:right">' . e($c) . '</td>'
+                    : '<td>' . e($c) . '</td>';
+            }
+            $body .= "<tr>{$sel}</tr>\n";
+        }
+        $ket = implode('', array_map(fn ($c) => '<p>' . e($c) . '</p>', $catatan));
+
+        return '
+<meta charset="utf-8">
+<h3>' . e($judul) . '</h3>
+' . $ket . '
+<table border="1" cellspacing="0" cellpadding="4">
+  <thead><tr style="background:#eee">' . $head . '</tr></thead>
+  <tbody>' . $body . '</tbody>
+</table>';
+    }
+
+    /** Versi CSV dari tabel yang sama. BOM supaya Excel membacanya sebagai UTF-8. */
+    public static function csvUmum(array $kepala, array $baris): string
+    {
+        $out = [implode(',', array_map([self::class, 'kutip'], $kepala))];
+        foreach ($baris as $b) {
+            $out[] = implode(',', array_map([self::class, 'kutip'], array_values($b)));
+        }
+
+        return "\xEF\xBB\xBF" . implode("\r\n", $out);
+    }
+
     private static function kutip($v): string
     {
         $s = (string) $v;

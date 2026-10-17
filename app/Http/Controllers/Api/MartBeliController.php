@@ -10,6 +10,7 @@ use App\Models\MartKas;
 use App\Models\MartSupplier;
 use App\Models\Produk;
 use App\Models\Tenant;
+use App\Services\Ekspor;
 use App\Services\Rupiah;
 use App\Services\Stok;
 use App\Support\WaktuIso;
@@ -167,6 +168,105 @@ class MartBeliController extends Controller
     }
 
     // ---------------------------------------------------------- pembelian
+
+    /**
+     * Barang yang disuplai SATU sales, pada rentang tanggal tertentu.
+     *
+     * Alasannya disebut tim kasir di rapat: barang yang sama bisa berpindah
+     * sales dari satu periode ke periode berikutnya. Daftar "barang milik
+     * sales" yang tidak terikat periode karena itu menyesatkan — yang berguna
+     * justru "apa saja yang DATANG dari sales ini, antara tanggal ini".
+     *
+     * Dikelompokkan per barang, bukan per baris nota: yang ditanya petugas
+     * adalah "berapa banyak teh kotak dari dia bulan ini", bukan daftar
+     * belasan nota yang harus dijumlah sendiri.
+     *
+     * Nota yang DIBATALKAN tidak ikut — barangnya tidak pernah benar-benar
+     * datang.
+     */
+    public function barangSales(Request $r, int $id)
+    {
+        $t = $this->martKu($r);
+        $sup = MartSupplier::where('id', $id)->where('tenant_id', $t->id)->first();
+        if (! $sup) {
+            throw new ApiError(404, 'Sales tidak ditemukan');
+        }
+
+        $tgl = fn ($v) => preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $v) && strtotime((string) $v)
+            ? (string) $v : null;
+        $dari = $tgl($r->query('dari'));
+        $sampai = $tgl($r->query('sampai'));
+        if ($dari && $sampai && $dari > $sampai) {
+            [$dari, $sampai] = [$sampai, $dari];
+        }
+
+        $baris = DB::table('mart_beli_item as i')
+            ->join('mart_beli as b', 'b.id', '=', 'i.beli_id')
+            ->where('b.tenant_id', $t->id)->where('b.supplier_id', $sup->id)
+            ->where('b.status', 'sah')
+            ->when($dari, fn ($q) => $q->where('b.tanggal', '>=', $dari))
+            ->when($sampai, fn ($q) => $q->where('b.tanggal', '<=', $sampai))
+            ->groupBy('i.nama')
+            ->selectRaw('i.nama, SUM(i.qty) qty, SUM(i.subtotal) nilai, COUNT(DISTINCT b.id) n_nota,
+                MAX(b.tanggal) terakhir, MIN(b.tanggal) pertama,
+                SUBSTRING_INDEX(GROUP_CONCAT(i.harga ORDER BY b.tanggal DESC, b.id DESC), ",", 1) harga_terakhir')
+            ->orderByDesc('nilai')->get()
+            ->map(fn ($b) => [
+                'nama' => $b->nama, 'qty' => (int) $b->qty, 'nilai' => (int) $b->nilai,
+                'n_nota' => (int) $b->n_nota, 'pertama' => $b->pertama, 'terakhir' => $b->terakhir,
+                'harga_terakhir' => (int) $b->harga_terakhir,
+            ])->all();
+
+        $total = [
+            'n_barang' => count($baris),
+            'qty' => array_sum(array_column($baris, 'qty')),
+            'nilai' => array_sum(array_column($baris, 'nilai')),
+            'n_nota' => (int) MartBeli::where('tenant_id', $t->id)->where('supplier_id', $sup->id)
+                ->where('status', 'sah')
+                ->when($dari, fn ($q) => $q->where('tanggal', '>=', $dari))
+                ->when($sampai, fn ($q) => $q->where('tanggal', '<=', $sampai))->count(),
+        ];
+
+        if ($r->query('format')) {
+            return $this->barangSalesUnduhan($sup, $baris, $total, $dari, $sampai,
+                Ekspor::formatSah($r->query('format')));
+        }
+
+        return response()->json([
+            'sales' => ['id' => $sup->id, 'kode' => $sup->kode, 'nama' => $sup->nama],
+            'dari' => $dari, 'sampai' => $sampai,
+            'baris' => $baris, 'total' => $total,
+        ]);
+    }
+
+    /** Barang per sales sebagai berkas unduhan (.xls / .doc / .csv). */
+    private function barangSalesUnduhan(MartSupplier $sup, array $baris, array $total,
+        ?string $dari, ?string $sampai, string $format)
+    {
+        $kepala = ['Barang', 'Qty', 'Nilai (Rp)', 'Harga beli terakhir (Rp)', 'Jumlah nota',
+            'Pertama datang', 'Terakhir datang'];
+        $isi = array_map(fn ($b) => [$b['nama'], $b['qty'], $b['nilai'], $b['harga_terakhir'],
+            $b['n_nota'], $b['pertama'], $b['terakhir']], $baris);
+        $isi[] = ['TOTAL', $total['qty'], $total['nilai'], '', $total['n_nota'], '', ''];
+
+        $periode = $dari || $sampai
+            ? ($dari ?: 'awal') . ' s/d ' . ($sampai ?: 'kini') : 'seluruh periode';
+        $judul = 'Barang dari sales ' . $sup->nama . ' (' . $sup->kode . ')';
+        $catatan = ["Periode: {$periode}", 'Nota yang dibatalkan tidak ikut dihitung.',
+            'Nilai dihitung dari harga beli pada notanya, sebelum diskon nota.'];
+        $nama = 'barang-sales-' . preg_replace('/[^A-Za-z0-9]+/', '-', $sup->kode) . ".{$format}";
+        [$tipe] = Ekspor::TIPE[$format];
+
+        $badan = $format === 'csv'
+            ? Ekspor::csvUmum($kepala, array_merge($isi, [[]], [[$judul]],
+                array_map(fn ($c) => [$c], $catatan)))
+            : Ekspor::tabelUmum($judul, $kepala, $isi, $catatan, [1, 2, 3, 4]);
+
+        return response($badan, 200, [
+            'Content-Type' => $tipe,
+            'Content-Disposition' => "attachment; filename=\"{$nama}\"",
+        ]);
+    }
 
     public function index(Request $r)
     {

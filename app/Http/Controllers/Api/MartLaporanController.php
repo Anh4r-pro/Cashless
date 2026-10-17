@@ -10,6 +10,10 @@ use App\Models\Produk;
 use App\Models\Tenant;
 use App\Models\Transaksi;
 use App\Models\TransaksiItem;
+use App\Services\Ekspor;
+use App\Services\Kartu;
+use App\Services\Rupiah;
+use App\Services\SqlWaktu;
 use App\Services\Stok;
 use App\Support\WaktuIso;
 use Illuminate\Http\Request;
@@ -186,6 +190,213 @@ class MartLaporanController extends Controller
         return (int) $a + (int) $b;
     }
 
+    /** Maks rentang yang boleh diminta sekali jalan. */
+    private const SPD_MAKS_HARI = 400;
+
+    /**
+     * Laporan Closing Harian — SPD (Sales Per-Day).
+     *
+     * Satu baris per HARI: penjualan, modal barangnya, marginnya, dan catatan
+     * penutupan kas hari itu. Bentuknya mengikuti format yang dibawa tim kasir
+     * ke rapat (Tanggal · Sales Per-Day · HPP · Margin · Ket).
+     *
+     * Dua hal yang menentukan kebenarannya:
+     *
+     *   1. HARI DIHITUNG MENURUT WIB, bukan UTC. created_at disimpan sebagai
+     *      teks ISO UTC; tanpa pergeseran +7 jam, penjualan sore hari jatuh ke
+     *      tanggal berikutnya — dan laporan closing harian yang salah hari
+     *      adalah laporan yang tidak ada gunanya. Pergeserannya dipinjam dari
+     *      Services/SqlWaktu yang sudah dipakai dashboard & analitik.
+     *   2. DISKON ADA DI LEVEL NOTA, bukan di barisnya. Karena itu penjualan
+     *      diambil dari SUM(total) nota (yang sudah bersih diskon), sedangkan
+     *      HPP dijumlahkan dari barisnya. Menjumlahkan subtotal baris akan
+     *      menggelembungkan omzet harian tepat sebesar diskon.
+     */
+    public function spd(Request $r)
+    {
+        $t = $this->martKu($r);
+
+        $hariIni = Kartu::hariIni();
+        $tgl = fn ($v, $bawaan) => preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $v) && strtotime((string) $v)
+            ? (string) $v : $bawaan;
+        $dari = $tgl($r->query('dari'), $hariIni);
+        $sampai = $tgl($r->query('sampai'), $hariIni);
+        if ($dari > $sampai) {
+            [$dari, $sampai] = [$sampai, $dari];
+        }
+        // Pagar rentang: laporan ini membaca dua buku sekaligus, dan permintaan
+        // "dari 1970" akan memindai seluruh tabel tanpa ada yang membutuhkannya.
+        if ((strtotime($sampai) - strtotime($dari)) / 86400 > self::SPD_MAKS_HARI) {
+            throw new ApiError(400, 'Rentang maksimal ' . self::SPD_MAKS_HARI .
+                ' hari sekali minta. Persempit tanggalnya.');
+        }
+        $kategori = in_array($r->query('kategori'), ['semua', 'tertinggi', 'terendah'], true)
+            ? $r->query('kategori') : 'semua';
+
+        $hari = SqlWaktu::periode('harian');
+        $hariJual = SqlWaktu::periode('harian', 'j.created_at');
+        $hariItem = SqlWaktu::periode('harian', 'i.created_at');
+        $antara = fn ($ekspresi) => [$ekspresi . ' BETWEEN ? AND ?', [$dari, $sampai]];
+
+        // --- penjualan per hari, dua buku -----------------------------------
+        $jual = MartJual::sah()->where('tenant_id', $t->id)
+            ->whereRaw(...$antara($hari))
+            ->selectRaw("{$hari} AS tgl, COALESCE(SUM(total),0) nilai, COUNT(*) n")
+            ->groupBy('tgl')->get()->keyBy('tgl');
+
+        $kartu = Transaksi::where('tenant_id', $t->id)->where('tipe', 'beli')
+            ->whereRaw(...$antara($hari))
+            ->selectRaw("{$hari} AS tgl, COALESCE(SUM(-jumlah),0) nilai, COUNT(*) n")
+            ->groupBy('tgl')->get()->keyBy('tgl');
+
+        // --- modal barang terjual per hari, dua buku -------------------------
+        $hppJual = DB::table('mart_jual_item as i')->join('mart_jual as j', 'j.id', '=', 'i.jual_id')
+            ->leftJoin('produk as p', 'p.id', '=', 'i.produk_id')
+            ->where('j.tenant_id', $t->id)->where('j.status', 'sah')
+            ->whereRaw(...$antara($hariJual))
+            ->selectRaw("{$hariJual} AS tgl, COALESCE(SUM(i.qty * COALESCE(i.hpp, p.hpp, 0)),0) hpp")
+            ->groupBy('tgl')->pluck('hpp', 'tgl');
+
+        $hppKartu = DB::table('transaksi_item as i')->leftJoin('produk as p', 'p.id', '=', 'i.produk_id')
+            ->where('i.tenant_id', $t->id)
+            ->whereRaw(...$antara($hariItem))
+            ->selectRaw("{$hariItem} AS tgl, COALESCE(SUM(i.qty * COALESCE(i.hpp, p.hpp, 0)),0) hpp")
+            ->groupBy('tgl')->pluck('hpp', 'tgl');
+
+        // --- catatan penutupan kas (kolom "Ket") -----------------------------
+        $kas = MartKas::where('tenant_id', $t->id)->whereBetween('tanggal', [$dari, $sampai])
+            ->get()->keyBy('tanggal');
+
+        /*
+         * Hari yang ditampilkan: yang PUNYA KEJADIAN — ada penjualan, atau
+         * kasnya ditutup. Hari sepi tanpa catatan apa pun sengaja tidak
+         * dibariskan: pada rentang sebulan ia hanya menambah baris kosong yang
+         * harus dilewati mata, dan tidak mengubah satu angka pun.
+         */
+        $tanggal = collect($jual->keys())->merge($kartu->keys())->merge($kas->keys())
+            ->unique()->sort()->values();
+
+        $baris = [];
+        foreach ($tanggal as $d) {
+            $spd = (int) ($jual[$d]->nilai ?? 0) + (int) ($kartu[$d]->nilai ?? 0);
+            $hpp = (int) ($hppJual[$d] ?? 0) + (int) ($hppKartu[$d] ?? 0);
+            $k = $kas[$d] ?? null;
+            $baris[] = [
+                'tanggal' => $d,
+                'spd' => $spd,
+                'hpp' => $hpp,
+                'margin' => $spd - $hpp,
+                'margin_persen' => $spd > 0 ? round(($spd - $hpp) / $spd * 100, 1) : null,
+                'n_transaksi' => (int) ($jual[$d]->n ?? 0) + (int) ($kartu[$d]->n ?? 0),
+                // "Ket" diambil dari penutupan kas hari itu — ini laporan
+                // CLOSING, jadi catatan penutupannyalah yang relevan di sini.
+                'ket' => $k ? trim((string) $k->catatan) : '',
+                'kas_ditutup' => (bool) $k,
+                'selisih_kas' => $k ? (int) $k->selisih : null,
+            ];
+        }
+
+        // Urutan: bawaan tanggal TERBARU dulu (konsisten dengan daftar
+        // bertanggal lain di aplikasi ini); "tertinggi"/"terendah" mengurutkan
+        // menurut SPD supaya hari teramai & tersepi langsung kelihatan.
+        usort($baris, match ($kategori) {
+            'tertinggi' => fn ($a, $b) => $b['spd'] <=> $a['spd'],
+            'terendah' => fn ($a, $b) => $a['spd'] <=> $b['spd'],
+            default => fn ($a, $b) => strcmp($b['tanggal'], $a['tanggal']),
+        });
+
+        $total = [
+            'spd' => array_sum(array_column($baris, 'spd')),
+            'hpp' => array_sum(array_column($baris, 'hpp')),
+            'n_hari' => count($baris),
+            'n_transaksi' => array_sum(array_column($baris, 'n_transaksi')),
+        ];
+        $total['margin'] = $total['spd'] - $total['hpp'];
+        $total['margin_persen'] = $total['spd'] > 0
+            ? round($total['margin'] / $total['spd'] * 100, 1) : null;
+        $total['rata_spd'] = $total['n_hari'] > 0 ? (int) round($total['spd'] / $total['n_hari']) : 0;
+
+        if ($r->query('format')) {
+            return $this->spdUnduhan($t, $baris, $total, $dari, $sampai, $kategori,
+                Ekspor::formatSah($r->query('format')));
+        }
+
+        return response()->json([
+            'tenant' => ['id' => $t->id, 'nama' => $t->nama],
+            'dari' => $dari, 'sampai' => $sampai, 'kategori' => $kategori,
+            'baris' => $baris, 'total' => $total,
+        ]);
+    }
+
+    /** SPD sebagai berkas unduhan (.xls / .doc / .csv) — lihat Services\Ekspor. */
+    private function spdUnduhan(Tenant $t, array $baris, array $total,
+        string $dari, string $sampai, string $kategori, string $format)
+    {
+        $kepala = ['Tanggal', 'Sales Per-Day (Rp)', 'HPP (Rp)', 'Margin (Rp)', 'Margin %',
+            'Transaksi', 'Ket'];
+        $isi = array_map(fn ($b) => [
+            $b['tanggal'], $b['spd'], $b['hpp'], $b['margin'],
+            $b['margin_persen'] === null ? '' : $b['margin_persen'],
+            $b['n_transaksi'],
+            trim(($b['kas_ditutup'] ? '' : 'kas belum ditutup') . ' ' . $b['ket']),
+        ], $baris);
+        $isi[] = ['TOTAL', $total['spd'], $total['hpp'], $total['margin'],
+            $total['margin_persen'] ?? '', $total['n_transaksi'], $total['n_hari'] . ' hari'];
+
+        $judul = 'Laporan Closing Harian (SPD) — ' . $t->nama;
+        $catatan = [
+            "Periode: {$dari} s/d {$sampai} · urut: {$kategori}",
+            'Margin di sini adalah LABA KOTOR (penjualan − modal barang terjual); '
+                . 'biaya operasional belum dikurangkan.',
+            'Rata-rata SPD: ' . Rupiah::f($total['rata_spd']) . ' per hari berjualan.',
+        ];
+        $nama = "closing-harian-{$dari}-sd-{$sampai}.{$format}";
+        [$tipe] = Ekspor::TIPE[$format];
+
+        // Pada CSV, keterangannya ditaruh SESUDAH datanya: csvUmum menulis baris
+        // kepala lebih dulu, jadi judul yang diselipkan di depan justru mendarat
+        // di bawah kepala tabel. Lagi pula periodenya sudah ada di nama berkas.
+        $badan = $format === 'csv'
+            ? Ekspor::csvUmum($kepala, array_merge($isi, [[]], [[$judul]],
+                array_map(fn ($c) => [$c], $catatan)))
+            : Ekspor::tabelUmum($judul, $kepala, $isi, $catatan, [1, 2, 3, 4, 5]);
+
+        return response($badan, 200, [
+            'Content-Type' => $tipe,
+            'Content-Disposition' => "attachment; filename=\"{$nama}\"",
+        ]);
+    }
+
+    /**
+     * Nilai barang terjual yang HARGA MODALNYA TIDAK DIKETAHUI.
+     *
+     * Dua sumbernya: barang yang diketik bebas di kasir (tidak terdaftar, jadi
+     * tidak punya HPP sama sekali — lihat Services/Keranjang), dan barang
+     * terdaftar yang HPP-nya memang belum pernah diisi.
+     *
+     * Keduanya masuk omzet penuh dengan modal nol, sehingga laba kotor ikut
+     * menggelembung tanpa ada satu pun angka di layar yang mengakuinya. Yang
+     * dikembalikan di sini bukan koreksi — menebak modalnya justru lebih buruk —
+     * melainkan bahan untuk mengatakannya terus terang kepada pembacanya.
+     */
+    private function tanpaModal(Tenant $t, ?string $sejak): array
+    {
+        $a = DB::table('mart_jual_item as i')->join('mart_jual as j', 'j.id', '=', 'i.jual_id')
+            ->leftJoin('produk as p', 'p.id', '=', 'i.produk_id')
+            ->where('j.tenant_id', $t->id)->where('j.status', 'sah')
+            ->when($sejak, fn ($q) => $q->where('j.created_at', '>=', $sejak))
+            ->whereRaw('COALESCE(i.hpp, p.hpp, 0) = 0')
+            ->selectRaw('COALESCE(SUM(i.subtotal),0) nilai, COUNT(*) n')->first();
+
+        $b = DB::table('transaksi_item as i')->leftJoin('produk as p', 'p.id', '=', 'i.produk_id')
+            ->where('i.tenant_id', $t->id)
+            ->when($sejak, fn ($q) => $q->where('i.created_at', '>=', $sejak))
+            ->whereRaw('COALESCE(i.hpp, p.hpp, 0) = 0')
+            ->selectRaw('COALESCE(SUM(i.subtotal),0) nilai, COUNT(*) n')->first();
+
+        return ['nilai' => (int) $a->nilai + (int) $b->nilai, 'n' => (int) $a->n + (int) $b->n];
+    }
+
     private function stokPeringatan(Tenant $t): array
     {
         $p = Produk::where('tenant_id', $t->id)->where('aktif', 1)->whereNotNull('stok');
@@ -284,7 +495,11 @@ class MartLaporanController extends Controller
             'ringkas' => $this->omzet($t, $periode),
             'terlaris' => $this->terlaris($t, $periode, 20, 'desc'),
             'transaksi' => $this->riwayatGabungan($t, 200, $this->sejak($periode)),
-            'kas' => MartKas::where('tenant_id', $t->id)->orderByDesc('tanggal')->limit(31)->get(),
+            // Barang yang terjual TANPA harga modal tercatat. Angkanya tidak
+            // dipakai menghitung apa pun — ia dipajang apa adanya sebagai
+            // peringatan, karena setiap rupiah di sini masuk ke laba seolah
+            // modalnya nol dan membuat laba tampak lebih besar dari yang benar.
+            'tanpa_modal' => $this->tanpaModal($t, $this->sejak($periode)),
         ]);
     }
 }
