@@ -24,6 +24,10 @@ class Siswa extends Model
     protected $fillable = [
         'nis', 'nama', 'kelas', 'card_uid', 'saldo', 'status', 'foto',
         'nisn', 'tgl_lahir', 'hp_ortu',
+        // Gender & kode keluarga — dasar aturan transfer antar gender.
+        // SENGAJA tidak diturunkan dari `kelas` di mana pun: lihat migrasi
+        // 2026_10_18_000100_santri_gender_kode_keluarga.
+        'jenis_kelamin', 'kode_keluarga',
         'saldo_titipan', 'smart_mode', 'smart_ambang', 'smart_isi',
         'golongan', 'jabatan', 'catatan', 'berlaku_sampai',
         // Daur hidup arsip (alumni / lanjut_study / pindah). Wajib ada di sini:

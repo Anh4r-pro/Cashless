@@ -72,6 +72,10 @@ class PengaturanController extends Controller
      */
     public const LABEL_TRANSFER = [
         'transfer_aktif' => ['label' => 'Transfer saldo antar teman', 'unit' => 'onoff'],
+        // Mati sampai admin yakin gender SELURUH santri sudah ditetapkan massal
+        // per kelas (layar Santri → Set Gender Massal) — lihat Services\Transfer.
+        // Sambil mati, transfer berperilaku PERSIS seperti sebelum sakelar ini ada.
+        'transfer_gender_aktif' => ['label' => 'Batasi transfer hanya sesama gender (kecuali keluarga)', 'unit' => 'onoff'],
         'transfer_min' => ['label' => 'Nominal terkecil sekali kirim', 'unit' => 'rp'],
         'transfer_maks' => ['label' => 'Nominal terbesar sekali kirim', 'unit' => 'rp'],
         'transfer_maks_harian' => ['label' => 'Max total kirim / orang / hari', 'unit' => 'rp'],

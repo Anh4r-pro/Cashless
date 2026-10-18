@@ -277,6 +277,7 @@ class KiosController extends Controller
         }
 
         $p = Transfer::cariPenerima($r->input('nis'), $s);
+        Transfer::wajibSamaGenderAtauKeluarga($s, $p);
         $cfg = Pengaturan::sekolah();
         $hari = Transfer::hariIni($s->id);
 
@@ -311,6 +312,9 @@ class KiosController extends Controller
         }
 
         $penerima = Transfer::cariPenerima($r->input('nis'), $s);
+        // Diperiksa ulang di sini, bukan percaya hasil langkah cariPenerima
+        // tadi — kios bisa saja mengirim 'nis' baru tanpa lewat cariPenerima lagi.
+        Transfer::wajibSamaGenderAtauKeluarga($s, $penerima);
         $jumlah = (int) floor((float) $r->input('jumlah'));
         // Catatan OPSIONAL — beda dari deskripsi iuran yang wajib. Transfer
         // pertemanan biasa tidak boleh dipersulit oleh kolom wajib; catatan

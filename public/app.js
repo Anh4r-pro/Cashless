@@ -7959,6 +7959,7 @@ function siswaView(el, sdm) {
         ${bolehImpor ? `<button class="linkbtn" id="btn-impor">⬆ Impor ${esc(t.orang)} dari Excel</button>` : ''}
         ${bolehKartu ? '<button class="linkbtn" id="btn-kartu-massal">📇 Daftar Kartu Massal</button>' : ''}
         ${!sdm && boleh('santri.kenaikan') ? '<button class="linkbtn" id="btn-kenaikan">🎓 Kenaikan Kelas</button>' : ''}
+        ${!sdm && boleh('santri.gender_massal') ? '<button class="linkbtn" id="btn-gender-massal">🚻 Set Gender Massal</button>' : ''}
         ${bolehArsip ? '<button class="linkbtn" id="btn-arsip">📦 Arsipkan</button>' : ''}
         <button class="linkbtn" id="btn-unduh-daftar">⬇ Unduh daftar</button>
         ${bolehTambah ? `<button class="linkbtn" id="btn-add-siswa">+ Tambah ${esc(t.orang)}</button>` : ''}
@@ -8043,6 +8044,7 @@ function siswaView(el, sdm) {
   if ($('#btn-kartu-massal')) $('#btn-kartu-massal').onclick = () => kartuMassalPanel(!!sdm);
   if ($('#btn-arsip')) $('#btn-arsip').onclick = () => arsipPanel(!!sdm);
   if ($('#btn-kenaikan')) $('#btn-kenaikan').onclick = kenaikanPanel;
+  if ($('#btn-gender-massal')) $('#btn-gender-massal').onclick = genderMassalModal;
   loadSiswa();
 }
 
@@ -8355,6 +8357,18 @@ function siswaModal(s) {
       <span class="muted set-hint" id="m-nis-hint"></span></div>
     <div class="field"><label>UID kartu (opsional — bisa juga tap kartu sekarang)</label>
       <input id="m-uid" data-scan="1" value="${esc(s?.card_uid || '')}" placeholder="tap kartu atau ketik manual"></div>
+    ${!sdm ? `<div class="field">
+      <label>Gender</label>
+      <span class="muted set-hint" style="display:block; margin-bottom:4px">
+        ${s?.jenis_kelamin ? (s.jenis_kelamin === 'L' ? '✔ Putra' : '✔ Putri')
+          : '<span class="minus">belum ditetapkan</span>'} — diisi massal per kelas di tombol
+        🚻 Set Gender Massal, bukan di sini. Dasar aturan "transfer hanya sesama gender".</span>
+      <label style="margin-top:4px">Kode keluarga <span class="muted">(opsional)</span></label>
+      <input id="m-keluarga" value="${esc(s?.kode_keluarga || '')}" maxlength="40"
+        placeholder="mis. kode unik per keluarga">
+      <span class="muted set-hint">Beri kode yang SAMA ke kakak-adik supaya mereka tetap boleh
+        transfer walau beda gender. Kosongkan kalau tidak ada saudara kandung yang juga santri di sini.</span>
+    </div>` : ''}
     <div class="field" id="m-khusus-wrap">
       <label>Jabatan / keterangan</label>
       <input id="m-jabatan" value="${esc(s?.jabatan || '')}" maxlength="120"
@@ -8395,6 +8409,7 @@ function siswaModal(s) {
         golongan: $('#m-golongan').value, jabatan: $('#m-jabatan').value,
         berlaku_sampai: $('#m-berlaku').value, catatan: $('#m-catatan').value,
         terima_iuran: $('#m-iuran') ? $('#m-iuran').checked : false,
+        ...($('#m-keluarga') ? { kode_keluarga: $('#m-keluarga').value } : {}),
         // Kosong dikirim sebagai string kosong — dibaca server sebagai "ikut
         // golongan", BUKAN sebagai nol yang berarti dibebaskan.
         biaya_admin: $('#m-biaya').value.trim() === '' ? '' : nilaiUang('#m-biaya'),
@@ -10722,6 +10737,40 @@ async function jenjangForm() {
       kenaikanPanel();   // saran tujuan bergantung pada rentang ini
     } catch (e) { toast(e.message, 'err'); ev.target.disabled = false; }
   };
+}
+
+/**
+ * Set gender massal: pilih beberapa kelas sekaligus, pilih putra/putri,
+ * terapkan. Bukan per-santri — lihat alasannya di SiswaController::genderMassal().
+ */
+async function genderMassalModal() {
+  let kelasList = [];
+  try { kelasList = (await api('/api/kelas')).kelas || []; } catch { /* dropdown kosong, bukan fatal */ }
+
+  openModal(`
+    <h2>Set Gender Massal</h2>
+    <p class="muted" style="margin-top:-6px">Pilih kelas yang SEMUA santrinya satu gender, lalu
+      terapkan. Dipakai tiap kali rombongan belajar baru dibentuk — pembagian kelas putra/putri
+      boleh berubah tiap tahun ajaran, gendernya tetap melekat ke santri walau naik kelas.</p>
+    <div class="field"><label>Kelas (pilih beberapa — Ctrl/Cmd+klik)</label>
+      <select id="gm-kelas" multiple size="10" style="width:100%">
+        ${kelasList.map((k) => `<option value="${esc(k)}">${esc(k)}</option>`).join('')
+          || '<option disabled>Belum ada kelas</option>'}
+      </select></div>
+    <div class="field"><label>Gender</label>
+      <select id="gm-jk">
+        <option value="L">Putra</option>
+        <option value="P">Putri</option>
+      </select></div>
+    <div id="gm-hasil"></div>`,
+    async () => {
+      const kelas = [...$('#gm-kelas').selectedOptions].map((o) => o.value);
+      if (!kelas.length) { throw new Error('Pilih minimal satu kelas'); }
+      const d = await api('/api/siswa/gender-massal', { method: 'POST', body: {
+        kelas, jenis_kelamin: $('#gm-jk').value } });
+      toast(`✔ ${d.n_berhasil} santri di ${kelas.length} kelas ditetapkan ${d.jenis_kelamin === 'L' ? 'putra' : 'putri'}`, 'ok');
+      loadSiswa();
+    }, 'Terapkan');
 }
 
 async function kenaikanPanel() {

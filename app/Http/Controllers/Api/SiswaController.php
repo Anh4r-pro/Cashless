@@ -335,11 +335,17 @@ class SiswaController extends Controller
             throw new ApiError(409, 'Kartu sudah terdaftar untuk pemegang lain');
         }
 
+        if (($b['jenis_kelamin'] ?? '') !== '' && ! in_array($b['jenis_kelamin'], ['L', 'P'], true)) {
+            throw new ApiError(400, 'Gender hanya boleh L atau P');
+        }
+
         $s = Siswa::create(array_merge([
             'nis' => BidangSiswa::nisKhas($b['nis'] ?? '', null),
             'nama' => $nama,
             'kelas' => strtoupper(trim((string) ($b['kelas'] ?? ''))),
             'card_uid' => $uid,
+            'jenis_kelamin' => in_array($b['jenis_kelamin'] ?? null, ['L', 'P'], true) ? $b['jenis_kelamin'] : null,
+            'kode_keluarga' => mb_substr(trim((string) ($b['kode_keluarga'] ?? '')), 0, 40) ?: null,
         ], BidangSiswa::ortu($b, null, null), BidangSiswa::golongan($b, null)))->fresh();
 
         return response()->json(['ok' => true, 'siswa' => $s]);
@@ -376,11 +382,26 @@ class SiswaController extends Controller
             'tgl_lahir' => $s->tgl_lahir, 'hp_ortu' => $s->hp_ortu,
         ];
 
+        // Gender: hanya diterima kalau benar-benar dikirim dan berupa 'L'/'P'
+        // persis (string kosong = "jangan diubah", BUKAN "kosongkan" — field
+        // ini tidak boleh berbalik jadi NULL lewat salah ketik di layar).
+        $jenisKelamin = $s->jenis_kelamin;
+        if (array_key_exists('jenis_kelamin', $b) && $b['jenis_kelamin'] !== '') {
+            if (! in_array($b['jenis_kelamin'], ['L', 'P'], true)) {
+                throw new ApiError(400, 'Gender hanya boleh L atau P');
+            }
+            $jenisKelamin = $b['jenis_kelamin'];
+        }
+
         $s->update(array_merge([
             'nis' => $nis,
             'nama' => trim((string) ($b['nama'] ?? $s->nama)),
             'kelas' => strtoupper(trim((string) ($b['kelas'] ?? $s->kelas))),
             'card_uid' => $uid,
+            'jenis_kelamin' => $jenisKelamin,
+            'kode_keluarga' => array_key_exists('kode_keluarga', $b)
+                ? (mb_substr(trim((string) $b['kode_keluarga']), 0, 40) ?: null)
+                : $s->kode_keluarga,
             // Hanya aktif/blokir yang boleh disetel dari sini. Status arsip
             // (alumni / lanjut_study / pindah) sengaja TIDAK diterima: jalurnya
             // ada di ArsipController, yang menolak selama saldo belum nol —
@@ -401,6 +422,66 @@ class SiswaController extends Controller
         }
 
         return response()->json(['ok' => true, 'siswa' => $s->fresh()]);
+    }
+
+    /**
+     * Set gender MASSAL, per kelas — bukan per santri satu-satu.
+     *
+     * Alasannya bukan kemalasan: pembagian kelas putra/putri BERUBAH tiap
+     * tahun ajaran (tahun ini 7A–C putra, tahun depan bisa 7A–E), jadi
+     * menetapkan gender satu-satu per santri tidak pernah selesai — begitu
+     * rombongan baru masuk, kerjanya terulang. Yang benar-benar menentukan
+     * putra/putrinya adalah KELAS tempat santri didudukkan sekarang, dan
+     * admin tahu persis pembagian itu saat rombongan belajar dibentuk.
+     *
+     * Sekali ditetapkan, nilainya TIDAK diturunkan ulang dari kelas di mana
+     * pun — ia melekat ke santri lewat kenaikan kelas tahun-tahun berikutnya
+     * (lihat KenaikanKelasController::terapkan(), yang hanya menyentuh kolom
+     * `kelas`). Endpoint ini hanya dipakai SEKALI per rombongan, bukan proses
+     * yang berjalan terus-menerus.
+     *
+     * Polanya meniru ArsipController::massal(): loop per siswa dalam SATU
+     * transaction (bukan UPDATE ... WHERE IN mentah) supaya tiap baris bisa
+     * gagal/berhasil independen dan dilaporkan satu-satu — tapi menerima
+     * BEBERAPA kelas sekaligus, karena permintaannya memang "7A-C jadi putra"
+     * dalam satu klik, bukan kelas demi kelas.
+     */
+    public function genderMassal(Request $r)
+    {
+        $u = $this->wajibPeran($r, 'superadmin');
+        Izin::wajib($u, 'santri.gender_massal');
+
+        $jenisKelamin = $r->input('jenis_kelamin');
+        if (! in_array($jenisKelamin, ['L', 'P'], true)) {
+            throw new ApiError(400, 'Gender hanya boleh L atau P');
+        }
+        $kelasList = array_values(array_unique(array_filter(array_map(
+            fn ($k) => strtoupper(trim((string) $k)),
+            (array) $r->input('kelas', []),
+        ))));
+        if (! $kelasList) {
+            throw new ApiError(400, 'Pilih minimal satu kelas');
+        }
+        if (count($kelasList) > 50) {
+            throw new ApiError(400, 'Maksimal 50 kelas sekali terap');
+        }
+
+        $berhasil = [];
+        DB::transaction(function () use ($kelasList, $jenisKelamin, &$berhasil) {
+            // Hanya santri AKTIF yang disentuh — sama seperti ArsipController,
+            // alumni/lanjut_study/pindah tidak lagi relevan ditandai gendernya.
+            $q = Siswa::where('golongan', 'siswa')->whereIn('kelas', $kelasList)
+                ->whereIn('status', ['aktif', 'blokir']);
+            foreach ($q->orderBy('kelas')->orderBy('nama')->get() as $s) {
+                $s->update(['jenis_kelamin' => $jenisKelamin]);
+                $berhasil[] = ['id' => $s->id, 'nis' => $s->nis, 'nama' => $s->nama, 'kelas' => $s->kelas];
+            }
+        });
+
+        return response()->json([
+            'ok' => true, 'kelas' => $kelasList, 'jenis_kelamin' => $jenisKelamin,
+            'n_berhasil' => count($berhasil), 'berhasil' => $berhasil,
+        ]);
     }
 
     public function destroy(Request $r, int $id)

@@ -68,6 +68,7 @@ class Izin
             'santri.impor' => 'Menambah santri kolektif via Excel',
             'santri.arsip' => 'Mengarsipkan santri (Alumni / Lanjut Study / Pindah)',
             'santri.kenaikan' => 'Menjalankan kenaikan kelas massal',
+            'santri.gender_massal' => 'Menetapkan gender santri massal per kelas',
         ],
         'Pemegang Kartu — SDM & Personil' => [
             'sdm.lihat' => 'Melihat data SDM & personil',
@@ -234,7 +235,7 @@ class Izin
                     'dashboard.lihat',
                     'santri.lihat', 'santri.tambah', 'santri.ubah', 'santri.hapus',
                     'santri.kartu', 'santri.reset_pin', 'santri.impor',
-                    'santri.arsip', 'santri.kenaikan',
+                    'santri.arsip', 'santri.kenaikan', 'santri.gender_massal',
                     'sdm.lihat', 'sdm.tambah', 'sdm.ubah', 'sdm.hapus',
                     'sdm.kartu', 'sdm.reset_pin', 'sdm.impor', 'sdm.arsip',
                     'riwayat.lihat',

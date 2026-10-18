@@ -46,6 +46,62 @@ class Transfer
         return ['kirim' => (int) $r->kirim, 'n_kirim' => (int) $r->n_kirim, 'terima' => (int) $r->terima];
     }
 
+    private const LABEL_GENDER = ['L' => 'putra', 'P' => 'putri'];
+
+    /**
+     * Transfer hanya boleh sesama gender, kecuali sesama keluarga.
+     *
+     * Dipanggil DUA KALI pada satu transfer — sekali saat penerima dicari
+     * (supaya layar nominal tidak terbuka untuk transfer yang pasti ditolak),
+     * sekali lagi saat benar-benar dieksekusi (jangan percaya langkah
+     * sebelumnya, pola yang sama dipakai di seluruh berkas ini).
+     *
+     * Berhenti diam-diam (tidak memeriksa apa pun) dalam tiga keadaan yang
+     * SENGAJA dibiarkan lewat:
+     *   - Sakelarnya mati (`transfer_gender_aktif` = 0). Sampai admin selesai
+     *     menetapkan gender massal per kelas dan yakin datanya terisi,
+     *     perilaku transfer harus persis seperti sebelum fitur ini ada.
+     *   - Salah satu pihak bukan santri (golongan != 'siswa'). SDM/tamu/VIP
+     *     tidak diasramakan terpisah gender, aturan ini tidak relevan buat
+     *     mereka.
+     *
+     * Begitu sakelarnya menyala dan kedua pihak santri, DATA YANG BOLONG
+     * DITOLAK, bukan diloloskan diam-diam — gender NULL pada salah satu pihak
+     * berarti admin belum menuntaskan pendataan, dan itu harus kelihatan.
+     */
+    public static function wajibSamaGenderAtauKeluarga(Siswa $pengirim, Siswa $penerima): void
+    {
+        if ((Pengaturan::sekolah()['transfer_gender_aktif'] ?? 0) !== 1) {
+            return;
+        }
+        if ($pengirim->golongan !== 'siswa' || $penerima->golongan !== 'siswa') {
+            return;
+        }
+
+        if ($pengirim->jenis_kelamin === null || $penerima->jenis_kelamin === null) {
+            throw new ApiError(403, 'Data gender salah satu kartu belum diisi admin — ' .
+                'transfer ditahan sampai dilengkapi. Hubungi admin.');
+        }
+        if ($pengirim->jenis_kelamin === $penerima->jenis_kelamin) {
+            return;
+        }
+
+        // Lintas gender tetap boleh untuk sesama keluarga — kode harus terisi
+        // DI KEDUA BELAH PIHAK dan sama persis. Kosong di salah satu sisi
+        // bukan keluarga, sekalipun kosong-kosong (jangan sampai dua santri
+        // yang sama-sama belum diberi kode malah dianggap satu keluarga).
+        $kodeP = trim((string) $pengirim->kode_keluarga);
+        $kodeT = trim((string) $penerima->kode_keluarga);
+        if ($kodeP !== '' && $kodeP === $kodeT) {
+            return;
+        }
+
+        $labelP = self::LABEL_GENDER[$pengirim->jenis_kelamin] ?? $pengirim->jenis_kelamin;
+        $labelT = self::LABEL_GENDER[$penerima->jenis_kelamin] ?? $penerima->jenis_kelamin;
+        throw new ApiError(403, "Kamu ({$labelP}) tidak bisa transfer ke {$penerima->nama} ({$labelT}) — " .
+            'kirim hanya boleh sesama gender, kecuali ke keluarga. Kalau ini keluargamu, minta admin menandainya.');
+    }
+
     /** Penerima menurut NIS. Dipakai layar konfirmasi maupun eksekusi transfernya. */
     public static function cariPenerima($nisMentah, Siswa $pengirim): Siswa
     {

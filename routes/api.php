@@ -183,6 +183,8 @@ Route::middleware('peran:superadmin')->group(function () {
     Route::post('siswa/{id}/foto', [SiswaController::class, 'foto']);
     Route::post('siswa/{id}/reset-pin', [SiswaController::class, 'resetPin']);
     Route::post('assign-card', [SiswaController::class, 'assignCard']);
+    // Set gender massal per kelas — lihat SiswaController::genderMassal().
+    Route::post('siswa/gender-massal', [SiswaController::class, 'genderMassal']);
 
     Route::post('golongan', [GolonganController::class, 'store'])->middleware('izin:golongan.kelola');
     Route::put('golongan/{id}', [GolonganController::class, 'update'])->middleware('izin:golongan.kelola');

@@ -73,6 +73,8 @@ class PengaturanSeeder extends Seeder
 
             // transfer saldo antar teman lewat kios
             'transfer_aktif' => 1,
+            // Mati bawaannya — lihat PengaturanController::LABEL_TRANSFER.
+            'transfer_gender_aktif' => 0,
             'transfer_min' => 1000,
             'transfer_maks' => 25000,
             'transfer_maks_harian' => 50000,
