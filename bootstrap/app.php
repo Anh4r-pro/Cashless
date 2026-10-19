@@ -7,7 +7,6 @@ use App\Http\Middleware\WajibMasuk;
 use App\Http\Middleware\WajibOrtu;
 use App\Http\Middleware\WajibIzin;
 use App\Http\Middleware\WajibPeran;
-use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -24,17 +23,6 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
-    ->withSchedule(function (Schedule $schedule): void {
-        /*
-         * Scheduler pertama untuk app ini — sebelum ini tidak ada satu pun
-         * tugas terjadwal. `everyMinute()` cuma membuat command-nya DICEK
-         * tiap menit; command-nya sendiri yang memutuskan apakah jam sekarang
-         * cocok dengan jam kirim yang diatur tiap tenant (lihat KirimSpdWa).
-         * Butuh cron sistem `* * * * * php artisan schedule:run` supaya
-         * benar-benar jalan — lihat catatan di terapkan.sh.
-         */
-        $schedule->command('mart:kirim-spd-wa')->everyMinute();
-    })
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->api(prepend: [
             SesiStafMiddleware::class,

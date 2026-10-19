@@ -35,11 +35,4 @@ return [
         ],
     ],
 
-    // Gateway WhatsApp mandiri milik kantin — lihat App\Services\WaGateway
-    // dan /var/www/kantin-wa-gateway.
-    'wa_gateway' => [
-        'url' => env('WA_GATEWAY_URL'),
-        'token' => env('WA_GATEWAY_TOKEN'),
-    ],
-
 ];

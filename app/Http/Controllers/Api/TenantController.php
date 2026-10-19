@@ -67,10 +67,6 @@ class TenantController extends Controller
                 'mode_kasir' => in_array($r->input('mode_kasir'), Keranjang::MODE_KASIR, true) ? $r->input('mode_kasir') : 'menu',
                 'input_manual' => $r->input('input_manual') === null ? true : (bool) $r->input('input_manual'),
                 'target_rab_bulanan' => $r->input('target_rab_bulanan') !== null ? (int) $r->input('target_rab_bulanan') : null,
-                'wa_nomor' => trim((string) $r->input('wa_nomor', '')) ?: null,
-                'wa_kirim_otomatis' => (bool) $r->input('wa_kirim_otomatis'),
-                'wa_jam_kirim' => preg_match('/^\d{2}:\d{2}$/', (string) $r->input('wa_jam_kirim'))
-                    ? $r->input('wa_jam_kirim') : null,
             ]);
             User::create([
                 'username' => $username, 'password' => $password,
@@ -112,12 +108,6 @@ class TenantController extends Controller
                 'target_rab_bulanan' => $r->has('target_rab_bulanan')
                     ? ($r->input('target_rab_bulanan') !== null ? (int) $r->input('target_rab_bulanan') : null)
                     : $t->target_rab_bulanan,
-                'wa_nomor' => $r->has('wa_nomor') ? (trim((string) $r->input('wa_nomor', '')) ?: null) : $t->wa_nomor,
-                'wa_kirim_otomatis' => $r->has('wa_kirim_otomatis')
-                    ? (bool) $r->input('wa_kirim_otomatis') : $t->wa_kirim_otomatis,
-                'wa_jam_kirim' => $r->has('wa_jam_kirim')
-                    ? (preg_match('/^\d{2}:\d{2}$/', (string) $r->input('wa_jam_kirim')) ? $r->input('wa_jam_kirim') : null)
-                    : $t->wa_jam_kirim,
             ]);
             // Koperasi → kantin: barang non-makanan miliknya dikembalikan ke
             // 'makanan'. Kalau tidak, tenant ini punya barang berkategori

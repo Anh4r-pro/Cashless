@@ -3,7 +3,6 @@
 namespace App\Http\Controllers\Api;
 
 use App\Exceptions\ApiError;
-use App\Models\MartBeliBayar;
 use App\Models\MartJual;
 use App\Models\MartKas;
 use App\Models\MartPiutangBayar;
@@ -16,7 +15,6 @@ use App\Services\Kartu;
 use App\Services\Rupiah;
 use App\Services\SqlWaktu;
 use App\Services\Stok;
-use App\Services\WaGateway;
 use App\Support\WaktuIso;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -251,9 +249,9 @@ class MartLaporanController extends Controller
 
     /**
      * Inti hitungan SPD, dipisah dari `spd()` supaya bisa dipakai ulang oleh
-     * `kirimWa()` dan command terjadwal `mart:kirim-spd-wa` — keduanya butuh
-     * angka yang SAMA PERSIS dengan yang tampil di layar, bukan kueri kedua
-     * yang bisa diam-diam melenceng dari yang pertama.
+     * `teksSpd()` — keduanya butuh angka yang SAMA PERSIS dengan yang tampil
+     * di layar, bukan kueri kedua yang bisa diam-diam melenceng dari yang
+     * pertama.
      *
      * @return array{baris: array, total: array}
      */
@@ -387,10 +385,10 @@ class MartLaporanController extends Controller
      *
      * Kalau hari ini belum punya kejadian sama sekali (belum ada penjualan,
      * kas belum ditutup), hitungSpd() tidak menghasilkan baris untuk hari itu
-     * — disulih dengan baris nol di sini, supaya laporan tetap terkirim
-     * (angka nol, bukan pesan error) alih-alih diam tanpa kiriman.
+     * — disulih dengan baris nol di sini, supaya teksnya tetap lengkap
+     * (angka nol, bukan kosong) alih-alih hilang begitu saja.
      */
-    private function teksLaporanWa(Tenant $t): string
+    private function teksLaporanSpd(Tenant $t): string
     {
         $hariIni = Kartu::hariIni();
         $awalBulan = substr($hariIni, 0, 7) . '-01';
@@ -443,30 +441,18 @@ class MartLaporanController extends Controller
         return implode("\n", $baris);
     }
 
-    /** Kirim manual dari layar SPD — "📱 kirim WA". */
-    public function kirimWa(Request $r)
+    /**
+     * Teks laporan untuk tombol "📋 copy laporan" di layar SPD.
+     *
+     * Bukan kirim otomatis — layar yang menyalin teks ini ke clipboard lewat
+     * `navigator.clipboard`, admin sendiri yang menempelkannya ke WhatsApp.
+     * Tidak butuh gateway, nomor tujuan, atau pairing apa pun.
+     */
+    public function teksSpd(Request $r)
     {
         $t = $this->martKu($r);
-        if (! $t->wa_nomor) {
-            throw new ApiError(400, 'Nomor WA tujuan belum diisi — isi dulu di pengaturan tenant (menu Tenant).');
-        }
 
-        if (! $this->kirimWaUntukTenant($t)) {
-            throw new ApiError(503, 'Gagal mengirim ke WhatsApp — gateway tidak merespons atau nomor belum terhubung.');
-        }
-
-        return response()->json(['ok' => true]);
-    }
-
-    /**
-     * Inti kirim WA, dipakai ulang oleh `kirimWa()` (lewat HTTP, lempar
-     * ApiError kalau gagal) dan command terjadwal `mart:kirim-spd-wa` (tanpa
-     * Request, cukup kembalikan bool — command sendiri yang mencatat log &
-     * lanjut ke tenant berikutnya kalau gagal).
-     */
-    public function kirimWaUntukTenant(Tenant $t): bool
-    {
-        return app(WaGateway::class)->kirim($t->wa_nomor, $this->teksLaporanWa($t));
+        return response()->json(['teks' => $this->teksLaporanSpd($t)]);
     }
 
     /** SPD sebagai berkas unduhan (.xls / .doc / .csv) — lihat Services\Ekspor. */
