@@ -150,6 +150,8 @@ Route::middleware('peran:tenant,superadmin')->group(function () {
     // Laporan closing harian (SPD). Tanpa ?format= ia menjawab JSON untuk layar;
     // dengan ?format=xls|doc|csv ia menjawab berkas unduhan.
     Route::get('mart/spd', [MartLaporanController::class, 'spd']);
+    // Kirim manual ringkasan SPD hari ini + rekap bulan berjalan ke WhatsApp.
+    Route::post('mart/spd/kirim-wa', [MartLaporanController::class, 'kirimWa']);
 });
 
 // --- uang masuk & keluar di luar kasir (eksklusif superadmin) --------------

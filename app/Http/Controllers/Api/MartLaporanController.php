@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Exceptions\ApiError;
+use App\Models\MartBeliBayar;
 use App\Models\MartJual;
 use App\Models\MartKas;
 use App\Models\MartPiutangBayar;
@@ -15,6 +16,7 @@ use App\Services\Kartu;
 use App\Services\Rupiah;
 use App\Services\SqlWaktu;
 use App\Services\Stok;
+use App\Services\WaGateway;
 use App\Support\WaktuIso;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -233,21 +235,61 @@ class MartLaporanController extends Controller
         $kategori = in_array($r->query('kategori'), ['semua', 'tertinggi', 'terendah'], true)
             ? $r->query('kategori') : 'semua';
 
+        ['baris' => $baris, 'total' => $total] = $this->hitungSpd($t, $dari, $sampai, $kategori);
+
+        if ($r->query('format')) {
+            return $this->spdUnduhan($t, $baris, $total, $dari, $sampai, $kategori,
+                Ekspor::formatSah($r->query('format')));
+        }
+
+        return response()->json([
+            'tenant' => ['id' => $t->id, 'nama' => $t->nama],
+            'dari' => $dari, 'sampai' => $sampai, 'kategori' => $kategori,
+            'baris' => $baris, 'total' => $total,
+        ]);
+    }
+
+    /**
+     * Inti hitungan SPD, dipisah dari `spd()` supaya bisa dipakai ulang oleh
+     * `kirimWa()` dan command terjadwal `mart:kirim-spd-wa` — keduanya butuh
+     * angka yang SAMA PERSIS dengan yang tampil di layar, bukan kueri kedua
+     * yang bisa diam-diam melenceng dari yang pertama.
+     *
+     * @return array{baris: array, total: array}
+     */
+    private function hitungSpd(Tenant $t, string $dari, string $sampai, string $kategori): array
+    {
         $hari = SqlWaktu::periode('harian');
         $hariJual = SqlWaktu::periode('harian', 'j.created_at');
         $hariItem = SqlWaktu::periode('harian', 'i.created_at');
         $antara = fn ($ekspresi) => [$ekspresi . ' BETWEEN ? AND ?', [$dari, $sampai]];
 
-        // --- penjualan per hari, dua buku -----------------------------------
+        // --- penjualan per hari, dua buku, dipecah per metode bayar ---------
+        // Pecahannya (tunai/transfer/hutang) dipakai layar SPD tabel biasa
+        // (yang mengabaikannya) dan oleh teks laporan WA (CASH/Transfer/Piutang)
+        // — pola CASE-WHEN-nya sama dengan omzet(), hanya dikelompokkan per
+        // hari, bukan per periode penuh.
         $jual = MartJual::sah()->where('tenant_id', $t->id)
             ->whereRaw(...$antara($hari))
             ->selectRaw("{$hari} AS tgl, COALESCE(SUM(total),0) nilai, COUNT(*) n")
+            ->selectRaw("COALESCE(SUM(CASE WHEN metode='tunai' THEN total END),0) tunai")
+            ->selectRaw("COALESCE(SUM(CASE WHEN metode='transfer' THEN total END),0) transfer")
+            ->selectRaw("COALESCE(SUM(CASE WHEN metode='hutang' THEN total END),0) hutang")
             ->groupBy('tgl')->get()->keyBy('tgl');
 
+        // Cashless (kartu santri/pegawai) — uangnya masuk kas sekolah, bukan
+        // laci Mart, jadi datang dari `transaksi`, bukan `mart_jual`.
         $kartu = Transaksi::where('tenant_id', $t->id)->where('tipe', 'beli')
             ->whereRaw(...$antara($hari))
             ->selectRaw("{$hari} AS tgl, COALESCE(SUM(-jumlah),0) nilai, COUNT(*) n")
             ->groupBy('tgl')->get()->keyBy('tgl');
+
+        // Uang keluar untuk membayar sales/nota hari itu — baris info, BUKAN
+        // bagian dari rumus Sales PerDay (itu uang keluar, bukan jalur masuk).
+        $bayarSales = DB::table('mart_beli_bayar')->where('tenant_id', $t->id)
+            ->whereRaw(...$antara($hari))
+            ->selectRaw("{$hari} AS tgl, COALESCE(SUM(jumlah),0) nilai")
+            ->groupBy('tgl')->pluck('nilai', 'tgl');
 
         // --- modal barang terjual per hari, dua buku -------------------------
         $hppJual = DB::table('mart_jual_item as i')->join('mart_jual as j', 'j.id', '=', 'i.jual_id')
@@ -278,7 +320,8 @@ class MartLaporanController extends Controller
 
         $baris = [];
         foreach ($tanggal as $d) {
-            $spd = (int) ($jual[$d]->nilai ?? 0) + (int) ($kartu[$d]->nilai ?? 0);
+            $j = $jual[$d] ?? null;
+            $spd = (int) ($j->nilai ?? 0) + (int) ($kartu[$d]->nilai ?? 0);
             $hpp = (int) ($hppJual[$d] ?? 0) + (int) ($hppKartu[$d] ?? 0);
             $k = $kas[$d] ?? null;
             $baris[] = [
@@ -287,12 +330,19 @@ class MartLaporanController extends Controller
                 'hpp' => $hpp,
                 'margin' => $spd - $hpp,
                 'margin_persen' => $spd > 0 ? round(($spd - $hpp) / $spd * 100, 1) : null,
-                'n_transaksi' => (int) ($jual[$d]->n ?? 0) + (int) ($kartu[$d]->n ?? 0),
+                'n_transaksi' => (int) ($j->n ?? 0) + (int) ($kartu[$d]->n ?? 0),
                 // "Ket" diambil dari penutupan kas hari itu — ini laporan
                 // CLOSING, jadi catatan penutupannyalah yang relevan di sini.
                 'ket' => $k ? trim((string) $k->catatan) : '',
                 'kas_ditutup' => (bool) $k,
                 'selisih_kas' => $k ? (int) $k->selisih : null,
+                // Breakdown jalur bayar — dipakai teks laporan WA, diabaikan
+                // tabel SPD biasa di layar.
+                'tunai' => (int) ($j->tunai ?? 0),
+                'transfer' => (int) ($j->transfer ?? 0),
+                'hutang' => (int) ($j->hutang ?? 0),
+                'cashless' => (int) ($kartu[$d]->nilai ?? 0),
+                'bayar_sales' => (int) ($bayarSales[$d] ?? 0),
             ];
         }
 
@@ -316,16 +366,107 @@ class MartLaporanController extends Controller
             ? round($total['margin'] / $total['spd'] * 100, 1) : null;
         $total['rata_spd'] = $total['n_hari'] > 0 ? (int) round($total['spd'] / $total['n_hari']) : 0;
 
-        if ($r->query('format')) {
-            return $this->spdUnduhan($t, $baris, $total, $dari, $sampai, $kategori,
-                Ekspor::formatSah($r->query('format')));
+        return ['baris' => $baris, 'total' => $total];
+    }
+
+    /** Nama bulan Indonesia — tidak bergantung ekstensi intl. */
+    private const BULAN_INDO = [1 => 'Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni',
+        'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
+
+    /** '2026-10-13' → '13 Oktober 2026'. */
+    private function tanggalIndo(string $iso): string
+    {
+        [$y, $m, $d] = explode('-', $iso);
+
+        return ((int) $d) . ' ' . self::BULAN_INDO[(int) $m] . ' ' . $y;
+    }
+
+    /**
+     * Susun teks "Laporan Performance" ala format lama tim kasir: snapshot
+     * HARI INI + rekap bulan berjalan (tanggal 1 s/d hari ini).
+     *
+     * Kalau hari ini belum punya kejadian sama sekali (belum ada penjualan,
+     * kas belum ditutup), hitungSpd() tidak menghasilkan baris untuk hari itu
+     * — disulih dengan baris nol di sini, supaya laporan tetap terkirim
+     * (angka nol, bukan pesan error) alih-alih diam tanpa kiriman.
+     */
+    private function teksLaporanWa(Tenant $t): string
+    {
+        $hariIni = Kartu::hariIni();
+        $awalBulan = substr($hariIni, 0, 7) . '-01';
+
+        $hari = $this->hitungSpd($t, $hariIni, $hariIni, 'semua');
+        $bulan = $this->hitungSpd($t, $awalBulan, $hariIni, 'semua');
+
+        $d = $hari['baris'][0] ?? [
+            'tanggal' => $hariIni, 'spd' => 0, 'hpp' => 0, 'margin' => 0,
+            'tunai' => 0, 'transfer' => 0, 'hutang' => 0, 'cashless' => 0, 'bayar_sales' => 0,
+        ];
+
+        $baris = [];
+        $baris[] = 'LAPORAN PERFORMANCE ' . mb_strtoupper($t->nama);
+        $baris[] = '';
+
+        if ($t->target_rab_bulanan) {
+            $hariDiBulan = (int) date('t', strtotime($awalBulan));
+            $targetHarian = (int) round($t->target_rab_bulanan / max(1, $hariDiBulan));
+            $persen = $targetHarian > 0 ? round($d['spd'] / $targetHarian * 100) : 0;
+            $baris[] = '====================';
+            $baris[] = 'TARGET RAB';
+            $baris[] = 'SPD              : ' . Rupiah::f($t->target_rab_bulanan);
+            $baris[] = '====================';
+            $baris[] = 'TGL   ' . $this->tanggalIndo($d['tanggal']);
+            $baris[] = 'Sales PerDay     : ' . Rupiah::f($d['spd']) . "  ({$persen}% dari target)";
+        } else {
+            $baris[] = '====================';
+            $baris[] = 'TGL   ' . $this->tanggalIndo($d['tanggal']);
+            $baris[] = 'Sales PerDay     : ' . Rupiah::f($d['spd']);
+        }
+        $baris[] = 'Harga pokok      : ' . Rupiah::f($d['hpp']);
+        $baris[] = 'CASH             : ' . Rupiah::f($d['tunai']);
+        $baris[] = 'Transfer         : ' . Rupiah::f($d['transfer']);
+        $baris[] = 'Cashless (kartu) : ' . Rupiah::f($d['cashless']);
+        $baris[] = 'Piutang          : ' . ($d['hutang'] > 0 ? Rupiah::f($d['hutang']) : '-');
+        $baris[] = 'Bayar sales/nota : ' . Rupiah::f($d['bayar_sales']);
+        $baris[] = 'Profit           : ' . Rupiah::f($d['margin']);
+        $baris[] = '';
+        $baris[] = 'Laporan Persediaan';
+        $baris[] = '====================';
+        $baris[] = 'Tgl 1 - ' . $this->tanggalIndo($hariIni);
+        $baris[] = 'Total Sales      : ' . Rupiah::f($bulan['total']['spd']);
+        $baris[] = 'Total HPP        : ' . Rupiah::f($bulan['total']['hpp']);
+        $baris[] = 'Total Profit     : ' . Rupiah::f($bulan['total']['margin']);
+        $baris[] = '====================';
+        $baris[] = '';
+        $baris[] = 'Terima kasih';
+
+        return implode("\n", $baris);
+    }
+
+    /** Kirim manual dari layar SPD — "📱 kirim WA". */
+    public function kirimWa(Request $r)
+    {
+        $t = $this->martKu($r);
+        if (! $t->wa_nomor) {
+            throw new ApiError(400, 'Nomor WA tujuan belum diisi — isi dulu di pengaturan tenant (menu Tenant).');
         }
 
-        return response()->json([
-            'tenant' => ['id' => $t->id, 'nama' => $t->nama],
-            'dari' => $dari, 'sampai' => $sampai, 'kategori' => $kategori,
-            'baris' => $baris, 'total' => $total,
-        ]);
+        if (! $this->kirimWaUntukTenant($t)) {
+            throw new ApiError(503, 'Gagal mengirim ke WhatsApp — gateway tidak merespons atau nomor belum terhubung.');
+        }
+
+        return response()->json(['ok' => true]);
+    }
+
+    /**
+     * Inti kirim WA, dipakai ulang oleh `kirimWa()` (lewat HTTP, lempar
+     * ApiError kalau gagal) dan command terjadwal `mart:kirim-spd-wa` (tanpa
+     * Request, cukup kembalikan bool — command sendiri yang mencatat log &
+     * lanjut ke tenant berikutnya kalau gagal).
+     */
+    public function kirimWaUntukTenant(Tenant $t): bool
+    {
+        return app(WaGateway::class)->kirim($t->wa_nomor, $this->teksLaporanWa($t));
     }
 
     /** SPD sebagai berkas unduhan (.xls / .doc / .csv) — lihat Services\Ekspor. */

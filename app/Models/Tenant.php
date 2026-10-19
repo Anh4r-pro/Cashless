@@ -23,10 +23,15 @@ class Tenant extends Model
         'jenis',
         'mode_kasir',
         'input_manual',
+        'target_rab_bulanan',
+        'wa_nomor',
+        'wa_kirim_otomatis',
+        'wa_jam_kirim',
+        'wa_terakhir_kirim',
         'created_at',
     ];
 
-    protected $casts = ['input_manual' => 'bool'];
+    protected $casts = ['input_manual' => 'bool', 'wa_kirim_otomatis' => 'bool'];
 
     public function produk(): \Illuminate\Database\Eloquent\Relations\HasMany
     {

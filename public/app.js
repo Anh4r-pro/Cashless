@@ -2988,7 +2988,8 @@ function martSpdView(el) {
           <option value="pdf">PDF (lewat dialog cetak)</option>
         </select>
         <button class="linkbtn" id="spd-unduh">⬇ unduh</button> ·
-        <button class="linkbtn" id="spd-cetak">🖨 cetak</button>
+        <button class="linkbtn" id="spd-cetak">🖨 cetak</button> ·
+        <button class="linkbtn" id="spd-wa">📱 kirim WA</button>
       </span></div>
     <div class="filterbar">
       <div class="field"><label>Dari</label><input type="date" id="spd-dari" value="${hariIni}"></div>
@@ -3022,7 +3023,30 @@ function martSpdView(el) {
   };
   $('#spd-unduh').onclick = martUnduhSpd;
   $('#spd-cetak').onclick = martCetakSpd;
+  $('#spd-wa').onclick = martKirimWaSpd;
   martMuatSpd();
+}
+
+/**
+ * Kirim ringkasan HARI INI + rekap bulan berjalan ke WA — bukan rentang
+ * tanggal yang sedang disaring di layar. "Kirim WA" dimaksudkan sebagai
+ * laporan harian rutin (sama isinya dengan yang dikirim otomatis), jadi
+ * tombol ini tidak bergantung pada filter tanggal yang sedang dipilih.
+ */
+async function martKirimWaSpd() {
+  const b = $('#spd-wa');
+  b.disabled = true;
+  const asli = b.textContent;
+  b.textContent = 'mengirim…';
+  try {
+    await api('/api/mart/spd/kirim-wa', { method: 'POST' });
+    toast('✔ Laporan SPD terkirim ke WhatsApp', 'ok');
+  } catch (e) {
+    toast(e.message, 'err');
+  } finally {
+    b.disabled = false;
+    b.textContent = asli;
+  }
 }
 
 /** Saringan layar sebagai query — dipakai bersama oleh daftar & unduhan. */
@@ -8949,6 +8973,19 @@ function tenantModal(t) {
       sesuai menu yang sudah disetujui admin — nyalakan lagi sewaktu-waktu kalau ada yang harus
       dilayani manual. Pagarnya ada di server, bukan sekadar menyembunyikan kotaknya.</span>
 
+    <div id="m-mart-wa">
+      <div class="field"><label>Target RAB bulanan (Rp)</label>${inputUang({ id: 'm-target-rab', nilai: t?.target_rab_bulanan || '' })}</div>
+      <div class="field"><label>Nomor WA tujuan laporan SPD</label>
+        <input id="m-wa-nomor" value="${esc(t?.wa_nomor || '')}" placeholder="08xxxxxxxxxx"></div>
+      <label class="cek"><input type="checkbox" id="m-wa-oto" ${t?.wa_kirim_otomatis ? 'checked' : ''}>
+        kirim laporan SPD otomatis tiap hari</label>
+      <div class="field"><label>Jam kirim otomatis</label>
+        <input type="time" id="m-wa-jam" value="${esc(t?.wa_jam_kirim || '22:00')}"></div>
+      <span class="muted set-hint">Khusus Imbos Mart (mode Swalayan). Target RAB dibagi rata per hari
+        untuk hitung persentase capaian di laporan WA — kosongkan kalau belum mau pakai target.
+        Laporan dikirim lewat gateway WA kantin sendiri, bukan nomor pribadi siapa pun.</span>
+    </div>
+
     ${t ? `
     <div class="field"><label>Status</label><select id="m-status">
       <option value="aktif" ${t.status === 'aktif' ? 'selected' : ''}>aktif</option>
@@ -8958,11 +8995,18 @@ function tenantModal(t) {
     <div class="field"><label>Username akun kasir</label><input id="m-user" placeholder="mis. sari"></div>
     <div class="field"><label>Password akun kasir</label><input id="m-pass" type="text"></div>`}`,
     async () => {
+      const waBody = {
+        target_rab_bulanan: nilaiUang('#m-target-rab'),
+        wa_nomor: $('#m-wa-nomor').value.trim(),
+        wa_kirim_otomatis: $('#m-wa-oto').checked,
+        wa_jam_kirim: $('#m-wa-jam').value || null,
+      };
       if (t) {
         const d = await api('/api/tenants/' + t.id, { method: 'PUT', body: {
           nama: $('#m-nama').value, pemilik: $('#m-pemilik').value, jenis: $('#m-jenis').value, mode_kasir: $('#m-mode').value,
           input_manual: $('#m-manual').checked, status: $('#m-status').value,
           password_baru: $('#m-pass').value || undefined,
+          ...waBody,
         }});
         if (d.kategori_direset > 0)
           toast(`${d.kategori_direset} barang non-makanan ditandai ulang sebagai makanan`, 'ok');
@@ -8971,6 +9015,7 @@ function tenantModal(t) {
           nama: $('#m-nama').value, pemilik: $('#m-pemilik').value, jenis: $('#m-jenis').value, mode_kasir: $('#m-mode').value,
           input_manual: $('#m-manual').checked,
           username: $('#m-user').value, password: $('#m-pass').value,
+          ...waBody,
         }});
       }
       toast('✔ Tenant disimpan', 'ok');
@@ -8993,6 +9038,12 @@ function tenantModal(t) {
   };
   $('#m-mode').addEventListener('change', selarasManual);
   selarasManual();
+
+  // Target RAB & kirim WA cuma masuk akal untuk Imbos Mart (mode Swalayan) —
+  // tenant kantin biasa tidak punya konsep SPD harian ini.
+  const selarasMart = () => { $('#m-mart-wa').style.display = $('#m-mode').value === 'mart' ? '' : 'none'; };
+  $('#m-mode').addEventListener('change', selarasMart);
+  selarasMart();
 }
 
 /*
