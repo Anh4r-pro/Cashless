@@ -387,7 +387,11 @@ class SaldoController extends Controller
         return response()->json([
             'siswa' => $s->only(['id', 'nis', 'nama', 'kelas', 'saldo', 'saldo_titipan',
                 'status', 'smart_mode', 'smart_ambang', 'smart_isi']),
-            'berlaku' => SmartTopup::aturan($s, Pengaturan::sekolah()),
+            // Per-orang, bukan sekolah: max_saldo bisa ditimpa per golongan, dan
+            // SmartTopup::jalankan() (eksekusi sungguhan) sudah memakai angka
+            // per-golongan ini — memakai Pengaturan::sekolah() di sini membuat
+            // admin melihat batas yang beda dari yang sungguhan berlaku.
+            'berlaku' => SmartTopup::aturan($s, Pengaturan::untuk($s)),
             'mutasi' => TitipanMutasi::where('siswa_id', $s->id)->orderByDesc('id')->limit(100)->get(),
         ]);
     }
