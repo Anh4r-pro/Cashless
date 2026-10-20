@@ -694,14 +694,25 @@ async function kirimTopup() {
   btn.disabled = true;
   btn.textContent = 'Mengirim…';
   try {
-    await api('/api/ortu/topup', { method: 'POST', body: {
+    const d = await api('/api/ortu/topup', { method: 'POST', body: {
       jumlah, metode: topupPilihan.kode, tgl_bayar: tgl,
       pengirim: $('#o-tp-pengirim').value,
       bukti: topupBukti || undefined,
     } });
     tutupModal();
-    toast('Konfirmasi terkirim — menunggu diperiksa admin', 'ok');
     await muatPengajuan();
+    /*
+     * Melebihi batas saldo TIDAK LAGI ditolak (lihat server) — wali tetap
+     * boleh mengirim. Pesannya cukup panjang untuk menjelaskan ke mana
+     * kelebihannya pergi, jadi dipakaikan modal yang harus ditutup sendiri,
+     * bukan toast yang lewat begitu saja dalam tiga detik.
+     */
+    if (d.peringatan) {
+      bukaModal(`<h3>Konfirmasi terkirim</h3><p>${esc(d.peringatan)}</p>`,
+        '<button id="om-batal">Oke, mengerti</button>');
+    } else {
+      toast('Konfirmasi terkirim — menunggu diperiksa admin', 'ok');
+    }
   } catch (e) {
     if (e.status === 401) { tutupModal(); return tanganiGagal(e); }
     tunjukkan(e.message);

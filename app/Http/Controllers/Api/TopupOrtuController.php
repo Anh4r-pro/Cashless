@@ -179,10 +179,24 @@ class TopupOrtuController extends Controller
             throw new ApiError(429, "Masih ada {$antre['n']} pengajuan yang menunggu diperiksa admin. " .
                 'Tunggu yang itu diproses dulu sebelum mengajukan lagi.');
         }
+        /*
+         * Melebihi batas saldo kartu TIDAK LAGI MENOLAK pengajuannya — hak wali
+         * untuk menyetor tetap ada, persis filosofi Setoran::bagi(): uang yang
+         * tidak muat di kartu bukan uang yang ditolak, melainkan uang yang
+         * mengendap sebagai titipan dan menetes masuk otomatis saat saldo
+         * menipis. Sakelar "Simpan kelebihan sebagai saldo titipan" di layar
+         * admin SUDAH menyala bawaannya, jadi persetujuannya tetap mulus tanpa
+         * admin perlu melakukan apa pun yang berbeda. Yang berubah hanya:
+         * walinya diberi tahu LEBIH AWAL lewat `peringatan`, bukan dikejutkan
+         * penolakan di tengah pengisian form.
+         */
+        $peringatan = null;
         if ($s->saldo + $antre['total'] + $jumlah > $cfg['max_saldo']) {
-            throw new ApiError(400, 'Saldo kartu maksimal ' . Rupiah::f($cfg['max_saldo']) .
-                '. Saldo sekarang ' . Rupiah::f($s->saldo) .
-                ($antre['total'] ? ' dan ' . Rupiah::f($antre['total']) . ' masih menunggu disetujui' : '') . '.');
+            $peringatan = 'Nominal ini membuat saldo kartu melebihi batas ' . Rupiah::f($cfg['max_saldo']) .
+                ' (saldo sekarang ' . Rupiah::f($s->saldo) .
+                ($antre['total'] ? ', ditambah ' . Rupiah::f($antre['total']) . ' yang masih menunggu disetujui' : '') .
+                '). Kelebihannya akan disimpan sebagai saldo titipan oleh admin dan otomatis ' .
+                'mengisi kartu saat saldo menipis — pengajuan tetap bisa dikirim.';
         }
 
         /*
@@ -238,7 +252,8 @@ class TopupOrtuController extends Controller
             'created_at' => WaktuIso::sekarang(),
         ])->fresh();
 
-        return response()->json(['ok' => true, 'pengajuan' => $this->untukOrtu($row)], 201);
+        return response()->json(['ok' => true, 'pengajuan' => $this->untukOrtu($row),
+            'peringatan' => $peringatan], 201);
     }
 
     // ------------------------------------------------------------ sisi admin
