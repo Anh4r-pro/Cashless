@@ -2221,7 +2221,7 @@ function martStokView(el) {
         <option value="habis">habis</option></select></div>
     </div>
     <div class="tblwrap"><table>
-      <thead><tr><th>Barang</th><th>SKU</th><th>Kategori</th><th class="num">Harga beli</th>
+      <thead><tr><th>SKU</th><th>Barang</th><th>Kategori</th><th class="num">Harga beli</th>
         <th class="num">Harga jual</th><th class="num">Margin</th><th class="num">Stok</th>
         <th>Status</th><th>Expired</th><th></th></tr></thead>
       <tbody id="ms-body"></tbody>
@@ -2294,8 +2294,8 @@ async function martMuatStok() {
 
   $('#ms-body').innerHTML = d.produk.map((p) => `
     <tr>
-      <td><b>${esc(p.nama)}</b>${p.aktif ? '' : ' <span class="badge nonaktif">nonaktif</span>'}</td>
       <td>${p.barcode ? `<code>${esc(p.barcode)}</code>` : '<span class="muted">—</span>'}</td>
+      <td><b>${esc(p.nama)}</b>${p.aktif ? '' : ' <span class="badge nonaktif">nonaktif</span>'}</td>
       <td>${esc(p.kategori_nama || '—')}${p.kategori === 'non_makanan' ? ' <span class="katdot">non-makanan</span>' : ''}</td>
       <td class="num rp">${p.hpp ? rp(p.hpp) : '<span class="muted">—</span>'}</td>
       <td class="num rp">${rp(p.harga)}${p.harga_grosir
@@ -2351,8 +2351,8 @@ async function martImporPratinjau(file) {
   const baris = d.baris.map((b) => `
     <tr class="${b.status === 'siap' ? '' : 'tp-menunggu'}">
       <td class="num muted">${b.baris}</td>
-      <td>${esc(b.nama || '—')}</td>
       <td>${b.barcode ? `<code>${esc(b.barcode)}</code>` : '<span class="muted">—</span>'}</td>
+      <td>${esc(b.nama || '—')}</td>
       <td>${b.kategori ? esc(b.kategori) : '<span class="muted">—</span>'}
         ${b.kategori_baru ? '<span class="badge tp-pending">baru</span>' : ''}</td>
       <td class="num rp">${b.hpp === null ? '<span class="muted">—</span>' : rp(b.hpp)}</td>
@@ -2374,7 +2374,7 @@ async function martImporPratinjau(file) {
     ${r.n_gagal ? `<p class="muted">Baris yang dilewati tidak ikut disimpan. Perbaiki di Excel lalu
       unggah lagi — barang yang sudah tersimpan tidak akan kembar.</p>` : ''}
     <div class="tblwrap" style="max-height:50vh; overflow:auto"><table>
-      <thead><tr><th class="num">Baris</th><th>Barang</th><th>SKU</th><th>Kategori</th>
+      <thead><tr><th class="num">Baris</th><th>SKU</th><th>Barang</th><th>Kategori</th>
         <th class="num">Beli</th><th class="num">Jual</th><th class="num">Stok</th>
         <th>Status</th></tr></thead>
       <tbody>${baris}</tbody>
@@ -2408,11 +2408,11 @@ async function martMuatPersediaan() {
       belum punya harga modal, jadi menyumbang <b>nol</b> ke nilai di atas — nilai persediaan
       sebenarnya <b>lebih besar</b> daripada angka itu. Isi HPP-nya supaya laporannya utuh.</p>` : ''}
     <div class="tblwrap"><table>
-      <thead><tr><th>Barang</th><th>SKU</th><th>Kategori</th><th class="num">Stok</th>
+      <thead><tr><th>SKU</th><th>Barang</th><th>Kategori</th><th class="num">Stok</th>
         <th class="num">Harga modal</th><th class="num">Nilai</th></tr></thead>
       <tbody>${martPs.baris.map((b) => `<tr>
-        <td>${esc(b.nama)}${b.aktif ? '' : ' <span class="badge nonaktif">nonaktif</span>'}</td>
         <td class="muted">${esc(b.barcode || '—')}</td>
+        <td>${esc(b.nama)}${b.aktif ? '' : ' <span class="badge nonaktif">nonaktif</span>'}</td>
         <td class="muted">${esc(b.kategori_nama || '—')}</td>
         <td class="num">${b.stok}</td>
         <td class="num rp ${b.hpp ? '' : 'minus'}">${b.hpp ? rp(b.hpp) : 'belum diisi'}</td>
@@ -2432,10 +2432,10 @@ function martCetakPersediaan() {
     <h1>Laporan Persediaan (nilai modal) — ${esc(martPs.tenant.nama)}</h1>
     <div>Dicetak ${new Date().toLocaleString('id-ID')}</div>
     <table>
-      <thead><tr><th>Barang</th><th>SKU</th><th>Kategori</th><th class="n">Stok</th>
+      <thead><tr><th>SKU</th><th>Barang</th><th>Kategori</th><th class="n">Stok</th>
         <th class="n">Harga modal</th><th class="n">Nilai</th></tr></thead>
-      <tbody>${martPs.baris.map((b) => `<tr><td>${esc(b.nama)}${b.aktif ? '' : ' (nonaktif)'}</td>
-        <td>${esc(b.barcode || '')}</td><td>${esc(b.kategori_nama || '')}</td>
+      <tbody>${martPs.baris.map((b) => `<tr><td>${esc(b.barcode || '')}</td>
+        <td>${esc(b.nama)}${b.aktif ? '' : ' (nonaktif)'}</td><td>${esc(b.kategori_nama || '')}</td>
         <td class="n">${b.stok}</td><td class="n">${rp(b.hpp)}</td>
         <td class="n">${rp(b.nilai)}</td></tr>`).join('')}
         <tr class="tebal"><td>TOTAL</td><td></td><td></td><td class="n">${t.stok}</td>
@@ -2683,9 +2683,9 @@ function martUnduhBarang() {
     // Expired ikut diunduh: layar sudah punya kolomnya, dan unduhan yang
     // tertinggal dari layar adalah persis cacat yang diperbaiki di Laporan
     // Keuangan (angka layar vs unduhan tidak sama).
-    ['Nama', 'SKU', 'Kategori', 'Jatah santri', 'Harga beli', 'Harga jual', 'Untung', 'Margin %',
+    ['SKU', 'Nama', 'Kategori', 'Jatah santri', 'Harga beli', 'Harga jual', 'Untung', 'Margin %',
       'Stok', 'Status', 'Expired', 'Sisa hari'],
-    d.map((p) => [p.nama, p.barcode || '', p.kategori_nama || '', p.kategori,
+    d.map((p) => [p.barcode || '', p.nama, p.kategori_nama || '', p.kategori,
       p.hpp || '', p.harga, p.untung ?? '', p.margin ?? '', p.stok ?? '', p.status,
       p.expired || '', p.expired_hari ?? '']));
 }
@@ -2698,10 +2698,10 @@ function martCetakBarang() {
   cetakLembar('Daftar Barang', gaya, `
     <h1>Daftar Barang &amp; Stok — ${esc(USER?.tenant_nama || 'IMBOS Mart')}</h1>
     <div>${new Date().toLocaleString('id-ID')} · ${d.length} barang</div>
-    <table><thead><tr><th>Nama</th><th>SKU</th><th>Kategori</th><th class="n">Beli</th>
+    <table><thead><tr><th>SKU</th><th>Nama</th><th>Kategori</th><th class="n">Beli</th>
       <th class="n">Jual</th><th class="n">Margin</th><th class="n">Stok</th>
       <th>Expired</th></tr></thead>
-    <tbody>${d.map((p) => `<tr><td>${esc(p.nama)}</td><td>${esc(p.barcode || '-')}</td>
+    <tbody>${d.map((p) => `<tr><td>${esc(p.barcode || '-')}</td><td>${esc(p.nama)}</td>
       <td>${esc(p.kategori_nama || '-')}</td><td class="n">${p.hpp ? rp(p.hpp) : '-'}</td>
       <td class="n">${rp(p.harga)}</td><td class="n">${p.margin ?? '-'}%</td>
       <td class="n">${p.stok ?? '-'}</td>
@@ -2830,9 +2830,10 @@ function martDaftarStok(judul, daftar, warna) {
   return `<h3 style="margin:12px 0 6px; font-size:13.5px; color:var(--${warna})">${judul}
     <span class="muted">(${daftar.length})</span></h3>
     <div class="tblwrap"><table>
-      <thead><tr><th>Barang</th><th>SKU</th><th class="num">Stok</th><th class="num">Ambang</th></tr></thead>
-      <tbody>${daftar.map((b) => `<tr><td>${esc(b.nama)}</td>
+      <thead><tr><th>SKU</th><th>Barang</th><th class="num">Stok</th><th class="num">Ambang</th></tr></thead>
+      <tbody>${daftar.map((b) => `<tr>
         <td>${b.barcode ? `<code>${esc(b.barcode)}</code>` : '—'}</td>
+        <td>${esc(b.nama)}</td>
         <td class="num"><b style="color:var(--${warna})">${b.stok}</b></td>
         <td class="num muted">${b.stok_min}</td></tr>`).join('')}</tbody>
     </table></div>`;
@@ -3283,7 +3284,7 @@ function martOpnameBerjalan() {
     <p class="muted">Isi kolom <b>Stok Fisik</b> apa adanya. Kosongkan kalau barangnya belum
       dihitung — kosong berarti "belum dihitung", bukan nol, dan stoknya tidak akan diubah.</p>
     <div class="tblwrap"><table>
-      <thead><tr><th>Barang</th><th>SKU</th><th class="num">Stok Sistem</th>
+      <thead><tr><th>SKU</th><th>Barang</th><th class="num">Stok Sistem</th>
         <th class="num" style="width:110px">Stok Fisik</th><th class="num">Selisih</th>
         <th class="num">Nilai Selisih</th><th style="width:150px">Alasan</th></tr></thead>
       <tbody>${o.item.map((i) => martOpnameBaris(i)).join('')}</tbody>
@@ -3306,8 +3307,8 @@ function martOpnameBaris(i) {
   const warna = i.selisih > 0 ? 'var(--ok)' : i.selisih < 0 ? 'var(--err)' : 'var(--muted)';
   const belum = i.stok_fisik === null;
   return `<tr data-baris="${i.id}" style="${belum ? 'background:#fffdf5' : ''}">
-    <td><b>${esc(i.nama)}</b></td>
     <td>${i.barcode ? `<code>${esc(i.barcode)}</code>` : '<span class="muted">—</span>'}</td>
+    <td><b>${esc(i.nama)}</b></td>
     <td class="num">${i.stok_sistem}</td>
     <td class="num"><input type="number" min="0" style="width:90px; text-align:right"
       data-fisik="${i.id}" value="${belum ? '' : i.stok_fisik}" placeholder="—"></td>
@@ -3346,8 +3347,8 @@ function martPasangOpname() {
   });
   $('#mo-cetak-form').onclick = martCetakFormOpname;
   $('#mo-unduh').onclick = () => unduhCsv(`opname-berjalan-${martHariIni()}.csv`,
-    ['Barang', 'SKU', 'Stok sistem', 'Stok fisik', 'Selisih', 'HPP', 'Nilai selisih', 'Alasan'],
-    o.item.map((i) => [i.nama, i.barcode, i.stok_sistem, i.stok_fisik ?? '', i.selisih,
+    ['SKU', 'Barang', 'Stok sistem', 'Stok fisik', 'Selisih', 'HPP', 'Nilai selisih', 'Alasan'],
+    o.item.map((i) => [i.barcode, i.nama, i.stok_sistem, i.stok_fisik ?? '', i.selisih,
       i.hpp, i.nilai_selisih, i.alasan]));
   $('#mo-batal').onclick = async () => {
     if (!confirm('Batalkan sesi opname ini? Semua hitungan yang sudah diisi akan hilang. '
@@ -3402,9 +3403,9 @@ function martCetakFormOpname() {
     <h1>Form Hitung Fisik — ${esc(USER?.tenant_nama || 'IMBOS Mart')}</h1>
     <div>Sesi #${o.id} · dimulai ${new Date(o.created_at).toLocaleString('id-ID')} ·
       petugas ${esc(o.operator)}</div>
-    <table><thead><tr><th>Barang</th><th>SKU</th><th class="n">Sistem</th>
+    <table><thead><tr><th>SKU</th><th>Barang</th><th class="n">Sistem</th>
       <th class="n isi">Fisik</th><th>Catatan</th></tr></thead>
-      <tbody>${o.item.map((i) => `<tr><td>${esc(i.nama)}</td><td>${esc(i.barcode || '-')}</td>
+      <tbody>${o.item.map((i) => `<tr><td>${esc(i.barcode || '-')}</td><td>${esc(i.nama)}</td>
         <td class="n">${i.stok_sistem}</td><td></td><td></td></tr>`).join('')}</tbody></table>
     <div class="ttd">Penghitung: ______________________ &nbsp;&nbsp;
       Saksi: ______________________ &nbsp;&nbsp; Tanggal: ______________</div>`);
@@ -3441,8 +3442,8 @@ async function martOpnameDetail(id) {
     </table></div>
     <button class="linkbtn" id="mo-unduh-detail">⬇ unduh rincian CSV</button>`);
   $('#mo-unduh-detail').onclick = () => unduhCsv(`opname-${o.id}.csv`,
-    ['Barang', 'SKU', 'Stok sistem', 'Stok fisik', 'Selisih', 'HPP', 'Nilai selisih', 'Alasan'],
-    o.item.map((i) => [i.nama, i.barcode, i.stok_sistem, i.stok_fisik ?? '', i.selisih,
+    ['SKU', 'Barang', 'Stok sistem', 'Stok fisik', 'Selisih', 'HPP', 'Nilai selisih', 'Alasan'],
+    o.item.map((i) => [i.barcode, i.nama, i.stok_sistem, i.stok_fisik ?? '', i.selisih,
       i.hpp, i.nilai_selisih, i.alasan]));
 }
 

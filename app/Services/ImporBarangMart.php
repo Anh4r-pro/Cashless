@@ -39,8 +39,8 @@ class ImporBarangMart
 
     public const KOLOM = [
         ['judul' => 'No', 'lebar' => 6],
-        ['judul' => 'Nama Barang', 'lebar' => 36],
         ['judul' => 'SKU / Barcode', 'lebar' => 20],
+        ['judul' => 'Nama Barang', 'lebar' => 36],
         ['judul' => 'Kategori', 'lebar' => 22],
         ['judul' => 'Harga Beli (HPP)', 'lebar' => 18],
         ['judul' => 'Harga Jual', 'lebar' => 16],
@@ -90,7 +90,7 @@ class ImporBarangMart
         // SKU disimpan sebagai TEKS, bukan angka: barcode 13 digit yang dibaca
         // Excel sebagai bilangan berubah menjadi 8,99E+12 dan nol di depannya
         // hilang — dan yang hilang itu tidak bisa dipulihkan dari berkasnya.
-        $sheet->getStyle('C2:C' . (self::MAKS_BARIS + 1))->getNumberFormat()->setFormatCode('@');
+        $sheet->getStyle('B2:B' . (self::MAKS_BARIS + 1))->getNumberFormat()->setFormatCode('@');
 
         $b = self::MAKS_BARIS + 1;
         $pasang = function (string $kol, string $tipe, ?string $op, string $f1, ?string $f2,
@@ -114,12 +114,12 @@ class ImporBarangMart
             $sheet->setDataValidation("{$kol}2:{$kol}{$b}", $dv);
         };
 
-        $pasang('B', DataValidation::TYPE_TEXTLENGTH, DataValidation::OPERATOR_BETWEEN, '2', '120',
-            'Nama barang seperti yang akan terlihat di layar kasir.',
-            'Nama barang 2–120 huruf.');
-        $pasang('C', DataValidation::TYPE_TEXTLENGTH, DataValidation::OPERATOR_BETWEEN, '4', '32',
+        $pasang('B', DataValidation::TYPE_TEXTLENGTH, DataValidation::OPERATOR_BETWEEN, '4', '32',
             'Angka/huruf barcode. Boleh dikosongkan — barang tetap bisa dicari lewat namanya.',
             'SKU/barcode 4–32 karakter angka atau huruf.');
+        $pasang('C', DataValidation::TYPE_TEXTLENGTH, DataValidation::OPERATOR_BETWEEN, '2', '120',
+            'Nama barang seperti yang akan terlihat di layar kasir.',
+            'Nama barang 2–120 huruf.');
         // Daftar kategori hanya dipasang kalau sudah ada isinya: daftar kosong
         // membuat Excel menolak SETIAP isian di kolom itu.
         if ($kategori) {
@@ -152,8 +152,8 @@ class ImporBarangMart
             '',
             '1. Satu baris untuk satu barang. Kolom No hanya penomoran, boleh diabaikan. Baris kosong dilewati.',
             '2. Jangan mengubah judul kolom — kolom dikenali dari judulnya, bukan dari urutannya.',
-            '3. Nama Barang: 2–120 huruf. Nama yang SUDAH ADA di daftar barang Anda akan dilewati, tidak ditimpa.',
-            '4. SKU / Barcode: boleh dikosongkan. Kalau diisi, 4–32 angka/huruf dan tidak boleh sama dengan barang lain.',
+            '3. SKU / Barcode: boleh dikosongkan. Kalau diisi, 4–32 angka/huruf dan tidak boleh sama dengan barang lain.',
+            '4. Nama Barang: 2–120 huruf. Nama yang SUDAH ADA di daftar barang Anda akan dilewati, tidak ditimpa.',
             '5. Kategori: kategori etalase untuk menyaring barang di kasir. Pilih dari daftar, atau ketik nama baru —',
             '   kategori yang belum ada akan dibuatkan otomatis, dan akan disebutkan di layar pratinjau.',
             '6. Harga Beli (HPP): modal per satuan. Boleh dikosongkan, tetapi tanpa ini laba & nilai stok tidak bisa dihitung.',
