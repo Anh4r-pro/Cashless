@@ -26,6 +26,11 @@ use Illuminate\Support\Facades\DB;
  * sendiri — menunggu persetujuan untuk mengubah harga barang sendiri hanya
  * menghambat tanpa menambah pengamanan apa pun. Yang tetap dijaga: seluruh
  * barang & mutasinya tetap terbaca penuh oleh admin pusat lewat laporan.
+ *
+ * Pagar peran dipasang PER-METHOD, bukan sekaligus di martKu(): hampir semua
+ * method di sini khusus admin toko, TAPI index() tidak boleh ikut dipagari —
+ * itulah sumber katalog etalase POS, yang justru dipakai kasir serve-only
+ * setiap kali melayani. Memagari martKu() membuat layar Kasir kosong.
  */
 class MartStokController extends Controller
 {
@@ -33,7 +38,7 @@ class MartStokController extends Controller
 
     private function martKu(Request $r): Tenant
     {
-        $u = $this->wajibAdminToko($r, 'tenant');
+        $u = $this->wajibPeran($r, 'tenant');
         $this->operator = (string) ($u->nama ?: 'Kasir Mart');
         $t = Tenant::find($u->tenant_id);
         if (! $t || ($t->mode_kasir ?? 'menu') !== 'mart') {
@@ -47,6 +52,7 @@ class MartStokController extends Controller
 
     public function kategori(Request $r)
     {
+        $this->wajibAdminToko($r, 'tenant');
         $t = $this->martKu($r);
 
         return response()->json(['kategori' => $this->daftarKategori($t)]);
@@ -63,6 +69,7 @@ class MartStokController extends Controller
 
     public function kategoriSimpan(Request $r, ?int $id = null)
     {
+        $this->wajibAdminToko($r, 'tenant');
         $t = $this->martKu($r);
         $nama = mb_substr(trim((string) $r->input('nama', '')), 0, 40);
         if ($nama === '') {
@@ -96,6 +103,7 @@ class MartStokController extends Controller
 
     public function kategoriHapus(Request $r, int $id)
     {
+        $this->wajibAdminToko($r, 'tenant');
         $t = $this->martKu($r);
         $k = MartKategori::where('id', $id)->where('tenant_id', $t->id)->first();
         if (! $k) {
@@ -111,6 +119,11 @@ class MartStokController extends Controller
 
     // --------------------------------------------------------------- barang
 
+    /**
+     * Daftar barang. SENGAJA tidak dipagari wajibAdminToko(): ini katalog
+     * yang dimuat layar Kasir (martMuatKatalog di app.js), jadi kasir
+     * serve-only wajib bisa membacanya.
+     */
     public function index(Request $r)
     {
         $t = $this->martKu($r);
@@ -152,6 +165,7 @@ class MartStokController extends Controller
      */
     public function persediaan(Request $r)
     {
+        $this->wajibAdminToko($r, 'tenant');
         $t = $this->martKu($r);
         $kat = MartKategori::where('tenant_id', $t->id)->pluck('nama', 'id');
 
@@ -300,6 +314,7 @@ class MartStokController extends Controller
 
     public function simpan(Request $r, ?int $id = null)
     {
+        $this->wajibAdminToko($r, 'tenant');
         $t = $this->martKu($r);
         $b = $r->all();
 
@@ -452,6 +467,7 @@ class MartStokController extends Controller
 
     public function hapus(Request $r, int $id)
     {
+        $this->wajibAdminToko($r, 'tenant');
         $t = $this->martKu($r);
         $p = Produk::where('id', $id)->where('tenant_id', $t->id)->first();
         if (! $p) {
@@ -477,6 +493,7 @@ class MartStokController extends Controller
     /** Barang masuk dari pemasok, atau koreksi manual. */
     public function stokMasuk(Request $r, int $id)
     {
+        $this->wajibAdminToko($r, 'tenant');
         $t = $this->martKu($r);
         $p = Produk::where('id', $id)->where('tenant_id', $t->id)->first();
         if (! $p) {
@@ -510,6 +527,7 @@ class MartStokController extends Controller
     /** Template Excel, lengkap dengan daftar kategori tenant ini sebagai dropdown. */
     public function imporTemplate(Request $r)
     {
+        $this->wajibAdminToko($r, 'tenant');
         $t = $this->martKu($r);
         $stamp = date('Y-m-d');
 
@@ -522,6 +540,7 @@ class MartStokController extends Controller
     /** Langkah 1: pratinjau — belum ada satu pun barang yang tersimpan. */
     public function imporPratinjau(Request $r)
     {
+        $this->wajibAdminToko($r, 'tenant');
         $t = $this->martKu($r);
         ['isi' => $isi, 'nama' => $nama] = ImporTopup::berkasDariBody($r->all());
 
@@ -537,6 +556,7 @@ class MartStokController extends Controller
      */
     public function imporTerapkan(Request $r)
     {
+        $this->wajibAdminToko($r, 'tenant');
         $t = $this->martKu($r);
         ['isi' => $isi, 'nama' => $nama] = ImporTopup::berkasDariBody($r->all());
         if ($r->input('sidik') && (string) $r->input('sidik') !== ImporTopup::sidik($isi)) {
@@ -552,6 +572,7 @@ class MartStokController extends Controller
     /** Riwayat pergerakan stok satu barang. */
     public function mutasi(Request $r, int $id)
     {
+        $this->wajibAdminToko($r, 'tenant');
         $t = $this->martKu($r);
 
         return response()->json(['mutasi' => MartStokMutasi::where('tenant_id', $t->id)
