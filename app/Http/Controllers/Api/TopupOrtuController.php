@@ -59,7 +59,12 @@ class TopupOrtuController extends Controller
     public function info(Request $r)
     {
         $s = $this->ortu($r);
-        $cfg = Pengaturan::sekolah();
+        // Per-orang, bukan sekolah: max_saldo bisa ditimpa per golongan (lihat
+        // Pengaturan::BATAS_GOLONGAN), dan Setoran::terima() yang memutuskan
+        // saat admin menyetujui sudah memakai angka per-golongan ini juga —
+        // memakai Pengaturan::sekolah() di sini membuat portal wali menampilkan
+        // dan menegakkan batas yang beda dari yang sungguhan berlaku.
+        $cfg = Pengaturan::untuk($s);
         $info = self::info_();
         $siap = self::metodeSiap($info);
 
@@ -112,7 +117,9 @@ class TopupOrtuController extends Controller
     public function ajukan(Request $r)
     {
         $s = $this->ortu($r);
-        $cfg = Pengaturan::sekolah();
+        // Sama seperti info(): per-orang, supaya pagar max_saldo di sini cocok
+        // persis dengan yang ditegakkan Setoran::terima() saat admin menyetujui.
+        $cfg = Pengaturan::untuk($s);
         if ($cfg['topup_ortu_aktif'] !== 1) {
             throw new ApiError(403, 'Pengajuan isi saldo lewat portal sedang ditutup sekolah.');
         }
