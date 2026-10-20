@@ -291,8 +291,13 @@ function showApp() {
   $('#login').classList.add('hidden');
   $('#app').classList.remove('hidden');
   $('#hd-title').textContent = USER.role === 'tenant' ? `IMBOS Cashless — ${USER.tenant_nama}` : 'IMBOS Cashless';
+  // Label peran. "(kasir)" dulu dipakai untuk SEMUA akun tenant, sejak
+  // sebelum ada akun kasir serve-only. Di unit Mart itu jadi menyesatkan:
+  // admin toko dan kasir serve-only terbaca sama persis padahal haknya jauh
+  // berbeda, dan justru di layar itulah bedanya perlu kelihatan.
   $('#hd-user').textContent = USER.role === 'tenant'
-    ? `${USER.nama} (kasir)`
+    ? `${USER.nama} (${USER.tenant_mode === 'mart'
+        ? (USER.peran_tenant === 'kasir' ? 'kasir' : 'admin toko') : 'kasir'})`
     : `${USER.nama} · ${USER.kategori_nama || 'Akses Penuh'}`;
   const awal = tabDariHash();
   gambarNav(tabTampil(USER.role), awal);
