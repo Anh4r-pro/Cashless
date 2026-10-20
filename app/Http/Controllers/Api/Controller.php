@@ -51,6 +51,23 @@ abstract class Controller
     }
 
     /**
+     * Pagar untuk aksi yang hanya boleh admin toko, bukan akun kasir serve-only.
+     *
+     * Akun kasir (peran_tenant='kasir') melayani penjualan tapi tidak mengolah
+     * data — stok, member, pembelian, dan opname tetap milik admin toko.
+     * Superadmin selalu lolos: kondisinya hanya menyala untuk role 'tenant'.
+     */
+    protected function wajibAdminToko(Request $r, string ...$peran): User
+    {
+        $u = $this->wajibPeran($r, ...$peran);
+        if ($u->role === 'tenant' && $u->peran_tenant === 'kasir') {
+            throw new ApiError(403, 'Akun ini hanya bisa melayani penjualan — fitur ini khusus admin toko.');
+        }
+
+        return $u;
+    }
+
+    /**
      * Pagar untuk endpoint yang dipakai BERSAMA oleh kasir dan admin.
      *
      * Akun kasir tidak punya kategori akses sama sekali, sehingga memasang

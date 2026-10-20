@@ -201,6 +201,11 @@ Route::middleware('peran:superadmin')->group(function () {
     Route::post('tenants', [TenantController::class, 'store'])->middleware('izin:tenant.tambah');
     Route::put('tenants/{id}', [TenantController::class, 'update'])->middleware('izin:tenant.ubah');
     Route::delete('tenants/{id}', [TenantController::class, 'destroy'])->middleware('izin:tenant.hapus');
+    // Akun kasir (serve-only) milik satu tenant — izin sama dengan tenant induknya.
+    Route::get('tenants/{id}/kasir', [TenantController::class, 'kasirIndex'])->middleware('izin:tenant.lihat');
+    Route::post('tenants/{id}/kasir', [TenantController::class, 'kasirStore'])->middleware('izin:tenant.ubah');
+    Route::put('tenants/{id}/kasir/{userId}', [TenantController::class, 'kasirUpdate'])->middleware('izin:tenant.ubah');
+    Route::delete('tenants/{id}/kasir/{userId}', [TenantController::class, 'kasirHapus'])->middleware('izin:tenant.ubah');
 });
 
 // --- menu: tenant mengusulkan, superadmin memutuskan ----------------------

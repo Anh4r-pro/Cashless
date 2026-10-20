@@ -119,7 +119,9 @@ class TenantController extends Controller
         });
 
         if ($baru = $r->input('password_baru')) {
-            if ($u = User::where('tenant_id', $t->id)->first()) {
+            // 'admin' disebut eksplisit: tenant yang sudah punya akun kasir
+            // tambahan tidak boleh ikut ganti sandi akun kasirnya di sini.
+            if ($u = User::where('tenant_id', $t->id)->where('peran_tenant', 'admin')->first()) {
                 $u->update(['password' => (string) $baru]);
                 // Sesi lama digugurkan: sandi diganti biasanya justru karena
                 // sandi lamanya sudah tidak dipercaya.
@@ -152,6 +154,97 @@ class TenantController extends Controller
             Produk::where('tenant_id', $id)->delete();
             Tenant::where('id', $id)->delete();
         });
+
+        return response()->json(['ok' => true]);
+    }
+
+    // --------------------------------------------- akun kasir (serve-only)
+
+    /** Daftar akun kasir (serve-only) milik satu tenant. */
+    public function kasirIndex(Request $r, int $id)
+    {
+        $this->wajibPeran($r, 'superadmin');
+        $t = Tenant::find($id);
+        if (! $t) {
+            throw new ApiError(404, 'Tenant tidak ditemukan');
+        }
+
+        return response()->json(['kasir' => User::where('tenant_id', $t->id)
+            ->where('peran_tenant', 'kasir')->orderBy('nama')
+            ->get(['id', 'nama', 'username'])]);
+    }
+
+    /**
+     * Tambah akun kasir baru untuk satu tenant — login terpisah dari akun
+     * admin toko, serve-only lewat `Controller::wajibAdminToko()`.
+     */
+    public function kasirStore(Request $r, int $id)
+    {
+        $this->wajibPeran($r, 'superadmin');
+        $t = Tenant::find($id);
+        if (! $t) {
+            throw new ApiError(404, 'Tenant tidak ditemukan');
+        }
+        $nama = trim((string) $r->input('nama'));
+        $username = strtolower(trim((string) $r->input('username')));
+        $password = (string) $r->input('password');
+        if ($nama === '') {
+            throw new ApiError(400, 'Nama akun kasir wajib diisi');
+        }
+        if ($username === '' || $password === '') {
+            throw new ApiError(400, 'Username & password akun kasir wajib diisi');
+        }
+        if (User::where('username', $username)->exists()) {
+            throw new ApiError(409, 'Username sudah dipakai');
+        }
+
+        $u = User::create([
+            'username' => $username, 'password' => $password, 'nama' => $nama,
+            'role' => 'tenant', 'tenant_id' => $t->id, 'peran_tenant' => 'kasir',
+        ]);
+
+        return response()->json(['ok' => true, 'kasir' => $u->only(['id', 'nama', 'username'])]);
+    }
+
+    /** Ubah nama dan/atau reset sandi satu akun kasir. */
+    public function kasirUpdate(Request $r, int $id, int $userId)
+    {
+        $this->wajibPeran($r, 'superadmin');
+        $u = User::where('id', $userId)->where('tenant_id', $id)->where('peran_tenant', 'kasir')->first();
+        if (! $u) {
+            throw new ApiError(404, 'Akun kasir tidak ditemukan');
+        }
+
+        $isi = [];
+        if ($r->filled('nama')) {
+            $isi['nama'] = trim((string) $r->input('nama'));
+        }
+        $baru = $r->input('password_baru');
+        if ($baru) {
+            $isi['password'] = (string) $baru;
+        }
+        if ($isi) {
+            $u->update($isi);
+        }
+        if ($baru) {
+            // Sesi lama digugurkan: sandi diganti biasanya justru karena
+            // sandi lamanya sudah tidak dipercaya.
+            SesiStaf::where('user_id', $u->id)->delete();
+        }
+
+        return response()->json(['ok' => true, 'kasir' => $u->fresh()->only(['id', 'nama', 'username'])]);
+    }
+
+    /** Hapus satu akun kasir — tidak menyentuh akun admin toko maupun kasir lain. */
+    public function kasirHapus(Request $r, int $id, int $userId)
+    {
+        $this->wajibPeran($r, 'superadmin');
+        $u = User::where('id', $userId)->where('tenant_id', $id)->where('peran_tenant', 'kasir')->first();
+        if (! $u) {
+            throw new ApiError(404, 'Akun kasir tidak ditemukan');
+        }
+        SesiStaf::where('user_id', $u->id)->delete();
+        $u->delete();
 
         return response()->json(['ok' => true]);
     }

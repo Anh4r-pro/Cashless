@@ -61,6 +61,7 @@ class MartMemberController extends Controller
     public function daftarKategori(Request $r)
     {
         $t = $this->martKu($r);
+        $this->wajibAdminToko($r, 'tenant');
 
         return response()->json([
             'kategori' => MartMemberKategori::where('tenant_id', $t->id)
@@ -73,6 +74,7 @@ class MartMemberController extends Controller
     public function kategoriSimpan(Request $r, ?int $id = null)
     {
         $t = $this->martKu($r);
+        $this->wajibAdminToko($r, 'tenant');
         $nama = mb_substr(trim(preg_replace('/\s+/u', ' ', (string) $r->input('nama', ''))), 0, 40);
         if (mb_strlen($nama) < 2) {
             throw new ApiError(400, 'Nama kategori minimal 2 huruf');
@@ -112,6 +114,7 @@ class MartMemberController extends Controller
     public function kategoriHapus(Request $r, int $id)
     {
         $t = $this->martKu($r);
+        $this->wajibAdminToko($r, 'tenant');
         $k = MartMemberKategori::where('id', $id)->where('tenant_id', $t->id)->first();
         if (! $k) {
             throw new ApiError(404, 'Kategori tidak ditemukan');
@@ -127,6 +130,7 @@ class MartMemberController extends Controller
     public function ketSimpan(Request $r, ?int $id = null)
     {
         $t = $this->martKu($r);
+        $this->wajibAdminToko($r, 'tenant');
         $teks = mb_substr(trim(preg_replace('/\s+/u', ' ', (string) $r->input('teks', ''))), 0, 160);
         if (mb_strlen($teks) < 2) {
             throw new ApiError(400, 'Keterangan minimal 2 huruf');
@@ -159,6 +163,7 @@ class MartMemberController extends Controller
     public function ketHapus(Request $r, int $id)
     {
         $t = $this->martKu($r);
+        $this->wajibAdminToko($r, 'tenant');
         $k = MartMemberKet::where('id', $id)->where('tenant_id', $t->id)->first();
         if (! $k) {
             throw new ApiError(404, 'Pilihan keterangan tidak ditemukan');
@@ -224,6 +229,7 @@ class MartMemberController extends Controller
     public function simpan(Request $r, ?int $id = null)
     {
         $t = $this->martKu($r);
+        $this->wajibAdminToko($r, 'tenant');
         $nama = mb_substr(trim(preg_replace('/\s+/u', ' ', (string) $r->input('nama', ''))), 0, 120);
         if (mb_strlen($nama) < 3) {
             throw new ApiError(400, 'Nama member minimal 3 huruf');
@@ -287,6 +293,7 @@ class MartMemberController extends Controller
     public function hapus(Request $r, int $id)
     {
         $t = $this->martKu($r);
+        $this->wajibAdminToko($r, 'tenant');
         $m = MartMember::where('id', $id)->where('tenant_id', $t->id)->first();
         if (! $m) {
             throw new ApiError(404, 'Member tidak ditemukan');

@@ -65,6 +65,7 @@ class MartLaporanController extends Controller
     public function dashboard(Request $r)
     {
         $t = $this->martKu($r);
+        $this->wajibAdminToko($r, 'tenant', 'superadmin');
 
         return response()->json([
             'tenant' => ['id' => $t->id, 'nama' => $t->nama],
@@ -621,6 +622,7 @@ class MartLaporanController extends Controller
     public function keuangan(Request $r)
     {
         $t = $this->martKu($r);
+        $this->wajibAdminToko($r, 'tenant', 'superadmin');
         $periode = in_array($r->query('periode'), ['hari', 'pekan', 'bulan', 'semua'], true)
             ? $r->query('periode') : 'bulan';
 

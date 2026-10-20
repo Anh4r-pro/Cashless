@@ -163,6 +163,15 @@ const VIEWS = {
     ['mart-spd', 'Closing Harian'],
     ['dashboard', 'Dashboard'],
   ],
+  // Akun kasir serve-only: cuma melayani (jual, tutup kas, tahan keranjang,
+  // koreksi riwayat, layani piutang) dan lihat Closing Harian — tidak
+  // mengolah data (stok, pembelian, kelola member, dashboard). Pagar
+  // sebenarnya di server (Controller::wajibAdminToko), ini cuma supaya
+  // menunya tidak menampilkan tombol yang akan ditolak server.
+  tenant_mart_kasir: [
+    ['kasir', 'Kasir'], ['mart-riwayat', 'Riwayat'], ['mart-piutang', 'Member & Piutang'],
+    ['mart-spd', 'Closing Harian'],
+  ],
 };
 
 /**
@@ -193,6 +202,13 @@ const IZIN_TAB = {
 const boleh = (kode) => !!USER?.izin?.includes(kode);
 
 /**
+ * Akun kasir Mart serve-only — cuma melayani, tidak mengolah data.
+ * Tombol kelola yang disembunyikan lewat ini murni kenyamanan tampilan;
+ * pagar sebenarnya di server (Controller::wajibAdminToko).
+ */
+const martKasirSajaMelayani = () => USER?.role === 'tenant' && USER?.peran_tenant === 'kasir';
+
+/**
  * Apakah tab ini boleh digambar? Tab tanpa aturan (milik kasir) selalu boleh.
  *
  * Penyaringan izin HANYA berlaku untuk superadmin: kategori akses adalah alat
@@ -205,7 +221,8 @@ const bolehTab = (id) => USER?.role !== 'superadmin'
   || !IZIN_TAB[id] || IZIN_TAB[id].some(boleh);
 
 /** Kunci menu: Mart punya susunan tab sendiri walau perannya tetap `tenant`. */
-const kunciMenu = (role) => role === 'tenant' && USER?.tenant_mode === 'mart' ? 'tenant_mart' : role;
+const kunciMenu = (role) => role === 'tenant' && USER?.tenant_mode === 'mart'
+  ? (USER?.peran_tenant === 'kasir' ? 'tenant_mart_kasir' : 'tenant_mart') : role;
 
 /**
  * Menu bar setelah disaring izin. Grup yang seluruh anaknya tertutup ikut
@@ -3705,9 +3722,10 @@ function martPiutangView(el) {
 
   <div class="panel">
     <div class="kat-head"><h2 style="margin:0">Member <span class="muted" id="mp-nm"></span></h2>
-      <span><button class="linkbtn" id="mp-unduh-member">⬇ unduh CSV</button> ·
+      <span><button class="linkbtn" id="mp-unduh-member">⬇ unduh CSV</button>
+        ${martKasirSajaMelayani() ? '' : ` ·
         <button class="linkbtn" id="mp-kategori">⚙ kelola kategori</button> ·
-        <button class="linkbtn" id="mp-tambah">+ Tambah member</button></span></div>
+        <button class="linkbtn" id="mp-tambah">+ Tambah member</button>`}</span></div>
     <p class="muted">Hanya member terdaftar yang boleh berhutang, dan hanya yang sudah diberi
       <b>plafon</b>. Plafon bawaannya nol — memberi batas hutang adalah keputusan yang harus
       diambil seseorang, bukan hak yang didapat begitu namanya terdaftar.</p>
@@ -3721,8 +3739,8 @@ function martPiutangView(el) {
     </table></div>
   </div>`;
 
-  $('#mp-tambah').onclick = () => martMemberModal(null);
-  $('#mp-kategori').onclick = martKategoriMemberModal;
+  if ($('#mp-tambah')) $('#mp-tambah').onclick = () => martMemberModal(null);
+  if ($('#mp-kategori')) $('#mp-kategori').onclick = martKategoriMemberModal;
   $('#mp-riwayat').onclick = martRiwayatCicilanModal;
   $('#mp-unduh-member').onclick = martUnduhMember;
   $('#mp-unduh-piutang').onclick = martUnduhPiutang;
@@ -3732,16 +3750,20 @@ function martPiutangView(el) {
 
 async function martMuatMemberLayar() {
   const q = $('#mp-cari')?.value.trim();
-  const [dm, dp, dk] = await Promise.all([
+  // Kasir tidak bisa menambah/mengubah member, jadi tidak pernah butuh
+  // dropdown kategorinya — endpointnya pun memang admin-only di server.
+  const kasir = martKasirSajaMelayani();
+  const panggilan = [
     api('/api/mart/member' + (q ? '?cari=' + encodeURIComponent(q) : '')),
     api('/api/mart/piutang'),
-    // Daftar kategori & pilihan keterangan ikut dimuat di sini supaya formulir
-    // member bisa langsung membuka dropdown-nya tanpa menunggu satu perjalanan
-    // jaringan lagi saat tombol Tambah ditekan.
-    api('/api/mart/member-kategori'),
-  ]);
+  ];
+  // Daftar kategori & pilihan keterangan ikut dimuat di sini supaya formulir
+  // member bisa langsung membuka dropdown-nya tanpa menunggu satu perjalanan
+  // jaringan lagi saat tombol Tambah ditekan.
+  if (!kasir) panggilan.push(api('/api/mart/member-kategori'));
+  const [dm, dp, dk] = await Promise.all(panggilan);
   martMem = { member: dm.member, piutang: dp.piutang, ringkas: dm.ringkas,
-    kategori: dk.kategori, keterangan: dk.keterangan };
+    kategori: dk?.kategori || [], keterangan: dk?.keterangan || [] };
 
   const r = dm.ringkas;
   $('#mp-ringkas').innerHTML = `
@@ -3783,9 +3805,9 @@ async function martMuatMemberLayar() {
       <td class="num rp">${m.sisa_piutang ? `<b>${rp(m.sisa_piutang)}</b>` : '<span class="muted">—</span>'}</td>
       <td class="num rp">${m.batas_hutang ? rp(m.sisa_plafon) : '<span class="muted">—</span>'}</td>
       <td><span class="badge ${m.aktif ? 'aktif' : 'nonaktif'}">${m.aktif ? 'aktif' : 'nonaktif'}</span></td>
-      <td style="white-space:nowrap">
+      <td style="white-space:nowrap">${martKasirSajaMelayani() ? '<span class="muted">—</span>' : `
         <button class="linkbtn" data-ubah-m="${i}">ubah</button> ·
-        <button class="linkbtn danger" data-hapus-m="${i}">hapus</button></td>
+        <button class="linkbtn danger" data-hapus-m="${i}">hapus</button>`}</td>
     </tr>`).join('') || '<tr><td colspan="9" class="muted">Belum ada member.</td></tr>';
 
   document.querySelectorAll('#mp-member-body [data-ubah-m]').forEach((b) => {
@@ -8991,6 +9013,15 @@ function tenantModal(t) {
         persentase capaian di tombol "copy laporan" layar Closing Harian — kosongkan kalau belum mau pakai target.</span>
     </div>
 
+    ${t && t.mode_kasir === 'mart' ? `
+    <div class="kat-head" style="margin-top:14px"><h3 style="margin:0">Akun Kasir (serve-only)</h3>
+      <button class="linkbtn" id="m-kasir-tambah" type="button">+ Tambah akun kasir</button></div>
+    <span class="muted set-hint">Login terpisah dari akun admin toko di atas — cuma bisa melayani
+      (jual, tutup kas, tahan keranjang, koreksi riwayat, layani piutang) dan lihat Closing Harian.
+      Tidak bisa kelola stok/member/pembelian. Cocok untuk unit Mart dengan lebih dari satu kasir
+      bergantian jaga.</span>
+    <div id="m-kasir-list" class="muted" style="margin-top:6px">memuat…</div>` : ''}
+
     ${t ? `
     <div class="field"><label>Status</label><select id="m-status">
       <option value="aktif" ${t.status === 'aktif' ? 'selected' : ''}>aktif</option>
@@ -9044,6 +9075,75 @@ function tenantModal(t) {
   const selarasMart = () => { $('#m-mart-wa').style.display = $('#m-mode').value === 'mart' ? '' : 'none'; };
   $('#m-mode').addEventListener('change', selarasMart);
   selarasMart();
+
+  // Akun kasir cuma masuk akal untuk tenant Mart yang SUDAH tersimpan (perlu
+  // tenant_id) — bagian ini statis di markup (lihat `${t && t.mode_kasir...}`
+  // di atas), tidak ikut sakelar mode_kasir yang baru diubah di layar ini.
+  if (t && t.mode_kasir === 'mart') {
+    $('#m-kasir-tambah').onclick = () => kasirAkunModal(t.id, null);
+    martMuatKasirAkun(t.id);
+  }
+}
+
+/** Daftar akun kasir (serve-only) satu tenant Mart, dengan aksi ubah/hapus inline. */
+async function martMuatKasirAkun(tenantId) {
+  const wrap = $('#m-kasir-list');
+  if (!wrap) return;
+  let d;
+  try { d = await api(`/api/tenants/${tenantId}/kasir`); }
+  catch (e) { wrap.innerHTML = `<span class="minus">${esc(e.message)}</span>`; return; }
+
+  wrap.innerHTML = d.kasir.length ? d.kasir.map((k) => `
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:4px 0">
+      <span><b>${esc(k.nama)}</b> <code>${esc(k.username)}</code></span>
+      <span><button class="linkbtn" data-kasir-ubah="${k.id}">reset sandi</button> ·
+        <button class="linkbtn danger" data-kasir-hapus="${k.id}">hapus</button></span>
+    </div>`).join('') : '<span class="muted">Belum ada akun kasir tambahan.</span>';
+
+  wrap.querySelectorAll('[data-kasir-ubah]').forEach((b) => {
+    b.onclick = () => kasirAkunModal(tenantId, d.kasir.find((k) => k.id === Number(b.dataset.kasirUbah)));
+  });
+  wrap.querySelectorAll('[data-kasir-hapus]').forEach((b) => {
+    b.onclick = async () => {
+      const k = d.kasir.find((x) => x.id === Number(b.dataset.kasirHapus));
+      if (!confirm(`Hapus akun kasir "${k.nama}" (${k.username})?`)) return;
+      try {
+        await api(`/api/tenants/${tenantId}/kasir/${k.id}`, { method: 'DELETE' });
+        toast('✔ Akun kasir dihapus', 'ok');
+        martMuatKasirAkun(tenantId);
+      } catch (e) { toast(e.message, 'err'); }
+    };
+  });
+}
+
+/**
+ * Tambah/ubah akun kasir — modal TERPISAH dari Tenant modal (modal tidak
+ * bertumpuk di aplikasi ini, yang baru menggantikan yang lama). Setelah
+ * simpan, admin membuka kembali "Ubah" tenant untuk melihat daftar terbaru.
+ */
+function kasirAkunModal(tenantId, k) {
+  openModal(`
+    <h2>${k ? 'Reset Sandi' : 'Tambah'} Akun Kasir</h2>
+    ${k ? `
+    <div class="field"><label>Nama</label><input id="mka-nama" value="${esc(k.nama)}"></div>
+    <div class="field"><label>Username</label><input value="${esc(k.username)}" disabled></div>
+    <div class="field"><label>Password baru (kosongkan jika tidak diganti)</label>
+      <input id="mka-pass" type="text" placeholder="password baru"></div>` : `
+    <div class="field"><label>Nama</label><input id="mka-nama" placeholder="mis. Kasir Pagi"></div>
+    <div class="field"><label>Username</label><input id="mka-user" placeholder="mis. kasir-putra-1"></div>
+    <div class="field"><label>Password</label><input id="mka-pass" type="text"></div>`}`,
+    async () => {
+      if (k) {
+        await api(`/api/tenants/${tenantId}/kasir/${k.id}`, { method: 'PUT', body: {
+          nama: $('#mka-nama').value, password_baru: $('#mka-pass').value || undefined,
+        }});
+      } else {
+        await api(`/api/tenants/${tenantId}/kasir`, { method: 'POST', body: {
+          nama: $('#mka-nama').value, username: $('#mka-user').value, password: $('#mka-pass').value,
+        }});
+      }
+      toast('✔ Akun kasir disimpan — buka kembali "Ubah" tenant untuk lihat daftarnya', 'ok');
+    });
 }
 
 /*

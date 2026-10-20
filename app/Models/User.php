@@ -30,6 +30,7 @@ class User extends Authenticatable
         'role',
         'kategori_id',
         'tenant_id',
+        'peran_tenant',
         'created_at',
     ];
 

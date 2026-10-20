@@ -47,7 +47,7 @@ class MartBeliController extends Controller
 
     private function martKu(Request $r): Tenant
     {
-        $u = $this->wajibPeran($r, 'tenant');
+        $u = $this->wajibAdminToko($r, 'tenant');
         $this->operator = (string) ($u->nama ?: 'Kasir Mart');
         $t = Tenant::find($u->tenant_id);
         if (! $t || ($t->mode_kasir ?? 'menu') !== 'mart') {

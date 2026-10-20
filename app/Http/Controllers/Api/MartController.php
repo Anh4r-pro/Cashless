@@ -199,6 +199,8 @@ class MartController extends Controller
     public function pasangBarcode(Request $r, int $id)
     {
         $t = $this->martKu($r);
+        // Pasang barcode = setup katalog, bukan melayani — admin toko saja.
+        $this->wajibAdminToko($r, 'tenant');
         $p = Produk::where('id', $id)->where('tenant_id', $t->id)->first();
         if (! $p) {
             throw new ApiError(404, 'Barang tidak ditemukan');
