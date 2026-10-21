@@ -932,7 +932,7 @@ function martView(el) {
       <div id="mart-qty-ketik" class="muted hidden"
         style="margin-top:6px; font-size:12.5px"></div>
       <div id="mart-hitung"></div>
-      <div class="modeswitch" style="margin-top:10px">
+      <div class="modeswitch" id="mart-metode" style="margin-top:10px">
         <button id="mart-m-kartu">💳 Kartu<br><span class="muted" style="font-size:11px">santri & pegawai</span></button>
         <button id="mart-m-tunai">💵 Tunai<br><span class="muted" style="font-size:11px">umum</span></button>
         <button id="mart-m-transfer">🏦 Transfer<br><span class="muted" style="font-size:11px">bank / QRIS</span></button>
@@ -971,8 +971,17 @@ function martView(el) {
     mart.cart.push({ manual: true, nama: desk, harga: h, kategori, qty: 1 });
     $('#mart-manual-desk').value = '';
     $('#mart-manual-harga').value = '';
-    $('#mart-manual-desk').focus();
     martRender();
+    // Barang manual biasanya diketik di HP/tablet sambil berdiri. Di layar
+    // selebar itu metode bayar ada jauh di bawah, jadi layarnya digulirkan
+    // ke sana. Di layar lebar tidak ada guliran dan perilaku lamanya utuh:
+    // fokus kembali ke kotak nama supaya barang berikutnya langsung diketik.
+    if (martGulirKeBayar()) {
+      $('#mart-manual-desk').blur();
+      $('#mart-manual-harga').blur();
+    } else {
+      $('#mart-manual-desk').focus();
+    }
   };
   $('#mart-kosong').onclick = () => {
     mart.cart = []; mart.metode = null; mart.uang = 0; mart.diskon = 0; mart.catatan = '';
@@ -1197,6 +1206,44 @@ async function martTambah(p, satuan) {
 
 function martSubtotal() { return mart.cart.reduce((n, p) => n + p.harga * p.qty, 0); }
 function martTotal() { return Math.max(0, martSubtotal() - (mart.diskon || 0)); }
+
+/**
+ * Gulirkan layar ke baris metode bayar sesudah barang masuk keranjang.
+ *
+ * Perlunya hanya di layar sempit (HP & tablet): di sana panel Keranjang turun
+ * ke BAWAH Etalase dan katalognya tidak lagi dibatasi tinggi (lihat media
+ * query .mart-katalog di style.css), jadi tombol metode bayar berada jauh di
+ * luar layar — kasir harus menggulir sendiri sambil memegang barang.
+ *
+ * Pagarnya sengaja "apakah tombolnya sudah terlihat", BUKAN lebar layar: di
+ * layar lebar kedua panel bersebelahan dan tombolnya memang sudah kelihatan,
+ * jadi di sana fungsi ini tidak berbuat apa-apa — termasuk kalau jendela
+ * komputernya kebetulan disempitkan sampai panelnya ikut turun.
+ *
+ * @returns {boolean} true kalau guliran dijadwalkan. Pemanggil yang mendapat
+ *   true JANGAN mengembalikan fokus ke kotak input: memfokuskan input membuat
+ *   peramban HP memunculkan papan ketik lalu menarik layar balik ke input itu,
+ *   persis melawan guliran yang baru saja diminta.
+ */
+function martGulirKeBayar() {
+  const el = $('#mart-metode');
+  if (!el) return false;
+  const kotak = el.getBoundingClientRect();
+  const tinggi = window.innerHeight || document.documentElement.clientHeight;
+  if (kotak.top >= 0 && kotak.bottom <= tinggi) return false;   // sudah terlihat utuh
+
+  const diam = window.matchMedia
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  // Ditunda sebentar: pemanggil baru saja menutup papan ketik lewat blur(),
+  // dan selama papan ketik masih terbuka tinggi layar menyusut sehingga
+  // posisi tujuan gulirannya meleset.
+  setTimeout(() => {
+    const t = $('#mart-metode');
+    if (t) t.scrollIntoView({ behavior: diam ? 'auto' : 'smooth', block: 'center' });
+  }, 120);
+
+  return true;
+}
 
 function martRender() {
   const box = $('#mart-cart');
