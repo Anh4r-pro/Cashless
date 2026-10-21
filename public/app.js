@@ -893,7 +893,10 @@ function martBadgeStok(p, angka) {
 
 function martView(el) {
   mart = { cart: [], metode: null, siswa: null, tapToken: null, uang: 0, diskon: 0,
-    info: null, barcodeBaru: null, produk: [], struk: true,
+    // Struk TIDAK dicetak secara bawaan: mayoritas pembeli Mart adalah santri
+    // yang membayar pakai kartu dan tidak memerlukan kertas. Kasir mencentangnya
+    // sendiri saat ada pembeli luar yang memintanya.
+    info: null, barcodeBaru: null, produk: [], struk: false,
     pilih: null, member: [], memberId: null };
   el.innerHTML = `
   <div class="row mart-pos">
@@ -1790,6 +1793,11 @@ async function martPrinterModal() {
 function martSelesai() {
   mart.cart = [];
   mart.metode = null;
+  // Centang struk sengaja ikut dikembalikan ke mati: ia pilihan PER TRANSAKSI,
+  // bukan setelan sesi. Kalau dibiarkan menyala setelah melayani satu pembeli
+  // luar, seluruh santri sesudahnya ikut tercetak struknya tanpa ada yang
+  // menyadari — persis pemborosan yang ingin dihindari.
+  mart.struk = false;
   mart.siswa = null;
   mart.tapToken = null;
   mart.uang = 0;
