@@ -145,7 +145,7 @@ const VIEWS = {
                                      ['topup', 'Topup Ortu'], ['tabungan', 'Tabungan']] },
     { grup: 'Pemegang Kartu', anak: [['santri', 'Santri'], ['sdm', 'SDM & Personil']] },
     { grup: 'Kantin', anak: [['tenant', 'Tenant'], ['menu-ajuan', 'Menu Tenant'],
-                             ['donasi', 'Donasi']] },
+                             ['donasi', 'Donasi'], ['mart-spd', 'Closing Harian Mart']] },
     { grup: 'Laporan', anak: [['analitik', 'Analitik'], ['riwayat', 'Riwayat']] },
     ['akun', 'Kelola Akun'],
   ],
@@ -191,6 +191,7 @@ const IZIN_TAB = {
   santri: ['santri.lihat'],
   sdm: ['sdm.lihat'],
   tenant: ['tenant.lihat'],
+  'mart-spd': ['tenant.lihat'],
   'menu-ajuan': ['ajuan.lihat'],
   donasi: ['donasi.lihat'],
   analitik: ['analitik.lihat'],
@@ -376,6 +377,9 @@ m-1476 -1057 c78 -75 54 -193 -48 -234 -85 -33 -183 40 -183 136 0 39 39 101
   akun: '<path d="M12 3 4.5 6v5.5c0 4.5 3.2 8 7.5 9.5 4.3-1.5 7.5-5 7.5-9.5V6z"/><path d="m9 12 2 2 4-4"/>',
   kasir: '<rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M2.5 10h19M6.5 15h4"/>',
   menu: '<path d="M4 6h16M4 12h16M4 18h10"/>',
+  // Dokumen terlipat pojok + centang: laporan yang sudah "ditutup/dicocokkan",
+  // bukan laporan yang masih berjalan — membedakannya dari ikon riwayat/analitik.
+  'mart-spd': '<path d="M7 3h7l4 4v14a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1z"/><path d="M14 3v4h4"/><path d="m9 14 2 2 4-4"/>',
 };
 const tombolNav = ([id, label], aktif) =>
   `<button data-v="${id}" class="${id === aktif ? 'active' : ''}">${IKON_TAB[id]
@@ -3164,11 +3168,24 @@ let opname = null;
    ════════════════════════════════════════════════════════════════════════ */
 let martSpd = null;
 
+/**
+ * Dipakai di DUA konteks: tenant Mart melihat closing TOKONYA SENDIRI (sesi
+ * yang menentukan, lewat martKu() di server), dan admin pusat melihat closing
+ * UNIT MART MANA PUN lewat ?tenant_id= — server (MartLaporanController::
+ * martKu()) sudah mendukung keduanya, jadi yang dibedakan di sini murni
+ * tampilan: admin mendapat pemilih unit Mart di atas filter tanggal.
+ */
+let martSpdTenantId = null;   // null = sesi sendiri; terisi = admin memilih unit tertentu
+
 function martSpdView(el) {
+  const admin = USER?.role === 'superadmin';
+  martSpdTenantId = null;
+  martSpd = null;
   const hariIni = martHariIni();
   el.innerHTML = `
   <div class="panel">
-    <div class="kat-head"><h2 style="margin:0">Closing Harian <span class="muted" id="spd-ket"></span></h2>
+    <div class="kat-head"><h2 style="margin:0">Closing Harian${admin ? ' Mart' : ''}
+      <span class="muted" id="spd-ket"></span></h2>
       <span style="display:flex; gap:8px; align-items:center">
         <select id="spd-format" class="k-chip-select" style="width:auto">
           <option value="xls">Excel (.xls)</option>
@@ -3180,6 +3197,8 @@ function martSpdView(el) {
         <button class="linkbtn" id="spd-copy">📋 copy laporan</button>
       </span></div>
     <div class="filterbar">
+      ${admin ? `<div class="field"><label>Unit Mart</label>
+        <select id="spd-tenant"><option value="">memuat…</option></select></div>` : ''}
       <div class="field"><label>Dari</label><input type="date" id="spd-dari" value="${hariIni}"></div>
       <div class="field"><label>Sampai</label><input type="date" id="spd-sampai" value="${hariIni}"></div>
       <div class="field"><label>Kategori</label><select id="spd-kategori">
@@ -3212,7 +3231,36 @@ function martSpdView(el) {
   $('#spd-unduh').onclick = martUnduhSpd;
   $('#spd-cetak').onclick = martCetakSpd;
   $('#spd-copy').onclick = martCopySpd;
-  martMuatSpd();
+
+  if (admin) martMuatUnitMartSpd();
+  else martMuatSpd();
+}
+
+/**
+ * Isi pemilih "Unit Mart" untuk admin — satu sekolah boleh punya lebih dari
+ * satu unit Swalayan (mis. putra/putri), dan SPD selalu laporan SATU unit,
+ * bukan gabungan (laci tunainya memang terpisah per unit).
+ */
+async function martMuatUnitMartSpd() {
+  const sel = $('#spd-tenant');
+  try {
+    const d = await api('/api/tenants');
+    const unit = (d.tenants || []).filter((t) => t.mode_kasir === 'mart');
+    if (!unit.length) {
+      sel.innerHTML = '<option value="">Belum ada unit Mart</option>';
+      $('#spd-body').innerHTML = '<tr><td colspan="7" class="muted">Belum ada tenant bermode ' +
+        'Swalayan (IMBOS Mart) — buat dulu di menu Tenant.</td></tr>';
+      return;
+    }
+    sel.innerHTML = unit.map((t) => `<option value="${t.id}">${esc(t.nama)}</option>`).join('');
+    martSpdTenantId = Number(sel.value);
+    sel.onchange = () => { martSpdTenantId = Number(sel.value); martMuatSpd(); };
+    martMuatSpd();
+  } catch (e) {
+    sel.innerHTML = '<option value="">gagal memuat</option>';
+    $('#spd-body').innerHTML = `<tr><td colspan="7" class="minus">${esc(e.message)}</td></tr>`;
+    toast(e.message, 'err');
+  }
 }
 
 /**
@@ -3226,7 +3274,8 @@ async function martCopySpd() {
   b.disabled = true;
   const asli = b.textContent;
   try {
-    const { teks } = await api('/api/mart/spd/teks');
+    const { teks } = await api('/api/mart/spd/teks' +
+      (martSpdTenantId ? '?tenant_id=' + martSpdTenantId : ''));
     try {
       await navigator.clipboard.writeText(teks);
     } catch {
@@ -3252,6 +3301,7 @@ async function martCopySpd() {
 /** Saringan layar sebagai query — dipakai bersama oleh daftar & unduhan. */
 function martSpdQs() {
   const p = new URLSearchParams();
+  if (martSpdTenantId) p.set('tenant_id', martSpdTenantId);
   if ($('#spd-dari').value) p.set('dari', $('#spd-dari').value);
   if ($('#spd-sampai').value) p.set('sampai', $('#spd-sampai').value);
   p.set('kategori', $('#spd-kategori').value || 'semua');
@@ -3269,7 +3319,9 @@ async function martMuatSpd() {
     return;
   }
   const t = martSpd.total;
-  $('#spd-ket').textContent = `— ${martSpd.dari} s/d ${martSpd.sampai}`;
+  $('#spd-ket').textContent = martSpdTenantId
+    ? `— ${martSpd.tenant.nama} · ${martSpd.dari} s/d ${martSpd.sampai}`
+    : `— ${martSpd.dari} s/d ${martSpd.sampai}`;
   $('#spd-ringkas').innerHTML = `
     <div class="statcard"><span class="muted">Total Sales Per-Day</span><br>
       <b class="rp">${rp(t.spd)}</b>
