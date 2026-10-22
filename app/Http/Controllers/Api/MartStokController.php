@@ -289,6 +289,9 @@ class MartStokController extends Controller
             'status' => Stok::status($p->stok, $p->stok_min),
             'aktif' => (int) $p->aktif,
             // Grosir (NULL = barang ini tidak dijual per kemasan).
+            // `barcode_grosir` ikut dibawa karena layar nota pembelian memakai
+            // daftar ini untuk mencocokkan pindaian karton.
+            'barcode_grosir' => $p->barcode_grosir,
             'isi_grosir' => $p->isi_grosir === null ? null : (int) $p->isi_grosir,
             'hpp_grosir' => $p->hpp_grosir === null ? null : (int) $p->hpp_grosir,
             'harga_grosir' => $p->harga_grosir === null ? null : (int) $p->harga_grosir,
@@ -404,10 +407,51 @@ class MartStokController extends Controller
             if (strlen($barcode) < 4 || strlen($barcode) > 32) {
                 throw new ApiError(400, 'SKU/barcode 4–32 karakter angka/huruf');
             }
-            $bentrok = Produk::where('tenant_id', $t->id)->where('barcode', $barcode)
-                ->when($id, fn ($q) => $q->where('id', '!=', $id))->first();
+            $bentrok = Produk::bentrokBarcode($t->id, $barcode, $id);
             if ($bentrok) {
                 throw new ApiError(409, "SKU/barcode itu sudah dipakai \"{$bentrok->nama}\"");
+            }
+        }
+
+        /*
+         * Barcode DUS — kode kedua, khusus satuan grosir.
+         *
+         * Karton punya kode sendiri (ITF-14) yang berbeda dari kode bungkusnya,
+         * jadi kasir yang memindai karton harus mendapat satu dus, bukan satu
+         * pcs yang lalu ditukar manual.
+         *
+         * Hanya boleh terisi kalau barangnya memang disiapkan grosir: tanpa isi
+         * dan harga dus, pindaian kodenya melahirkan baris yang tidak bisa
+         * dihargai. Sebaliknya, setelan grosir yang dikosongkan ikut menghapus
+         * kodenya — kode yatim yang tertinggal akan terbaca sebagai pcs dan
+         * membingungkan kasir yang mengira ia memindai satu dus.
+         */
+        $barcodeGrosir = preg_replace('/[^0-9A-Za-z]/', '', (string) ($b['barcode_grosir'] ?? ''));
+        if ($barcodeGrosir !== '') {
+            /*
+             * DITOLAK, bukan dikosongkan diam-diam. Menghapusnya sendiri akan
+             * membuang kode yang mungkin baru saja diketik petugas tanpa ada
+             * yang memberitahunya; menolaknya menyebutkan persis apa yang
+             * kurang. Layar ikut mengosongkan kotak ini saat setelan grosirnya
+             * dikosongkan, jadi alur "barang ini tidak lagi dijual per dus"
+             * tidak pernah menabrak galat ini — tetapi pagarnya tetap di sini,
+             * bukan di layar.
+             */
+            if ($isiGrosir === null || $hargaGrosir === null) {
+                throw new ApiError(400, 'Barcode dus hanya bisa diisi kalau barang ini dijual per ' .
+                    'kemasan — isi dulu "Isi per grosir" dan "Harga jual grosir", ' .
+                    'atau kosongkan barcode dusnya.');
+            }
+            if (strlen($barcodeGrosir) < 4 || strlen($barcodeGrosir) > 32) {
+                throw new ApiError(400, 'Barcode dus 4–32 karakter angka/huruf');
+            }
+            if ($barcodeGrosir === $barcode) {
+                throw new ApiError(400, 'Barcode dus tidak boleh sama dengan barcode satuannya — ' .
+                    'pindaiannya tidak akan bisa dibedakan.');
+            }
+            $bentrokDus = Produk::bentrokBarcode($t->id, $barcodeGrosir, $id);
+            if ($bentrokDus) {
+                throw new ApiError(409, "Barcode dus itu sudah dipakai \"{$bentrokDus->nama}\"");
             }
         }
 
@@ -428,7 +472,8 @@ class MartStokController extends Controller
 
         $isi = [
             'tenant_id' => $t->id, 'nama' => $nama, 'harga' => $harga, 'hpp' => $hpp,
-            'barcode' => $barcode ?: null, 'kategori_id' => $katId ?: null, 'kategori' => $jatah,
+            'barcode' => $barcode ?: null, 'barcode_grosir' => $barcodeGrosir ?: null,
+            'kategori_id' => $katId ?: null, 'kategori' => $jatah,
             'stok_min' => max(0, (int) ($b['stok_min'] ?? 5)),
             'isi_grosir' => $isiGrosir, 'hpp_grosir' => $hppGrosir, 'harga_grosir' => $hargaGrosir,
             'expired' => $expired ?: null,

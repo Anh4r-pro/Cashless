@@ -21,6 +21,11 @@ class Produk extends Model
         // pengajuan: ia penanda barang, bukan syarat dagang seperti nama &
         // harga yang menentukan berapa santri dibebani.
         'barcode',
+        // Barcode kedua, khusus satuan grosir: karton punya kode sendiri
+        // (ITF-14) yang berbeda dari kode bungkusnya (EAN-13). Hanya boleh
+        // terisi kalau barangnya memang disiapkan grosir — lihat
+        // MartStokController::simpan().
+        'barcode_grosir',
         'harga',
         'aktif',
         'kategori',
@@ -51,5 +56,37 @@ class Produk extends Model
     public function tenant(): \Illuminate\Database\Eloquent\Relations\BelongsTo
     {
         return $this->belongsTo(Tenant::class, 'tenant_id');
+    }
+
+    /**
+     * Barang lain yang sudah memakai kode ini — pada SLOT MANA PUN.
+     *
+     * Satu kode yang dipindai harus menunjuk tepat satu (barang, satuan).
+     * Karena itu pemeriksaannya silang dua kolom: barcode satuan tidak boleh
+     * menabrak barcode dus barang lain, dan sebaliknya. Memeriksa satu kolom
+     * saja menyisakan celah yang baru ketahuan saat kasir memindai dan
+     * mendapat barang yang keliru di depan pembeli.
+     *
+     * Lingkupnya per tenant, mengikuti aturan yang sudah berlaku untuk nama
+     * barang dan barcode satuan: dua tenant boleh menjual barang bermerek sama.
+     *
+     * @param  int|null  $kecuali  id barang yang sedang disunting
+     */
+    public static function bentrokBarcode(int $tenantId, string $kode, ?int $kecuali = null): ?self
+    {
+        if ($kode === '') {
+            return null;
+        }
+
+        return self::where('tenant_id', $tenantId)
+            ->where(fn ($q) => $q->where('barcode', $kode)->orWhere('barcode_grosir', $kode))
+            ->when($kecuali, fn ($q) => $q->where('id', '!=', $kecuali))
+            ->first();
+    }
+
+    /** Apakah barang ini benar-benar disiapkan untuk dijual per dus/karton? */
+    public function siapGrosir(): bool
+    {
+        return (int) ($this->isi_grosir ?? 0) >= 2 && (int) ($this->harga_grosir ?? 0) > 0;
     }
 }

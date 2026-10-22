@@ -1050,7 +1050,14 @@ function martGambarKatalog() {
 
   $('#mart-katalog').innerHTML = daftar.length
     ? daftar.map((p) => `
-      <button class="mart-kartu" data-pilih="${p.id}" ${p.status === 'habis' ? 'disabled' : ''}>
+      <button class="mart-kartu" data-pilih="${p.id}" ${
+        // Barang habis tidak bisa dijual — KECUALI saat ada barcode baru yang
+        // menunggu ditempelkan. Di situ klik berarti "kode ini milik barang
+        // ini", bukan "jual satu". Justru saat karton baru datanglah stoknya
+        // masih nol, jadi mematikan kartunya menutup satu-satunya jalan
+        // mendata kodenya dari layar kasir — padahal martTambah() memang
+        // sengaja menempel barcode DULU, baru memeriksa stok.
+        p.status === 'habis' && !mart.barcodeBaru ? 'disabled' : ''}>
         <span class="mart-kartu-atas">
           <span class="muted" style="font-size:11px">SKU: ${esc(p.barcode || '—')}</span>
           ${martBadgeStok(p, true)}
@@ -1114,7 +1121,10 @@ async function martCari(q, dariPindai) {
     const d = await api('/api/mart/cari', { method: 'POST', body: { q } });
     mart.barcodeBaru = d.barcode_baru || null;
     if (d.cocok) {
-      martTambah(d.cocok);
+      // `satuan` dari server menyebut lewat KOLOM MANA kodenya cocok: barcode
+      // bungkus → pcs, barcode karton → dus. Tanpa meneruskannya, pindaian
+      // karton masuk sebagai satu pcs dan kasir harus menukarnya manual.
+      martTambah(d.cocok, d.satuan);
       $('#mart-q').value = '';
       $('#mart-hasil').innerHTML = '';
       martGambarKatalog();
@@ -1124,7 +1134,9 @@ async function martCari(q, dariPindai) {
       $('#mart-hasil').innerHTML = `<div class="aju-unduh" style="margin:10px 0">
         <b>Barcode <code>${esc(d.barcode_baru)}</code> belum terdaftar.</b>
         <span class="muted set-hint">Ketik nama barangnya di kotak atas, lalu klik barang yang benar
-          untuk menempelkan barcode ini sekaligus memasukkannya ke keranjang.</span></div>`;
+          untuk menempelkan barcode ini sekaligus memasukkannya ke keranjang.
+          Kalau barang itu dijual per dus juga, Anda akan ditanya dulu kode ini
+          untuk satuan atau untuk dus.</span></div>`;
       return;
     }
     $('#mart-hasil').innerHTML = '';
@@ -1173,17 +1185,70 @@ function martBolehTambah(p, tambahanPcs) {
 /** Apakah barang ini disiapkan untuk dijual per kemasan? */
 const martAdaGrosir = (p) => !!(p && p.isi_grosir >= 2 && p.harga_grosir);
 
+/**
+ * Barcode baru yang dipindai bisa jadi kode bungkusnya, bisa jadi kode
+ * kartonnya — hanya petugas yang memegang barangnya yang tahu.
+ *
+ * @returns {Promise<'ecer'|'grosir'|null>} null = dibatalkan.
+ */
+function martTanyaSlotBarcode(p, kode) {
+  return new Promise((selesai) => {
+    let sudah = false;
+    const jawab = (v) => { if (sudah) return; sudah = true; selesai(v); };
+    martPulihkanScan();
+    openModal(`<h2>Barcode ini untuk satuan apa?</h2>
+      <p class="muted">Kode <code>${esc(kode)}</code> akan ditempelkan ke <b>${esc(p.nama)}</b>.</p>
+      <div class="modeswitch" style="margin-top:12px">
+        <button id="bs-ecer">📦 Satuan<br><span class="muted" style="font-size:11px">${rp(p.harga)} / pcs</span></button>
+        <button id="bs-dus">🧃 Dus<br><span class="muted" style="font-size:11px">${rp(p.harga_grosir)} / ${p.isi_grosir} pcs</span></button>
+      </div>`);
+    /*
+     * Esc dan klik latar menutup modal tanpa melewati tombol mana pun. Tanpa
+     * penjaga ini janji di atas menggantung selamanya, dan penambahan barang
+     * ikut membeku — kasir menekan barang lalu tidak terjadi apa-apa.
+     */
+    const akar = $('#modal-root');
+    const amati = new MutationObserver(() => {
+      if (akar.children.length) return;
+      amati.disconnect();
+      jawab(null);
+    });
+    amati.observe(akar, { childList: true });
+    $('#bs-ecer').onclick = () => { closeModal(); jawab('ecer'); };
+    $('#bs-dus').onclick = () => { closeModal(); jawab('grosir'); };
+  });
+}
+
 async function martTambah(p, satuan) {
-  // Barcode hasil pindaian yang belum terdaftar ditempelkan ke barang yang
-  // dipilih kasir — pendataan terjadi sambil melayani, bukan proyek tersendiri.
-  if (mart.barcodeBaru && !p.barcode) {
+  /*
+   * Barcode hasil pindaian yang belum terdaftar ditempelkan ke barang yang
+   * dipilih kasir — pendataan terjadi sambil melayani, bukan proyek tersendiri.
+   *
+   * Ada DUA slot: kode bungkus (`barcode`) dan kode karton (`barcode_grosir`).
+   * Slot karton hanya ada kalau barangnya memang disiapkan grosir.
+   */
+  const slotEcerKosong = !p.barcode;
+  const slotDusKosong = martAdaGrosir(p) && !p.barcode_grosir;
+  if (mart.barcodeBaru && (slotEcerKosong || slotDusKosong)) {
+    // Ditanyakan HANYA kalau dua-duanya masih kosong. Satu slot kosong tidak
+    // ambigu, dan pertanyaan yang jawabannya cuma satu memperlambat antrean.
+    let slot = slotEcerKosong ? 'ecer' : 'grosir';
+    if (slotEcerKosong && slotDusKosong) {
+      slot = await martTanyaSlotBarcode(p, mart.barcodeBaru);
+      if (!slot) return;
+    }
     try {
-      await api(`/api/mart/produk/${p.id}/barcode`, { method: 'PUT', body: { barcode: mart.barcodeBaru } });
-      toast(`✔ Barcode ditempel ke ${p.nama}`, 'ok');
-      p.barcode = mart.barcodeBaru;
+      await api(`/api/mart/produk/${p.id}/barcode`,
+        { method: 'PUT', body: { barcode: mart.barcodeBaru, satuan: slot } });
+      toast(`✔ Barcode ${slot === 'grosir' ? 'dus' : 'satuan'} ditempel ke ${p.nama}`, 'ok');
+      if (slot === 'grosir') p.barcode_grosir = mart.barcodeBaru;
+      else p.barcode = mart.barcodeBaru;
       mart.barcodeBaru = null;
       $('#mart-hasil').innerHTML = '';
       martGambarKatalog();
+      // Kode karton yang baru ditempel berarti yang dipegang petugas memang
+      // satu dus — barisnya dibuat dalam satuan itu, bukan pcs.
+      if (slot === 'grosir') satuan = 'grosir';
     } catch (e) { toast(e.message, 'err'); }
   }
   // Satuan grosir hanya kalau barangnya memang disiapkan untuk itu; permintaan
@@ -2354,7 +2419,9 @@ async function martMuatStok() {
 
   $('#ms-body').innerHTML = d.produk.map((p) => `
     <tr>
-      <td>${p.barcode ? `<code>${esc(p.barcode)}</code>` : '<span class="muted">—</span>'}</td>
+      <td>${p.barcode ? `<code>${esc(p.barcode)}</code>` : '<span class="muted">—</span>'}${
+        p.barcode_grosir ? `<br><span class="muted" style="font-size:11px">dus:
+          <code>${esc(p.barcode_grosir)}</code></span>` : ''}</td>
       <td><b>${esc(p.nama)}</b>${p.aktif ? '' : ' <span class="badge nonaktif">nonaktif</span>'}</td>
       <td>${esc(p.kategori_nama || '—')}${p.kategori === 'non_makanan' ? ' <span class="katdot">non-makanan</span>' : ''}</td>
       <td class="num rp">${p.hpp ? rp(p.hpp) : '<span class="muted">—</span>'}</td>
@@ -2572,6 +2639,13 @@ function martBarangModal(p) {
         <div class="field"><label>Harga jual grosir</label>
           ${inputUang({ id: 'mb-hargag', nilai: p?.harga_grosir || '' })}</div>
       </div>
+      <div class="field"><label>Barcode dus (opsional)</label>
+        <input id="mb-barcode-grosir" data-scan="1" maxlength="32" autocomplete="off"
+          value="${esc(p?.barcode_grosir || '')}" placeholder="pindai barcode kartonnya">
+        <span class="muted set-hint">Karton biasanya punya barcode sendiri yang berbeda dari
+          barcode bungkusnya. Diisi di sini, memindainya di kasir langsung masuk sebagai
+          <b>satu dus</b> — bukan satu pcs yang lalu ditukar manual.</span>
+        <span class="minus hidden" id="mb-barcode-grosir-cek" style="font-size:12.5px"></span></div>
       <p class="muted" id="mb-margin-g" style="margin:0"></p>
     </fieldset>
     ${p ? `<label class="cek"><input type="checkbox" id="mb-aktif" ${p.aktif ? 'checked' : ''}>
@@ -2586,6 +2660,7 @@ function martBarangModal(p) {
         isi_grosir: $('#mb-isi').value === '' ? null : Number($('#mb-isi').value),
         hpp_grosir: $('#mb-hppg').value.trim() === '' ? null : nilaiUang('#mb-hppg'),
         harga_grosir: $('#mb-hargag').value.trim() === '' ? null : nilaiUang('#mb-hargag'),
+        barcode_grosir: $('#mb-barcode-grosir').value,
       };
       // Dihentikan di sini juga, bukan hanya di server: kasir mendapat
       // jawabannya seketika, tanpa menunggu bolak-balik jaringan. Servernya
@@ -2631,26 +2706,60 @@ function martBarangModal(p) {
         ? ' <b class="minus">— tidak lebih murah daripada eceran, tidak bisa disimpan</b>' : '')
       + (mg && mg > hg ? ' <b class="minus">— rugi tiap terjual</b>' : '');
   };
+  /*
+   * Barcode dus mengikuti nasib setelan grosirnya: begitu isi atau harga
+   * dusnya dikosongkan, kotak barcode dus ikut dikosongkan dan dikunci.
+   * Server menolak kombinasi itu (barcode dus tanpa harga dus adalah baris
+   * keranjang yang tidak bisa dihargai), dan membiarkan kotaknya tetap terisi
+   * hanya akan memunculkan galat yang sebabnya tidak kelihatan di layar.
+   */
+  const kunciBarcodeDus = () => {
+    const siap = Number($('#mb-isi').value || 0) >= 2 && nilaiUang('#mb-hargag') > 0;
+    const kotak = $('#mb-barcode-grosir');
+    kotak.disabled = !siap;
+    kotak.placeholder = siap ? 'pindai barcode kartonnya'
+      : 'isi dulu isi & harga jual grosirnya';
+    if (!siap) kotak.value = '';
+  };
   ['#mb-isi', '#mb-hppg', '#mb-hargag', '#mb-harga'].forEach((x) =>
-    $(x).addEventListener('input', hitungGrosir));
+    $(x).addEventListener('input', () => { hitungGrosir(); kunciBarcodeDus(); }));
   hitungGrosir();
+  kunciBarcodeDus();
 
   // Cek dobel seketika dari martStok.produk (sudah di memori) — server
   // tetap menolak saat simpan (409), ini cuma peringatan dini.
-  const cekBarcode = () => {
-    const kode = $('#mb-barcode').value.trim();
-    const el = $('#mb-barcode-cek');
-    const x = kode ? (martStok.produk || []).find((b) => b.barcode === kode && b.id !== p?.id) : null;
+  const cekBarcode = (kotak, pesan, tombol) => {
+    const kode = $(kotak).value.trim();
+    const el = $(pesan);
+    // Dicocokkan ke KEDUA kolom: satu kode harus menunjuk tepat satu
+    // (barang, satuan), jadi barcode satuan yang menabrak barcode dus barang
+    // lain pun ambigu saat dipindai.
+    const x = kode ? (martStok.produk || []).find((b) => b.id !== p?.id
+      && (b.barcode === kode || b.barcode_grosir === kode)) : null;
     if (!x) { el.classList.add('hidden'); el.innerHTML = ''; return; }
-    el.innerHTML = `⚠ Sudah dipakai: <b>${esc(x.nama)}</b> (stok ${x.stok ?? '—'}) —
-      <button type="button" class="linkbtn danger" id="mb-barcode-ubah">ubah barang itu</button>`;
+    const sebagai = x.barcode_grosir === kode ? 'barcode dus' : 'barcode satuan';
+    el.innerHTML = `⚠ Sudah dipakai sebagai ${sebagai}: <b>${esc(x.nama)}</b>
+      (stok ${x.stok ?? '—'}) —
+      <button type="button" class="linkbtn danger" id="${tombol}">ubah barang itu</button>`;
     el.classList.remove('hidden');
-    $('#mb-barcode-ubah').onclick = () => { closeModal(); martBarangModal(x); };
+    $('#' + tombol).onclick = () => { closeModal(); martBarangModal(x); };
   };
-  $('#mb-barcode').addEventListener('input', debounce(cekBarcode, 250));
-  cekBarcode();
+  const cekEcer = () => cekBarcode('#mb-barcode', '#mb-barcode-cek', 'mb-barcode-ubah');
+  const cekDus = () => cekBarcode('#mb-barcode-grosir', '#mb-barcode-grosir-cek', 'mb-barcode-grosir-ubah');
+  $('#mb-barcode').addEventListener('input', debounce(cekEcer, 250));
+  $('#mb-barcode-grosir').addEventListener('input', debounce(cekDus, 250));
+  cekEcer();
+  cekDus();
 
-  cardHandler = (uid) => { const f = $('#mb-barcode'); if (f) { f.value = uid; cekBarcode(); } };
+  // Pindaian jatuh ke kotak yang sedang disorot — petugas yang baru menekan
+  // kotak barcode dus lalu memindai karton tidak perlu mengetik ulang.
+  cardHandler = (uid) => {
+    const dus = document.activeElement && document.activeElement.id === 'mb-barcode-grosir';
+    const f = $(dus ? '#mb-barcode-grosir' : '#mb-barcode');
+    if (!f || f.disabled) return;
+    f.value = uid;
+    if (dus) cekDus(); else cekEcer();
+  };
 }
 
 function martStokModal(p) {
@@ -2743,9 +2852,9 @@ function martUnduhBarang() {
     // Expired ikut diunduh: layar sudah punya kolomnya, dan unduhan yang
     // tertinggal dari layar adalah persis cacat yang diperbaiki di Laporan
     // Keuangan (angka layar vs unduhan tidak sama).
-    ['SKU', 'Nama', 'Kategori', 'Jatah santri', 'Harga beli', 'Harga jual', 'Untung', 'Margin %',
+    ['SKU', 'SKU dus', 'Nama', 'Kategori', 'Jatah santri', 'Harga beli', 'Harga jual', 'Untung', 'Margin %',
       'Stok', 'Status', 'Expired', 'Sisa hari'],
-    d.map((p) => [p.barcode || '', p.nama, p.kategori_nama || '', p.kategori,
+    d.map((p) => [p.barcode || '', p.barcode_grosir || '', p.nama, p.kategori_nama || '', p.kategori,
       p.hpp || '', p.harga, p.untung ?? '', p.margin ?? '', p.stok ?? '', p.status,
       p.expired || '', p.expired_hari ?? '']));
 }
@@ -2761,7 +2870,8 @@ function martCetakBarang() {
     <table><thead><tr><th>SKU</th><th>Nama</th><th>Kategori</th><th class="n">Beli</th>
       <th class="n">Jual</th><th class="n">Margin</th><th class="n">Stok</th>
       <th>Expired</th></tr></thead>
-    <tbody>${d.map((p) => `<tr><td>${esc(p.barcode || '-')}</td><td>${esc(p.nama)}</td>
+    <tbody>${d.map((p) => `<tr><td>${esc(p.barcode || '-')}${
+      p.barcode_grosir ? `<br><small>dus: ${esc(p.barcode_grosir)}</small>` : ''}</td><td>${esc(p.nama)}</td>
       <td>${esc(p.kategori_nama || '-')}</td><td class="n">${p.hpp ? rp(p.hpp) : '-'}</td>
       <td class="n">${rp(p.harga)}</td><td class="n">${p.margin ?? '-'}%</td>
       <td class="n">${p.stok ?? '-'}</td>
@@ -4490,29 +4600,52 @@ async function martNotaModal() {
   const cocokkan = (q) => {
     const t = q.trim().toLowerCase();
     if (!t) return [];
-    const persis = aktif.filter((p) => String(p.barcode || '').toLowerCase() === t);
+    const persis = aktif.filter((p) => String(p.barcode || '').toLowerCase() === t
+      || String(p.barcode_grosir || '').toLowerCase() === t);
     if (persis.length) return persis;
     return aktif.filter((p) => p.nama.toLowerCase().includes(t)
-      || String(p.barcode || '').toLowerCase().includes(t)).slice(0, 8);
+      || String(p.barcode || '').toLowerCase().includes(t)
+      || String(p.barcode_grosir || '').toLowerCase().includes(t)).slice(0, 8);
+  };
+
+  /**
+   * Barang masuk per dus atau per pcs ditentukan oleh KODE YANG DIPINDAI:
+   * memindai karton berarti kartonnya yang datang. Mengetik nama tidak
+   * menyiratkan apa-apa, jadi jatuh ke eceran seperti sebelumnya — satuannya
+   * tetap bisa diganti lewat dropdown di barisnya.
+   */
+  const satuanDariKode = (q, p) => {
+    const t = String(q || '').trim().toLowerCase();
+    return p && t && String(p.barcode_grosir || '').toLowerCase() === t
+      && (p.isi_grosir || 0) >= 2 ? 'grosir' : 'ecer';
   };
 
   const gambarSaran = () => {
     const box = $('#mn-saran');
     box.innerHTML = saran.map((p, i) => `<button type="button" class="linkbtn" data-saran="${i}"
       style="display:block; text-align:left; padding:4px 0">${esc(p.nama)}
-      <span class="muted">${p.barcode ? '· ' + esc(p.barcode) : ''} · modal ${rp(p.hpp || 0)}</span>
+      <span class="muted">${p.barcode ? '· ' + esc(p.barcode) : ''}${
+        p.barcode_grosir ? ' · dus ' + esc(p.barcode_grosir) : ''} · modal ${rp(p.hpp || 0)}</span>
       </button>`).join('');
     box.classList.toggle('hidden', saran.length === 0);
     box.querySelectorAll('[data-saran]').forEach((b) => {
-      b.onclick = () => tambahBarang(saran[Number(b.dataset.saran)]);
+      b.onclick = () => {
+        const pil = saran[Number(b.dataset.saran)];
+        tambahBarang(pil, satuanDariKode($('#mn-pilih').value, pil));
+      };
     });
   };
 
-  const tambahBarang = (p) => {
+  const tambahBarang = (p, satuan) => {
     if (!p) return;
     if (baris.some((b) => b.id === p.id)) { toast('Barang itu sudah ada di nota', 'err'); return; }
-    baris.push({ id: p.id, nama: p.nama, hpp: p.hpp, jual: p.harga, qty: 1, harga: p.hpp || 0,
-      satuan: 'ecer', isiGrosir: p.isi_grosir || 0, expired: p.expired || '' });
+    const dus = satuan === 'grosir' && (p.isi_grosir || 0) >= 2;
+    baris.push({ id: p.id, nama: p.nama, hpp: p.hpp, jual: p.harga, qty: 1,
+      // Harga beli bawaan mengikuti satuan yang datang: harga modal SATU DUS
+      // untuk baris dus, harga modal satu pcs untuk baris eceran.
+      harga: (dus ? p.hpp_grosir : p.hpp) || 0,
+      satuan: dus ? 'grosir' : 'ecer', isiGrosir: p.isi_grosir || 0, expired: p.expired || '' });
+    if (dus) toast(`Barcode dus — ${p.nama} masuk per dus isi ${p.isi_grosir}`, 'ok');
     $('#mn-pilih').value = '';
     saran = [];
     gambarSaran();
@@ -4521,8 +4654,9 @@ async function martNotaModal() {
   };
 
   const ambilCocok = () => {
-    const c = cocokkan($('#mn-pilih').value);
-    if (c.length === 1) { tambahBarang(c[0]); return; }
+    const q = $('#mn-pilih').value;
+    const c = cocokkan(q);
+    if (c.length === 1) { tambahBarang(c[0], satuanDariKode(q, c[0])); return; }
     if (!c.length) { toast('Barang tidak ketemu — periksa barcode atau namanya', 'err'); return; }
     saran = c;
     gambarSaran();

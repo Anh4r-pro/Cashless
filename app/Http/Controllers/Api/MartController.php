@@ -159,7 +159,25 @@ class MartController extends Controller
         if ($kode !== '') {
             $persis = (clone $dasar())->where('barcode', $kode)->first();
             if ($persis) {
-                return response()->json(['ok' => true, 'cocok' => $this->ringkasProduk($persis), 'daftar' => []]);
+                return response()->json(['ok' => true, 'satuan' => 'ecer',
+                    'cocok' => $this->ringkasProduk($persis), 'daftar' => []]);
+            }
+            /*
+             * Barcode DUS. Dus punya kode sendiri (ITF-14 di karton) yang
+             * berbeda dari kode bungkusnya, jadi memindainya harus langsung
+             * menjadi satu dus — bukan satu pcs yang lalu ditukar manual.
+             *
+             * Syarat grosirnya ikut dituntut di sini, bukan hanya dipercayakan
+             * pada validasi saat menyimpan: kalau setelan grosirnya terlanjur
+             * dikosongkan sementara kodenya tertinggal, pindaian lebih baik
+             * jatuh ke "tidak ketemu" daripada melahirkan baris dus tanpa
+             * harga dan tanpa isi.
+             */
+            $dus = (clone $dasar())->where('barcode_grosir', $kode)
+                ->where('isi_grosir', '>=', 2)->whereNotNull('harga_grosir')->first();
+            if ($dus) {
+                return response()->json(['ok' => true, 'satuan' => 'grosir',
+                    'cocok' => $this->ringkasProduk($dus), 'daftar' => []]);
             }
         }
 
@@ -168,6 +186,7 @@ class MartController extends Controller
 
         return response()->json([
             'ok' => true,
+            'satuan' => 'ecer',
             'cocok' => null,
             'daftar' => $daftar,
             // Dipakai layar untuk menawarkan "tempelkan barcode ini ke barang
@@ -181,6 +200,7 @@ class MartController extends Controller
     {
         return ['id' => $p->id, 'nama' => $p->nama, 'harga' => (int) $p->harga,
             'kategori' => $p->kategori, 'barcode' => $p->barcode,
+            'barcode_grosir' => $p->barcode_grosir,
             // Stok & grosir ikut dibawa: hasil pindaian masuk keranjang
             // langsung, jadi layar perlu tahu sisanya dan apakah barang ini
             // bisa dijual per kemasan — tanpa memuat ulang seluruh katalog.
@@ -195,6 +215,10 @@ class MartController extends Controller
      * Berbeda dari nama & harga yang harus disetujui admin karena menentukan
      * berapa santri dibebani, barcode hanya penanda: salah tempel pun tidak
      * mengubah harga sepeser pun, dan bisa dibetulkan seketika.
+     *
+     * `satuan` memilih SLOT-nya: `ecer` mengisi barcode bungkusnya, `grosir`
+     * mengisi barcode kartonnya. Keduanya hidup berdampingan pada satu barang
+     * supaya kasir boleh memindai mana pun yang ada di tangannya.
      */
     public function pasangBarcode(Request $r, int $id)
     {
@@ -205,21 +229,40 @@ class MartController extends Controller
         if (! $p) {
             throw new ApiError(404, 'Barang tidak ditemukan');
         }
+
+        $grosir = $r->input('satuan') === 'grosir';
+        $kolom = $grosir ? 'barcode_grosir' : 'barcode';
+        /*
+         * Barang yang belum disiapkan grosir tidak boleh punya barcode dus:
+         * isi dan harga dusnya tidak diketahui, jadi pindaian kodenya akan
+         * melahirkan baris keranjang yang tidak bisa dihargai. Ditolak di sini
+         * supaya sebabnya terbaca saat menempel, bukan nanti saat melayani.
+         */
+        if ($grosir && ! $p->siapGrosir()) {
+            throw new ApiError(409, "\"{$p->nama}\" belum disiapkan dijual per dus — " .
+                'isi dulu "Isi per grosir" dan "Harga jual grosir" di Barang & Stok.');
+        }
+
         $kode = preg_replace('/[^0-9A-Za-z]/', '', (string) $r->input('barcode', ''));
         if ($kode === '') {
-            $p->update(['barcode' => null]);
+            $p->update([$kolom => null]);
 
             return response()->json(['ok' => true, 'produk' => $this->ringkasProduk($p->fresh())]);
         }
         if (strlen($kode) < 6 || strlen($kode) > 32) {
             throw new ApiError(400, 'Barcode 6–32 karakter angka/huruf');
         }
-        $bentrok = Produk::where('tenant_id', $t->id)->where('barcode', $kode)
-            ->where('id', '!=', $p->id)->first();
+        // Satu kode = satu (barang, satuan), jadi slot seberang pada barang
+        // yang SAMA pun tidak boleh memakai kode yang sama.
+        if ($kode === (string) ($grosir ? $p->barcode : $p->barcode_grosir)) {
+            throw new ApiError(409, 'Kode itu sudah dipakai sebagai barcode ' .
+                ($grosir ? 'satuan' : 'dus') . " barang ini sendiri — pindaiannya akan ambigu.");
+        }
+        $bentrok = Produk::bentrokBarcode($t->id, $kode, $p->id);
         if ($bentrok) {
             throw new ApiError(409, "Barcode ini sudah dipakai \"{$bentrok->nama}\"");
         }
-        $p->update(['barcode' => $kode]);
+        $p->update([$kolom => $kode]);
 
         return response()->json(['ok' => true, 'produk' => $this->ringkasProduk($p->fresh())]);
     }
