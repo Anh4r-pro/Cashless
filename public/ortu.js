@@ -457,15 +457,6 @@ function bukaModal(isi, tombol) {
 }
 function tutupModal() { $('#o-modal-root').innerHTML = ''; }
 
-function fileKeDataUrl(file) {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader();
-    r.onload = () => resolve(r.result);
-    r.onerror = reject;
-    r.readAsDataURL(file);
-  });
-}
-
 /** Tanggal WIB n hari ke belakang, format YYYY-MM-DD untuk atribut min/max. */
 function tglMundur(n) {
   return new Date(Date.now() + 7 * 3600 * 1000 - n * 86400000).toISOString().slice(0, 10);
@@ -596,8 +587,8 @@ function langkahKonfirmasi() {
         ini yang dicari admin di mutasi rekening sekolah.</span></div>
     <div class="field"><label>Bukti pembayaran <span class="o-wajib">wajib</span></label>
       <input id="o-tp-bukti" type="file" accept="image/*">
-      <span class="muted hint" id="o-tp-bukti-hint">Foto atau tangkapan layar bukti bayar,
-        maksimal 3MB. Pastikan gambarnya sudah selesai terunduh di ponsel Anda.</span></div>
+      <span class="muted hint" id="o-tp-bukti-hint">Foto atau tangkapan layar bukti bayar —
+        ukurannya dikecilkan otomatis. Pastikan gambarnya sudah selesai terunduh di ponsel Anda.</span></div>
     <p id="o-tp-err" class="o-err hidden"></p>`,
     `<button id="om-batal">Batal</button>
      <button id="om-kembali">‹ Instruksi</button>
@@ -611,23 +602,41 @@ function langkahKonfirmasi() {
     topupBukti = null;
     segarkanTombolKirim();
     if (!f) { hintBukti.textContent = bakuHint; return; }
-    if (f.size > 3 * 1024 * 1024) {
-      e.target.value = ''; hintBukti.textContent = bakuHint;
-      return toast('Bukti maksimal 3MB', 'err');
-    }
     /*
      * Berkas yang terlalu kecil hampir pasti belum selesai terunduh — kejadian
      * biasa saat gambar dipilih dari galeri di sinyal yang seadanya. Ditahan di
      * sini selagi walinya masih di depan layar, bukan dibiarkan lolos lalu
      * ketahuan berhari-hari kemudian ketika admin tidak bisa membuka gambarnya.
+     * Dicek pada berkas ASLI, sebelum dikompres: berkas yang memang terpotong
+     * biasanya gagal dibaca kanvas juga, tapi pesan di sini jauh lebih jelas
+     * sebabnya daripada galat kompresi yang generik.
      */
     if (f.size < 512) {
       e.target.value = ''; hintBukti.textContent = bakuHint;
       return toast('Gambar terbaca tidak lengkap. Tunggu unduhannya selesai, lalu pilih lagi.', 'err');
     }
+    // Foto langsung dari kamera biasanya 2-5MB — DIKOMPRES di sini, bukan
+    // ditolak. Wali yang tidak paham teknologi tidak punya cara mengecilkan
+    // gambar sendiri, jadi menolak mentah-mentah di atas suatu batas cuma
+    // memindahkan masalahnya ke orang yang paling tidak siap menyelesaikannya.
+    hintBukti.textContent = 'Memproses gambar…';
     try {
-      topupBukti = await fileKeDataUrl(f);
-      hintBukti.textContent = `✔ ${f.name} (${Math.round(f.size / 1024)} KB) siap dikirim`;
+      const hasil = await kompresGambar(f);
+      // Jaring pengaman terakhir, bukan jalur yang diharapkan tersentuh:
+      // kompresi menyasar sisi 1600px/kualitas 0.85, hasilnya nyaris selalu
+      // jauh di bawah ini. Kalau tetap kena (mis. kanvas gagal lalu jatuh ke
+      // berkas asli yang kebetulan besar), wali tetap diberi tahu dengan
+      // jelas, bukan diam-diam gagal terkirim nanti di server.
+      if (hasil.byteAkhir > 3 * 1024 * 1024) {
+        e.target.value = ''; hintBukti.textContent = bakuHint;
+        return toast('Gambar masih terlalu besar setelah dikecilkan. Coba foto ulang ' +
+          'dari jarak lebih dekat, atau kirim tangkapan layar saja.', 'err');
+      }
+      topupBukti = hasil.dataUrl;
+      const kb = Math.round(hasil.byteAkhir / 1024);
+      hintBukti.textContent = hasil.dikompres
+        ? `✔ ${f.name} — dikecilkan ke ${kb} KB, siap dikirim`
+        : `✔ ${f.name} (${kb} KB) siap dikirim`;
     } catch {
       e.target.value = ''; hintBukti.textContent = bakuHint;
       toast('Bukti gagal dibaca', 'err');

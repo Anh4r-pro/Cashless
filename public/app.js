@@ -6419,7 +6419,7 @@ function setorModal(tenantId, nama, outstanding) {
         keterangan: $('#m-ket').value,
       };
       const f = $('#m-file').files[0];
-      if (f) body.bukti_data = await fileToDataUrl(f);
+      if (f) body.bukti_data = (await kompresGambar(f)).dataUrl;
       await api('/api/settlements', { method: 'POST', body });
       toast('✔ Setoran tercatat', 'ok');
       // Panelnya kini tinggal di layar Tenant; hanya bagian uangnya yang
@@ -8713,7 +8713,10 @@ function siswaModal(s) {
       else id = (await api('/api/siswa', { method: 'POST', body })).siswa.id;
       const f = s && $('#m-foto')?.files[0];
       if (f) {
-        const data = await fileToDataUrl(f);
+        // Foto profil: cukup kecil untuk dilihat di tabel & kartu — sisi
+        // terpanjang dibatasi lebih ketat daripada bukti transfer, karena di
+        // sini tidak ada teks kecil yang perlu tetap terbaca.
+        const data = (await kompresGambar(f, { maxSisi: 900 })).dataUrl;
         await api(`/api/siswa/${id}/foto`, { method: 'POST', body: { data } });
       }
       toast('✔ Data tersimpan', 'ok');
@@ -9119,12 +9122,12 @@ async function muatUangTenant() {
     wadah.querySelectorAll('[data-upbukti]').forEach((b) => {
       b.onclick = () => openModal(`
         <h2>Upload Bukti Setoran</h2>
-        <div class="field"><label>Foto/scan bukti (JPG/PNG, maks 3MB)</label>
+        <div class="field"><label>Foto/scan bukti (JPG/PNG)</label>
         <input type="file" id="m-file" accept="image/*"></div>`,
         async () => {
           const f = $('#m-file').files[0];
           if (!f) throw new Error('Pilih file dulu');
-          const data = await fileToDataUrl(f);
+          const data = (await kompresGambar(f)).dataUrl;
           await api(`/api/settlements/${b.dataset.upbukti}/bukti`, { method: 'POST', body: { data } });
           toast('✔ Bukti tersimpan', 'ok');
           muatUangTenant();
@@ -11428,7 +11431,7 @@ function tarikDanaModal() {
       <input id="dn-ket" maxlength="200" placeholder="mis. beli kertas struk & servis printer kasir">
       <span class="muted set-hint">Wajib diisi. Dana ini uang sekolah, dan setiap pengambilannya
         harus bisa dijelaskan kembali berbulan-bulan kemudian.</span></div>
-    <div class="field"><label>Bukti <span class="muted">(opsional, JPG/PNG maks 3MB)</span></label>
+    <div class="field"><label>Bukti <span class="muted">(opsional, JPG/PNG)</span></label>
       <input type="file" id="dn-bukti" accept="image/*"></div>`,
     async () => {
       const jumlah = nilaiUang('#dn-jumlah') ?? 0;
@@ -11439,7 +11442,7 @@ function tarikDanaModal() {
         // Penanda unik per penarikan: klik ganda tidak menghasilkan dua catatan.
         ref: 'tarik-' + Date.now(),
       };
-      if (f) body.bukti = await fileToDataUrl(f);
+      if (f) body.bukti = (await kompresGambar(f)).dataUrl;
       const d = await api('/api/dana-admin/tarik', { method: 'POST', body });
       toast(`✔ Penarikan tercatat — sisa dana ${rp(d.ringkas.saldo)}`, 'ok');
       muatDanaAdmin();
