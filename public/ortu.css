@@ -269,7 +269,18 @@ footer { text-align: center; font-size: 12px; color: var(--ink-3); margin: 28px 
 @media (prefers-reduced-motion: reduce) { .modal { animation: none; } }
 .modal h2 { font-size: 19px; font-weight: 800; margin-bottom: 6px; }
 .modal > .muted { display: block; line-height: 1.55; margin: 0 0 12px; }
-.modal .actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+/*
+ * Sama seperti di layar admin: tombol putusan menempel di dasar popup.
+ * Formulir konfirmasi pembayaran 802px, sedangkan ruang popup di HP kecil
+ * hanya 681px — "Kirim konfirmasi" adalah tombol terpenting di portal ini,
+ * dan ia tidak boleh perlu dicari dengan menggulir.
+ * Padding bawahnya ikut membawa safe-area supaya tidak tertutup bilah
+ * gestur iPhone.
+ */
+.modal .actions { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap;
+  position: sticky; bottom: calc(-18px - env(safe-area-inset-bottom));
+  padding: 12px 0 calc(18px + env(safe-area-inset-bottom));
+  background: #fff; border-top: 1px solid var(--line); }
 .modal .actions button { flex: 1; border-radius: 13px; padding: 12px 10px; font-weight: 700; border: 1px solid var(--line); background: #fff; white-space: nowrap; }
 .modal .actions button.primary { background: var(--navy-900); border-color: var(--navy-900); color: #fff; flex: 1.6; }
 .modal .actions button:disabled { opacity: .45; cursor: not-allowed; }

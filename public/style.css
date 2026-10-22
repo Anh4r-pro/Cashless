@@ -409,7 +409,26 @@ tr.tp-menunggu > td:first-child { border-left: 3px solid var(--gold); }
 .modal-bg { position: fixed; inset: 0; background: rgba(22,32,74,.5); display: flex; align-items: center; justify-content: center; padding: 16px; z-index: 40; }
 .modal { background: #fff; border-radius: 12px; padding: 20px; width: 100%; max-width: 460px; max-height: 90vh; overflow-y: auto; border-top: 4px solid var(--gold); }
 .modal h2 { margin-bottom: 12px; }
-.modal .actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+/*
+ * Tombol putusan MENEMPEL di dasar popup.
+ *
+ * Formulir panjang jauh melebihi ruang popup di HP (~760px): Tambah Santri
+ * 1.467px, Ubah Barang 1.603px, editor 64 sakelar Kategori Akses 2.769px.
+ * Tanpa ini, mengisi formulir di HP berarti menggulir sampai dasar hanya untuk
+ * menemukan tombol Simpan — dan Batal yang tak terlihat membuat orang menutup
+ * popup dengan menekan latar, jalan yang di popup statis (nota pembelian)
+ * memang sengaja dimatikan.
+ *
+ * `sticky` tidak mengubah apa pun pada popup yang isinya sudah muat: di sana
+ * elemennya tetap mengalir biasa. Jadi popup pendek tidak tersentuh.
+ *
+ * Margin samping TIDAK dibuat negatif (yang akan melebarkannya sampai tepi):
+ * .modal ber-overflow-y auto, sehingga sumbu-x-nya ikut menjadi auto — margin
+ * negatif di sana melahirkan gulir mendatar di dalam popup.
+ */
+.modal .actions { display: flex; gap: 8px; justify-content: flex-end;
+  position: sticky; bottom: -20px; margin-top: 16px; padding: 12px 0 20px;
+  background: #fff; border-top: 1px solid var(--line); }
 .modal .actions button { padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line); background: #fff; }
 .modal .actions button.primary { background: var(--navy); color: var(--gold); border-color: var(--navy); }
 .field { margin-bottom: 10px; }
