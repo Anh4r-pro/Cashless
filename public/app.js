@@ -627,7 +627,7 @@ function kasirView(el) {
         Tempelkan kartu untuk memulai transaksi<br>
         <span class="muted">satu tap = satu transaksi</span>
       </div>
-      <div style="display:flex; gap:8px; margin-top:10px">
+      <div id="uid-cari" style="display:flex; gap:8px; margin-top:10px">
         <input id="manual-uid" placeholder="atau ketik UID manual, mis. 04A1B2C3">
         <button class="linkbtn" id="btn-manual" style="flex:none">Cari</button>
       </div>
@@ -728,6 +728,9 @@ async function kasirLookup(uid) {
     const d = await api('/api/card-lookup', { method: 'POST', body: { uid } });
     if (!d.siswa) {
       kasir.siswa = null; kasir.tapToken = null;
+      // Tidak ada kartu yang terbaca — ajakan tap & kolom UID tetap diperlukan
+      // supaya kartu berikutnya bisa dicoba tanpa jalan memutar.
+      kasirTampilAjakanTap(true);
       $('#stu-box').innerHTML = `
         <div class="stucard" style="border-color:var(--warn)">
           <div class="avatar" style="background:var(--warn)">?</div>
@@ -746,8 +749,42 @@ async function kasirLookup(uid) {
   } catch (e) { toast(e.message, 'err'); }
 }
 
+/**
+ * Ajakan "tempelkan kartu" + kolom UID hanya berguna SEBELUM kartu terbaca.
+ *
+ * Sesudahnya keduanya cuma memanjangkan gulir di HP — kasir harus menggulir
+ * melewati dua kotak mati untuk sampai ke keranjang dan tombol Bayar. Jadi
+ * begitu identitas santri tampil, keduanya disembunyikan; begitu transaksinya
+ * selesai (atau kartunya diganti), keduanya kembali.
+ *
+ * DISEMBUNYIKAN, bukan dihapus: penangkap ketikan reader hidup di tingkat
+ * dokumen, jadi tap kartu berikutnya tetap terbaca walau kotaknya tak terlihat.
+ */
+function kasirTampilAjakanTap(tampil) {
+  $('#tapzone')?.classList.toggle('hidden', !tampil);
+  $('#uid-cari')?.classList.toggle('hidden', !tampil);
+}
+
+/**
+ * Lepaskan kartu yang sedang terbaca tanpa menyelesaikan transaksi.
+ *
+ * Jalan keluar yang wajib ada: dengan kolom UID ikut tersembunyi, kasir yang
+ * readernya bermasalah lalu salah mengetik UID akan terkunci pada santri yang
+ * keliru. Keranjang SENGAJA tidak ikut dikosongkan — barangnya sama, yang
+ * berganti cuma siapa yang membayar.
+ */
+function kasirLepasKartu() {
+  kasir.siswa = null;
+  kasir.tapToken = null;
+  $('#stu-box').innerHTML = '';
+  kasirTampilAjakanTap(true);
+  updatePayBtn();
+  $('#manual-uid')?.focus();
+}
+
 function renderKasirSiswa(pesan) {
   const s = kasir.siswa;
+  kasirTampilAjakanTap(false);
   $('#stu-box').innerHTML = `
     <div class="stucard">
       ${avatarHtml(s)}
@@ -764,7 +801,9 @@ function renderKasirSiswa(pesan) {
           ? `<br><span class="muted" style="font-size:11px">titipan ${rp(s.saldo_titipan)}</span>` : ''}
       </div>
     </div>
-    ${pesan ? `<p class="muted" style="margin:8px 0 0">${pesan}</p>` : ''}`;
+    ${pesan ? `<p class="muted" style="margin:8px 0 0">${pesan}</p>` : ''}
+    <p style="margin:8px 0 0"><button class="linkbtn" id="btn-lepas-kartu">↺ ganti kartu</button></p>`;
+  $('#btn-lepas-kartu').onclick = kasirLepasKartu;
 }
 
 function renderCart() {
@@ -829,6 +868,9 @@ async function doBayar() {
     kasir.tapToken = null;
     kasir.cart = [];
     $('#stu-box').innerHTML = '';
+    // Layar kembali ke keadaan menunggu: ajakan tap & kolom UID muncul lagi,
+    // siap untuk santri berikutnya.
+    kasirTampilAjakanTap(true);
     renderCart();
     updatePayBtn();
   } catch (e) {
