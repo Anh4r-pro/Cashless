@@ -127,6 +127,11 @@ main { max-width: 1200px; margin: 20px auto; padding: 0 16px; }
 .panel { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
 .row { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
 .row > * { flex: 1; min-width: 300px; }
+/* .panel punya margin-bottom bawaan untuk jarak antarpanel yang berurutan di
+   luar .row. Di DALAM .row, gap-nya sendiri sudah mengatur jarak itu — margin
+   bawaan tadi cuma menggandakannya jadi 32px saat panelnya bertumpuk di layar
+   sempit, padahal yang terlihat semestinya 16px. */
+.row > .panel { margin-bottom: 0; }
 .muted { color: var(--muted); font-size: 13px; }
 .rp { font-variant-numeric: tabular-nums; }
 .right { text-align: right; }
@@ -170,12 +175,27 @@ main { max-width: 1200px; margin: 20px auto; padding: 0 16px; }
 .tapzone.pulse { border-color: var(--brand); color: var(--brand); }
 .tapzone .big { font-size: 32px; }
 
-.stucard { display: flex; gap: 14px; align-items: center; padding: 14px; border: 1px solid var(--line); border-radius: 12px; margin-top: 12px; border-left: 4px solid var(--gold); }
+.stucard { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; padding: 14px; border: 1px solid var(--line); border-radius: 12px; margin-top: 12px; border-left: 4px solid var(--gold); }
 .avatar { width: 72px; height: 72px; border-radius: 12px; background: var(--navy); color: var(--gold); display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 800; flex: none; }
 img.avatar { object-fit: cover; background: #dde3ea; }
 .avatar.small, img.avatar.small { width: 40px; height: 40px; font-size: 15px; border-radius: 8px; }
+/* Nama+kelas+NIS: tanpa min-width:0 elemen flex ini menolak menyusut lebih
+   kecil dari lebar alaminya, memeras saldo di sebelahnya sampai ikut terlipat
+   aneh. flex-basis 140px memberinya ruang wajar di layar sempit. */
+.stucard > :not(.avatar):not(.saldo) { min-width: 0; flex: 1 1 140px; }
 .stucard .saldo { margin-left: auto; text-align: right; }
-.stucard .saldo b { font-size: 22px; color: var(--navy); }
+.stucard .saldo b { font-size: 22px; color: var(--navy); white-space: nowrap; }
+@media (max-width: 480px) {
+  /* Di HP, nama dan saldo sama-sama tidak cukup lebar untuk berdampingan —
+     dipisah jadi baris sendiri yang tegas, bukan dibiarkan berebut dan
+     terlipat di tempat yang tak terduga.
+     TANPA padding-top tambahan: .stucard sudah ber-gap 14px, dan gap itu
+     berlaku juga ANTARA BARIS saat flex-wrap membungkus — padding-top di
+     sini akan menumpuk di atas gap itu, persis masalah dobel-jarak yang
+     sama dengan .row/.panel (lihat komentar di dekat .row > .panel). */
+  .stucard .saldo { flex-basis: 100%; margin-left: 0; text-align: left;
+    border-top: 1px dashed var(--line); padding-top: 4px; }
+}
 .badge { display: inline-block; padding: 2px 8px; border-radius: 99px; font-size: 12px; font-weight: 700; }
 .badge.aktif { background: #e3f4ea; color: var(--ok); }
 .badge.blokir, .badge.nonaktif { background: #fbe4e2; color: var(--err); }

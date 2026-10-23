@@ -173,6 +173,12 @@ body.admin .panel { background: var(--card); border: 1px solid var(--line); bord
   padding: 20px; margin-bottom: 18px; box-shadow: var(--bayang); }
 body.admin .row { gap: 18px; }
 body.admin .row > * { min-width: min(300px, 100%); }
+/* Jarak panel yang bertumpuk di layar sempit SENGAJA dobel tanpa ini: .row
+   sudah memberi gap 18px, dan margin-bottom 18px bawaan .panel di atas
+   menambahkannya lagi — 36px yang terlihat, bukan 18px yang semestinya.
+   Perbaikan yang sama di style.css (`.row > .panel`) kalah spesifisitas dari
+   `body.admin .panel` tepat di atas, jadi harus diulang di sini. */
+body.admin .row > .panel { margin-bottom: 0; }
 body.admin .muted { color: var(--muted); }
 
 /* kartu angka */

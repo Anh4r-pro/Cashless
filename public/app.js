@@ -641,13 +641,15 @@ function kasirView(el) {
       <div id="manual-box">
         <input id="manual-desk" maxlength="60" autocomplete="off" style="margin-top:12px"
           placeholder="Deskripsi barang (opsional), mis. Sabun mandi">
-        <div style="display:flex; gap:8px; margin-top:8px">
+        <div style="margin-top:8px">
           ${inputUang({ id: 'manual-harga', placeholder: 'Input manual (Rp)' })}
-          <select id="manual-kat" class="hidden" style="flex:none; width:auto">
+        </div>
+        <div style="display:flex; gap:8px; margin-top:8px">
+          <select id="manual-kat" class="hidden" style="flex:1; width:auto">
             <option value="makanan">Makanan</option>
             <option value="non_makanan">Non-makanan</option>
           </select>
-          <button class="linkbtn" id="btn-add-manual" style="flex:none">+ Tambah</button>
+          <button class="go" id="btn-add-manual" style="flex:none">+ Tambah</button>
         </div>
       </div>
       <div class="cart" id="cart-box"></div>
@@ -793,6 +795,11 @@ function renderKasirSiswa(pesan) {
         <span class="muted">${esc(s.kelas)} · NIS ${esc(s.nis)}</span><br>
         <span class="badge ${s.status}">${s.status.toUpperCase()}</span>
         ${kasir.tapToken ? '' : '<span class="badge" style="background:#fdf1dc;color:var(--warn)">TAP LAGI UNTUK TRANSAKSI BARU</span>'}
+        <!-- Sebaris dengan badge, bukan paragraf sendiri di bawah kartu:
+             paragraf terpisah menambah satu baris penuh persis di tempat
+             yang paling ingin dihemat — ruang yang baru saja dibebaskan
+             dengan menyembunyikan ajakan tap. -->
+        <button class="linkbtn" id="btn-lepas-kartu" style="margin-left:4px; font-size:12.5px">↺ ganti kartu</button>
       </div>
       <div class="saldo"><span class="muted">Saldo</span><br><b class="rp">${rp(s.saldo)}</b>
         ${s.saldo_titipan > 0
@@ -801,8 +808,7 @@ function renderKasirSiswa(pesan) {
           ? `<br><span class="muted" style="font-size:11px">titipan ${rp(s.saldo_titipan)}</span>` : ''}
       </div>
     </div>
-    ${pesan ? `<p class="muted" style="margin:8px 0 0">${pesan}</p>` : ''}
-    <p style="margin:8px 0 0"><button class="linkbtn" id="btn-lepas-kartu">↺ ganti kartu</button></p>`;
+    ${pesan ? `<p class="muted" style="margin:8px 0 0">${pesan}</p>` : ''}`;
   $('#btn-lepas-kartu').onclick = kasirLepasKartu;
 }
 
