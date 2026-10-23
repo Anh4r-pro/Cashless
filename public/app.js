@@ -954,7 +954,7 @@ function martView(el) {
   <div class="row mart-pos">
     <div class="panel">
       <div class="kat-head"><h2 style="margin:0">Etalase</h2>
-        <span style="display:flex; gap:10px; align-items:baseline">
+        <span style="display:flex; gap:10px; align-items:baseline; flex-wrap:wrap">
           <span id="mart-printer"></span>
           <button class="linkbtn" id="mart-bantuan" title="pintasan papan ketik (F1)">⌨ F1</button>
           <button class="linkbtn" id="mart-kas">🧾 Tutup kas harian</button>
@@ -978,7 +978,7 @@ function martView(el) {
     </div>
     <div class="panel">
       <div class="kat-head"><h2 style="margin:0">Keranjang <span class="muted" id="mart-n"></span></h2>
-        <span style="display:flex; gap:10px; align-items:baseline">
+        <span style="display:flex; gap:10px; align-items:baseline; flex-wrap:wrap">
           <button class="linkbtn" id="mart-tahan" title="tahan transaksi (F8)">⏸ Tahan</button>
           <button class="linkbtn" id="mart-tertahan"></button>
           <button class="linkbtn danger" id="mart-kosong">Kosongkan</button>
@@ -2366,7 +2366,7 @@ function martStokView(el) {
     </div>
     <div id="ms-persediaan" class="hidden" style="margin-bottom:14px">
       <div class="kat-head"><h3 style="margin:0; font-size:14px">Persediaan menurut harga modal</h3>
-        <span style="display:flex; gap:8px; align-items:center">
+        <span style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:flex-end">
           <select id="ms-ps-format" class="k-chip-select" style="width:auto">
             <option value="xls">Excel (.xls)</option>
             <option value="doc">Word (.doc)</option>
@@ -2954,7 +2954,7 @@ async function martMuatDash() {
     <div class="kat-head"><h2 style="margin:0">Laporan Keuangan Rinci</h2>
       <button class="linkbtn" id="md-keu-toggle">▾ Tampilkan laporan</button></div>
     <div id="md-keu-box" class="hidden">
-      <span style="display:flex; gap:10px; align-items:baseline; margin-bottom:8px">
+      <span style="display:flex; gap:10px; align-items:baseline; margin-bottom:8px; flex-wrap:wrap">
         <select id="md-periode" class="k-chip-select" style="width:auto">
           <option value="hari">Hari ini</option><option value="pekan">7 hari</option>
           <option value="bulan" selected>30 hari</option><option value="semua">Semua</option>
@@ -3234,7 +3234,7 @@ function martSpdView(el) {
   <div class="panel">
     <div class="kat-head"><h2 style="margin:0">Closing Harian${admin ? ' Mart' : ''}
       <span class="muted" id="spd-ket"></span></h2>
-      <span style="display:flex; gap:8px; align-items:center">
+      <span style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:flex-end">
         <select id="spd-format" class="k-chip-select" style="width:auto">
           <option value="xls">Excel (.xls)</option>
           <option value="doc">Word (.doc)</option>
@@ -3772,7 +3772,7 @@ function martRiwayatView(el) {
         <th class="num">Total</th><th>Keterangan</th><th>Kasir</th><th></th></tr></thead>
       <tbody id="rwm-body"></tbody>
     </table></div>
-    <div id="rwm-nav" style="display:flex; gap:8px; align-items:center; margin-top:12px"></div>
+    <div id="rwm-nav" style="display:flex; gap:8px; align-items:center; justify-content:center; flex-wrap:wrap; margin-top:12px"></div>
   </div>`;
 
   $('#rwm-go').onclick = () => { martRw.hal = 1; martMuatRiwayat(); };
@@ -4870,7 +4870,7 @@ function martBarangSalesModal(sup) {
       <div class="field"><label>Dari</label><input type="date" id="bs-dari"></div>
       <div class="field"><label>Sampai</label><input type="date" id="bs-sampai"></div>
       <button class="go" id="bs-go">Terapkan</button>
-      <span style="display:flex; gap:8px; align-items:center; margin-left:auto">
+      <span style="display:flex; gap:8px; align-items:center; margin-left:auto; flex-wrap:wrap">
         <select id="bs-format" class="k-chip-select" style="width:auto">
           <option value="xls">Excel (.xls)</option>
           <option value="doc">Word (.doc)</option>
@@ -6420,7 +6420,7 @@ function neracaPanel(n) {
       ${(m.per_metode.tunai + m.per_metode.transfer + m.per_metode.qris) > 0 ? `
         <div class="nr-baris"><span>Rincian metode uang masuk yang tercatat
           <br><span class="nr-catatan">hanya dari impor massal &amp; portal orang tua; top up manual tidak menyimpan metode</span></span>
-          <b>${['tunai', 'transfer', 'qris'].map((x) =>
+          <b class="nr-metode-grup">${['tunai', 'transfer', 'qris'].map((x) =>
             `<span class="nr-metode">${x}: ${rp(m.per_metode[x])}</span>`).join('')}</b></div>` : ''}
     </div>
 

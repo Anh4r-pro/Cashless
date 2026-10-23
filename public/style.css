@@ -243,7 +243,7 @@ img.avatar { object-fit: cover; background: #dde3ea; }
 .paybtn.danger:disabled { background: #b9c2cf; }
 
 /* ---------- kategori alasan potongan ---------- */
-.kat-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.kat-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .kat-list { margin-top: 6px; margin-bottom: 8px; }
 .kat-list button { font-weight: 600; font-size: 13.5px; padding: 7px 11px; text-align: left; }
 .kat-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
@@ -747,7 +747,9 @@ button.go { background: var(--navy); color: var(--gold); border-color: var(--nav
   background: #fff8e6; border: 1px solid var(--gold); }
 .nr-saran p { margin: 0 0 10px; font-size: 14px; }
 .nr-info { margin-top: 12px; }
-.nr-metode { display: inline-block; margin-left: 8px; font-size: 13px; font-weight: 600;
+.nr-metode-grup.nr-metode-grup { white-space: normal; display: flex; flex-wrap: wrap;
+  justify-content: flex-end; gap: 4px; }
+.nr-metode { display: inline-block; font-size: 13px; font-weight: 600;
   color: var(--navy); font-variant-numeric: tabular-nums; }
 
 .nr-periksa { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 8px; }
