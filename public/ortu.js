@@ -314,6 +314,10 @@ async function muatRingkasan() {
     (s.punya_kartu ? '' : ' · <span class="muted">kartu belum dihubungkan</span>');
   $('#o-hp').textContent = (s.peran === 'pegawai' ? 'HP terdaftar: ' : 'HP wali terdaftar: ') + s.hp_ortu_samar;
   $('#o-hp').classList.toggle('hidden', !MINTA_HP && s.hp_ortu_samar === '—');
+  // Tabungan/donasi/ganti PIN lewat perangkat sendiri hanya untuk pintu
+  // pegawai, dan hanya kalau kartunya sudah terhubung — tanpa kartu, ketiga
+  // aksi itu dijamin ditolak server (PIN bawaannya berasal dari NIS kartu).
+  $('#o-layanan').classList.toggle('hidden', !(s.peran === 'pegawai' && s.punya_kartu));
   $('#o-saldo').textContent = rp(s.saldo);
   // Saldo titipan: uang yang sudah diterima sekolah tetapi sengaja belum ditaruh
   // di kartu. Ditampilkan agar wali yang menyetor sekaligus banyak bisa melihat
@@ -456,6 +460,189 @@ function bukaModal(isi, tombol) {
   if (batal) batal.onclick = tutupModal;
 }
 function tutupModal() { $('#o-modal-root').innerHTML = ''; }
+
+// --------------------------------------------- layanan pegawai (tabungan,
+// donasi, ganti PIN dari perangkat sendiri). Pola modalnya meniru alur isi
+// saldo di atas (menu → pilihan → konfirmasi), tapi eksekusinya langsung,
+// bukan pengajuan yang menunggu admin — sama seperti di kios, hanya pintu
+// masuknya yang beda (sesi login /ortu, bukan tap kartu).
+let pegawaiOpsi = null;
+
+async function mulaiLayanan() {
+  let d;
+  try { d = await api('/api/ortu/pegawai/opsi'); }
+  catch (e) { return tanganiGagal(e); }
+  pegawaiOpsi = d;
+  layananMenu();
+}
+
+function layananMenu() {
+  const d = pegawaiOpsi;
+  bukaModal(`
+    <h2>Layanan Pegawai</h2>
+    <p class="muted">Saldo kartu saat ini <b>${rp(d.saldo)}</b>.</p>
+    <div class="o-metode-grid">
+      <button class="o-metode" id="o-pg-pilih-tabungan" ${d.tabungan_jenis.length ? '' : 'disabled'}>
+        <span class="o-metode-lg">💰</span>
+        <span><b>Tabungan</b><span class="muted">${d.tabungan_jenis.length
+          ? `Sisa jatah hari ini ${rp(d.sisa_tabungan_harian)}` : 'Belum ada jenis tabungan dibuka sekolah'}</span></span>
+      </button>
+      <button class="o-metode" id="o-pg-pilih-donasi" ${d.donasi_program.length ? '' : 'disabled'}>
+        <span class="o-metode-lg">❤</span>
+        <span><b>Donasi</b><span class="muted">${d.donasi_program.length
+          ? `Sisa jatah hari ini ${rp(d.sisa_donasi)}` : 'Belum ada program donasi dibuka sekolah'}</span></span>
+      </button>
+      <button class="o-metode" id="o-pg-pilih-pin">
+        <span class="o-metode-lg">🔑</span>
+        <span><b>Ganti PIN</b><span class="muted">Dipakai untuk semua layanan ini & di kios</span></span>
+      </button>
+    </div>`,
+    '<button id="om-batal">Tutup</button>');
+
+  $('#o-pg-pilih-tabungan').onclick = layananTabunganForm;
+  $('#o-pg-pilih-donasi').onclick = layananDonasiProgram;
+  $('#o-pg-pilih-pin').onclick = layananPinForm;
+}
+
+function layananTabunganForm() {
+  const d = pegawaiOpsi;
+  const opsiJenis = d.tabungan_jenis.map((j) => `<option value="${j.id}">${esc(j.nama)}</option>`).join('');
+  bukaModal(`
+    <h2>Tabungan</h2>
+    <div class="field"><label>Jenis tabungan</label>
+      <select id="o-pg-jenis">${opsiJenis}</select></div>
+    <div class="field"><label>Nominal</label>
+      ${inputUang({ id: 'o-pg-jumlah', placeholder: 'contoh: 50.000' })}
+      <span class="muted hint">Minimal ${rp(d.tabungan_min)}, sisa jatah hari ini ${rp(d.sisa_tabungan_harian)}</span></div>
+    <div class="field"><label>PIN</label>
+      <input id="o-pg-pin" type="password" inputmode="numeric" maxlength="20" autocomplete="off" placeholder="PIN kartu Anda"></div>
+    <p id="o-pg-err" class="o-err hidden"></p>`,
+    `<button id="om-batal">Batal</button>
+     <button id="om-kembali">‹ Layanan lain</button>
+     <button id="om-kirim" class="primary">Setor</button>`);
+  $('#om-kembali').onclick = layananMenu;
+  $('#om-kirim').onclick = layananTabunganKirim;
+}
+
+function pegawaiTxId(label) {
+  return `pg-${label}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+}
+
+async function layananTabunganKirim() {
+  const btn = $('#om-kirim');
+  const err = $('#o-pg-err');
+  err.classList.add('hidden');
+  const jenisId = Number($('#o-pg-jenis').value);
+  const jumlah = nilaiUang('#o-pg-jumlah') ?? 0;
+  const pin = $('#o-pg-pin').value;
+  if (!jumlah) { err.textContent = 'Isi nominal.'; err.classList.remove('hidden'); return; }
+  if (!pin) { err.textContent = 'Isi PIN.'; err.classList.remove('hidden'); return; }
+  btn.disabled = true; btn.textContent = 'Memproses…';
+  try {
+    const d = await api('/api/ortu/pegawai/tabungan', { method: 'POST',
+      body: { jenis_id: jenisId, jumlah, pin, tx_id: pegawaiTxId('tab') } });
+    tutupModal();
+    toast(`Tabungan ${d.jenis} ${rp(d.jumlah)} berhasil.`, 'ok');
+    muatRingkasan();
+  } catch (e) {
+    err.textContent = e.message; err.classList.remove('hidden');
+    btn.disabled = false; btn.textContent = 'Setor';
+  }
+}
+
+function layananDonasiProgram() {
+  const d = pegawaiOpsi;
+  const pilihan = d.donasi_program.map((p) => `
+    <button class="o-metode" data-program="${p.id}">
+      <span class="o-metode-lg">❤</span>
+      <span><b>${esc(p.nama)}</b><span class="muted">${p.nominal.map((n) => rp(n)).join(' · ')}</span></span>
+    </button>`).join('');
+  bukaModal(`
+    <h2>Pilih Program Donasi</h2>
+    <p class="muted">Sisa jatah donasi hari ini <b>${rp(d.sisa_donasi)}</b>.</p>
+    <div class="o-metode-grid">${pilihan}</div>`,
+    `<button id="om-batal">Batal</button>
+     <button id="om-kembali">‹ Layanan lain</button>`);
+  $('#om-kembali').onclick = layananMenu;
+  document.querySelectorAll('#o-modal-root [data-program]').forEach((b) => {
+    b.onclick = () => layananDonasiNominal(d.donasi_program.find((p) => p.id === Number(b.dataset.program)));
+  });
+}
+
+function layananDonasiNominal(program) {
+  const d = pegawaiOpsi;
+  const tombol = program.nominal.map((n) => {
+    const cukup = n <= d.saldo && n <= d.sisa_donasi;
+    return `<button class="o-metode" data-jumlah="${n}" ${cukup ? '' : 'disabled'}>
+      <span><b>${rp(n)}</b>${cukup ? '' : '<span class="muted">tidak cukup</span>'}</span></button>`;
+  }).join('');
+  bukaModal(`
+    <h2>${esc(program.nama)}</h2>
+    <p class="muted">Pilih nominal donasi.</p>
+    <div class="o-metode-grid">${tombol}</div>
+    <div class="field"><label>PIN</label>
+      <input id="o-pg-pin" type="password" inputmode="numeric" maxlength="20" autocomplete="off" placeholder="PIN kartu Anda"></div>
+    <p id="o-pg-err" class="o-err hidden"></p>`,
+    `<button id="om-batal">Batal</button>
+     <button id="om-kembali">‹ Program lain</button>`);
+  $('#om-kembali').onclick = layananDonasiProgram;
+  document.querySelectorAll('#o-modal-root [data-jumlah]').forEach((b) => {
+    b.onclick = () => layananDonasiKirim(program, Number(b.dataset.jumlah));
+  });
+}
+
+async function layananDonasiKirim(program, jumlah) {
+  const err = $('#o-pg-err');
+  err.classList.add('hidden');
+  const pin = $('#o-pg-pin').value;
+  if (!pin) { err.textContent = 'Isi PIN.'; err.classList.remove('hidden'); return; }
+  try {
+    const d = await api('/api/ortu/pegawai/donasi', { method: 'POST',
+      body: { program_id: program.id, jumlah, pin, tx_id: pegawaiTxId('don') } });
+    tutupModal();
+    toast(`Donasi ${d.program} ${rp(d.jumlah)} berhasil.`, 'ok');
+    muatRingkasan();
+  } catch (e) {
+    err.textContent = e.message; err.classList.remove('hidden');
+  }
+}
+
+function layananPinForm() {
+  bukaModal(`
+    <h2>Ganti PIN</h2>
+    <div class="field"><label>PIN lama</label>
+      <input id="o-pg-pin-lama" type="password" inputmode="numeric" maxlength="20" autocomplete="off"></div>
+    <div class="field"><label>PIN baru (4–8 angka)</label>
+      <input id="o-pg-pin-baru" type="password" inputmode="numeric" maxlength="8" autocomplete="off"></div>
+    <div class="field"><label>Ulangi PIN baru</label>
+      <input id="o-pg-pin-baru2" type="password" inputmode="numeric" maxlength="8" autocomplete="off"></div>
+    <p id="o-pg-err" class="o-err hidden"></p>`,
+    `<button id="om-batal">Batal</button>
+     <button id="om-kembali">‹ Layanan lain</button>
+     <button id="om-kirim" class="primary">Ganti PIN</button>`);
+  $('#om-kembali').onclick = layananMenu;
+  $('#om-kirim').onclick = layananPinKirim;
+}
+
+async function layananPinKirim() {
+  const btn = $('#om-kirim');
+  const err = $('#o-pg-err');
+  err.classList.add('hidden');
+  const lama = $('#o-pg-pin-lama').value;
+  const baru = $('#o-pg-pin-baru').value;
+  const baru2 = $('#o-pg-pin-baru2').value;
+  if (!lama || !baru) { err.textContent = 'Isi PIN lama dan PIN baru.'; err.classList.remove('hidden'); return; }
+  if (baru !== baru2) { err.textContent = 'PIN baru dan pengulangannya tidak sama.'; err.classList.remove('hidden'); return; }
+  btn.disabled = true; btn.textContent = 'Memproses…';
+  try {
+    await api('/api/ortu/pegawai/ganti-pin', { method: 'POST', body: { pin_lama: lama, pin_baru: baru } });
+    tutupModal();
+    toast('PIN berhasil diganti.', 'ok');
+  } catch (e) {
+    err.textContent = e.message; err.classList.remove('hidden');
+    btn.disabled = false; btn.textContent = 'Ganti PIN';
+  }
+}
 
 /** Tanggal WIB n hari ke belakang, format YYYY-MM-DD untuk atribut min/max. */
 function tglMundur(n) {
@@ -797,6 +984,7 @@ $('#o-ganti').onclick = tampilPilihanPeran;
 document.querySelectorAll('.o-peran-opsi').forEach((b) => { b.onclick = () => pilihPeran(b.dataset.peran); });
 $('#o-keluar').onclick = keluar;
 $('#o-topup').onclick = mulaiTopup;
+$('#o-layanan').onclick = mulaiLayanan;
 addEventListener('keydown', (e) => { if (e.key === 'Escape') tutupModal(); });
 // :not([type=checkbox]) — "tetap masuk" bukan kolom angka, dan nilai bawaan
 // checkbox ("on") tidak boleh ikut dilucuti seolah-olah isian NIS/tanggal.

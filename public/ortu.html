@@ -122,6 +122,11 @@
     <div class="o-aksi">
       <button id="o-topup" class="utama hidden"><span class="ic">
         <svg class="i" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></span>Isi saldo</button>
+      <!-- Hanya tampil untuk pintu pegawai (lihat muatRingkasan di ortu.js) —
+           tabungan, donasi, dan ganti PIN dari perangkat sendiri, tanpa antre
+           di kios bersama santri. -->
+      <button id="o-layanan" class="hidden"><span class="ic">
+        <svg class="i" viewBox="0 0 24 24"><path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg></span>Layanan Pegawai</button>
       <button data-ke="o-sek-riwayat"><span class="ic">
         <svg class="i" viewBox="0 0 24 24"><path d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01"/></svg></span>Riwayat</button>
       <button data-ke="o-sek-grafik"><span class="ic">

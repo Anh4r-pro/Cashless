@@ -91,6 +91,15 @@ class Izin
             'produk.kategori' => 'Memindah kategori barang koperasi',
             'produk.langsung' => 'Mengubah / menghapus menu tenant langsung tanpa pengajuan',
         ],
+        // Berlaku HANYA untuk superadmin yang mengintip laporan Mart lewat
+        // ?tenant_id= — akun tenant Mart sendiri (admin toko / kasir) tidak
+        // memakai sistem Izin ini sama sekali, jangkauannya sudah dipagari
+        // tenant_id (lihat MartLaporanController::martKu).
+        'IMBOS Mart' => [
+            'mart.dashboard' => 'Melihat Dashboard IMBOS Mart',
+            'mart.keuangan' => 'Melihat Laporan Keuangan Rinci Mart',
+            'mart.spd' => 'Melihat Closing Harian (SPD) Mart',
+        ],
         'Donasi & Kios' => [
             'donasi.lihat' => 'Membuka menu Donasi & rekapnya',
             'donasi.program' => 'Mengubah program & nominal donasi',

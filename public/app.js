@@ -612,7 +612,7 @@ function onCardTapped(uid) {
 // ╔══════════════════════════════════════════════════════════╗
 // ║ TENANT: KASIR                                             ║
 // ╚══════════════════════════════════════════════════════════╝
-let kasir = { siswa: null, tapToken: null, cart: [], produk: [] };
+let kasir = { siswa: null, tapToken: null, cart: [], produk: [], sisaHarian: null };
 
 function kasirView(el) {
   // tenant = keterangan tenant yang login (dipakai untuk tahu apakah ini koperasi,
@@ -729,7 +729,7 @@ async function kasirLookup(uid) {
   try {
     const d = await api('/api/card-lookup', { method: 'POST', body: { uid } });
     if (!d.siswa) {
-      kasir.siswa = null; kasir.tapToken = null;
+      kasir.siswa = null; kasir.tapToken = null; kasir.sisaHarian = null;
       // Tidak ada kartu yang terbaca — ajakan tap & kolom UID tetap diperlukan
       // supaya kartu berikutnya bisa dicoba tanpa jalan memutar.
       kasirTampilAjakanTap(true);
@@ -744,6 +744,7 @@ async function kasirLookup(uid) {
     }
     kasir.siswa = d.siswa;
     kasir.tapToken = d.tap_token;
+    kasir.sisaHarian = d.sisa_harian;
     renderKasirSiswa(d.smart
       ? `💡 Saldo baru saja terisi ulang otomatis <b>${rp(d.smart.isi)}</b> dari saldo titipan.`
       : '');
@@ -784,6 +785,31 @@ function kasirLepasKartu() {
   $('#manual-uid')?.focus();
 }
 
+/**
+ * Peringatan sisa jatah jajan — HANYA ketika sudah dekat/habis (lihat
+ * MEPET di bawah), bukan di setiap tap. Alasannya bukan sekadar kerapian:
+ * kartu kasir di HP sudah SANGAT pas gulirnya — satu baris tambahan yang
+ * SELALU tampil mengalahkan penghematan gulir dari menyembunyikan ajakan
+ * tap (diukur nyata di test-ui-asap.js, "tombol Bayar naik ke atas", bukan
+ * diduga). Ini sekalian lebih tepat sasaran: kasir hanya perlu diberi tahu
+ * PAS transaksi berikutnya benar-benar berisiko ditolak, bukan setiap saat
+ * jatahnya memang masih longgar.
+ */
+const JAJAN_MEPET_RP = 20000;   // kira-kira harga jajan termurah di kantin
+const JAJAN_MEPET_KALI = 1;
+
+function kasirJajanHtml(j) {
+  if (!j) return '';
+  const mepet = (x) => x.rp <= JAJAN_MEPET_RP || x.kali <= JAJAN_MEPET_KALI;
+  if (!mepet(j.makanan) && !mepet(j.nonmakanan)) return '';
+
+  const warna = (x) => x.rp <= 0 || x.kali <= 0 ? ' class="habis"' : '';
+  const satu = (label, x) => mepet(x) ? `${label} <b${warna(x)}>${rp(x.rp)}</b>` : '';
+  const teks = [satu('mkn', j.makanan), satu('non', j.nonmakanan)].filter(Boolean).join(' · ');
+
+  return `<br><span class="muted" style="font-size:11px">sisa jajan: ${teks}</span>`;
+}
+
 function renderKasirSiswa(pesan) {
   const s = kasir.siswa;
   kasirTampilAjakanTap(false);
@@ -806,6 +832,7 @@ function renderKasirSiswa(pesan) {
           // Titipan tidak bisa dibelanjakan, tapi kasir perlu tahu uangnya ada:
           // santri bersaldo tipis bisa diarahkan ke admin, bukan disuruh pulang.
           ? `<br><span class="muted" style="font-size:11px">titipan ${rp(s.saldo_titipan)}</span>` : ''}
+        ${kasirJajanHtml(kasir.sisaHarian)}
       </div>
     </div>
     ${pesan ? `<p class="muted" style="margin:8px 0 0">${pesan}</p>` : ''}`;
@@ -7444,6 +7471,17 @@ async function muatPanelTitipan() {
   // Santri bisa saja sudah diganti selagi permintaan berjalan.
   if (!saldo.siswa || saldo.siswa.id !== d.siswa.id) return;
 
+  // Server baru saja bisa saja mengisi ulang kartu dari titipan (lihat
+  // SaldoController::titipanSiswa) — kartu di panel atas disegarkan supaya
+  // tidak menampilkan saldo lama yang sudah kedaluwarsa. Dijaga dengan
+  // pembanding nilai supaya tidak memicu panggilan berulang tanpa henti.
+  if (d.siswa.saldo !== s.saldo || d.siswa.saldo_titipan !== s.saldo_titipan) {
+    saldo.siswa = { ...s, saldo: d.siswa.saldo, saldo_titipan: d.siswa.saldo_titipan };
+    renderSaldoSiswa();
+    sdSync();
+    return;
+  }
+
   const t = d.siswa;
   const b = d.berlaku;
   const asal = (nilai) => nilai === null ? ' <span class="muted">(ikut sekolah)</span>' : '';
@@ -7596,19 +7634,26 @@ function sdSync() {
   if (sdKolektif()) return sdSyncKolektif(n, ket);
 
   const biaya = potong ? 0 : sdBiaya(s, n);
+  // Sumber potongan (kartu/titipan/keduanya) menentukan apa yang sungguh
+  // tersedia — bukan s.saldo mentah saja, atau titipan tidak akan pernah
+  // bisa dipotong walau dropdown "Sumber potongan" sudah memilihnya.
+  const bagi = potong && s ? sdBagi(s) : null;
   let pesan = '', ok = false;
   if (!s) pesan = 'Pilih santri dulu di panel sebelah kiri.';
   else if (!n || n <= 0) pesan = 'Isi nominal — pilih nominal cepat atau ketik sendiri.';
   else if (biaya > 0 && biaya >= n) pesan = `⚠️ Nominal harus lebih besar dari biaya admin (${rp(biaya)}).`;
-  else if (potong && n > s.saldo) pesan = `⚠️ Melebihi saldo ${esc(s.nama)} (${rp(s.saldo)}).`;
+  else if (potong && !bagi.cukup) pesan = `⚠️ Kartu + titipan ${esc(s.nama)} tidak cukup (kartu ${rp(s.saldo)}` +
+    (s.saldo_titipan > 0 ? `, titipan ${rp(s.saldo_titipan)}` : '') + ').';
   else if (potong && ket.length < 3) pesan = 'Alasan pemotongan wajib diisi (minimal 3 huruf).';
   else {
     ok = true;
     const masuk = n - biaya;
-    const akhir = potong ? s.saldo - n : s.saldo + masuk;
+    const akhir = potong ? s.saldo - bagi.kartu : s.saldo + masuk;
     pesan = `<b>${esc(s.nama)}</b><br>Saldo ${rp(s.saldo)}
       <span class="${potong ? 'minus' : 'plus'}">${potong ? '−' : '+'}${rp(potong ? n : masuk)}</span>
       → <b class="rp">${rp(akhir)}</b>`;
+    if (potong && bagi.titipan > 0) pesan += `<br><span class="muted">Dari kartu ${rp(bagi.kartu)},
+      dari titipan ${rp(bagi.titipan)}</span>`;
     if (biaya > 0) pesan += `<br><span class="muted">Top up ${rp(n)} → masuk kartu ${rp(masuk)},
       biaya admin ${rp(biaya)}</span>`;
     else if (!potong && $('#sd-biaya').value === 'biaya' && s.biaya_admin === 0)

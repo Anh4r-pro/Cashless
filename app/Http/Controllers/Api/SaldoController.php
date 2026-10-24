@@ -384,6 +384,14 @@ class SaldoController extends Controller
             throw new ApiError(404, 'Santri tidak ditemukan');
         }
 
+        // Admin membuka panel ini lewat cari-nama, bukan tap kartu — jalur
+        // yang TIDAK lewat KasirController::cardLookup, jadi tanpa ini angka
+        // yang dilihat admin bisa jadi lebih lama dari yang sebenarnya berlaku
+        // (isi ulang baru akan terjadi saat santrinya tap kartu berikutnya).
+        if ($smart = SmartTopup::diam($s->id, 'lihat titipan admin')) {
+            $s = $smart['siswa'];
+        }
+
         return response()->json([
             'siswa' => $s->only(['id', 'nis', 'nama', 'kelas', 'saldo', 'saldo_titipan',
                 'status', 'smart_mode', 'smart_ambang', 'smart_isi']),

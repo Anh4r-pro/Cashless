@@ -71,6 +71,9 @@ class KasirController extends Controller
             'golongan' => $g?->only(['kode', 'nama', 'jenis', 'label_unit']),
             'kedaluwarsa' => Kartu::kedaluwarsa($s),
             'smart' => $smart ? ['isi' => $smart['isi'], 'sisa_titipan' => $smart['sisa_titipan']] : null,
+            // Supaya kasir tahu LEBIH DULU kenapa transaksi bisa ditolak,
+            // bukan baru tahu setelah mengetik nominal (lihat periksaBatasHarian).
+            'sisa_harian' => Rekap::sisaHarian($s),
         ]);
     }
 

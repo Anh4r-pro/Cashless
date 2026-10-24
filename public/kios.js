@@ -436,6 +436,23 @@ function barisTxHtml(t, denganSaldo) {
   </div>`;
 }
 
+/**
+ * Sisa jatah jajan hari ini, makanan & non-makanan — dua gerbang independen
+ * (nominal DAN jumlah kali), jadi keduanya ditampilkan supaya santri tahu
+ * yang mana yang sudah habis kalau belanjanya nanti ditolak kasir.
+ */
+function jajanHtml(j) {
+  if (!j) return '';
+  const baris = (label, x) => {
+    const habis = x.rp <= 0 || x.kali <= 0;
+    return `${label} <b class="${habis ? 'habis' : ''}">${rp(x.rp)}</b> (${x.kali}x)`;
+  };
+  return `<div class="jajan-catatan">
+    Sisa jajan hari ini — ${baris('makanan', j.makanan)} ·
+    ${baris('non-makanan', j.nonmakanan)}
+  </div>`;
+}
+
 function siswaHtml() {
   const s = SESI.siswa;
   const tx = (SESI.transaksi || []).map((t) => barisTxHtml(t, false)).join('')
@@ -470,6 +487,8 @@ function siswaHtml() {
       Ada <b>${rp(s.saldo_titipan)}</b> saldo titipan atas nama Anda — belum bisa dibelanjakan,
       dan akan otomatis mengisi kartu ketika saldo mulai habis.
     </div>` : ''}
+
+    ${jajanHtml(SESI.sisa_jajan)}
 
     ${saldoTabungan.length ? `<div class="k-panel">
       <h2>Tabungan Saya</h2>

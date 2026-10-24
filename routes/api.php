@@ -26,6 +26,7 @@ use App\Http\Controllers\Api\MartLaporanController;
 use App\Http\Controllers\Api\MartOpnameController;
 use App\Http\Controllers\Api\MartStokController;
 use App\Http\Controllers\Api\OrtuController;
+use App\Http\Controllers\Api\OrtuPegawaiController;
 use App\Http\Controllers\Api\PengaturanController;
 use App\Http\Controllers\Api\NotifController;
 use App\Http\Controllers\Api\PotongMassalController;
@@ -286,6 +287,17 @@ Route::middleware('ortu')->group(function () {
     Route::get('ortu/transaksi', [OrtuController::class, 'transaksi']);
     // Riwayat titipan — bisa dimatikan sekolah lewat `ortu_lihat_titipan`.
     Route::get('ortu/titipan', [OrtuController::class, 'titipan']);
+});
+
+// --- portal pegawai (pintu "pegawai" di /ortu yang sama): tabungan, donasi,
+// ganti PIN dari perangkat sendiri. Dipagari dua lapis: middleware('ortu')
+// (sesi login harus ada) DAN OrtuPegawaiController::pegawai() di dalam
+// (sesi itu harus pintu pegawai, bukan wali — lihat docblock kelasnya).
+Route::middleware('ortu')->group(function () {
+    Route::get('ortu/pegawai/opsi', [OrtuPegawaiController::class, 'opsi']);
+    Route::post('ortu/pegawai/tabungan', [OrtuPegawaiController::class, 'tabungan']);
+    Route::post('ortu/pegawai/donasi', [OrtuPegawaiController::class, 'donasi']);
+    Route::post('ortu/pegawai/ganti-pin', [OrtuPegawaiController::class, 'gantiPin']);
 });
 
 // --- donasi: admin menentukan jenis & besarannya ---------------------------

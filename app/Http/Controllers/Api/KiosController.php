@@ -10,10 +10,12 @@ use App\Models\Siswa;
 use App\Models\TabunganJenis;
 use App\Models\Transaksi;
 use App\Services\BidangSiswa;
+use App\Services\DonasiSetor;
 use App\Services\Iuran;
 use App\Services\Kartu;
 use App\Services\Pengaturan;
 use App\Services\Pin;
+use App\Services\Rekap;
 use App\Services\Rem;
 use App\Services\Rupiah;
 use App\Services\SesiKios;
@@ -151,40 +153,25 @@ class KiosController extends Controller
             return response()->json([
                 'ok' => true, 'duplikat' => true, 'program' => $p->nama,
                 'jumlah' => -$dupe->jumlah, 'saldo' => $s2->saldo, 'waktu' => $dupe->created_at,
-                'sisa_donasi' => max(0, $cfg['donasi_maks_harian'] - $this->donasiHariIni($s->id)),
+                'sisa_donasi' => max(0, $cfg['donasi_maks_harian'] - DonasiSetor::hariIni($s->id)),
             ]);
         }
 
-        $sudah = $this->donasiHariIni($s->id);
+        $sudah = DonasiSetor::hariIni($s->id);
         if ($sudah + $jumlah > $cfg['donasi_maks_harian']) {
             throw new ApiError(429, 'Melebihi batas donasi harian (hari ini sudah ' . Rupiah::f($sudah) .
                 ', batas ' . Rupiah::f($cfg['donasi_maks_harian']) . ')');
         }
 
-        $hasil = DB::transaction(function () use ($s, $jumlah, $txId, $p) {
-            $ubah = Siswa::where('id', $s->id)->where('saldo', '>=', $jumlah)->where('status', 'aktif')
-                ->update(['saldo' => DB::raw("saldo - {$jumlah}")]);
-            if ($ubah === 0) {
-                $cek = Siswa::find($s->id);
-                if (! $cek) {
-                    throw new ApiError(404, 'Santri tidak ditemukan');
-                }
-                if ($cek->status !== 'aktif') {
-                    throw new ApiError(403, 'Kartu sedang diblokir — hubungi admin kantin');
-                }
-                throw new ApiError(402, 'Saldo tidak cukup (saldo ' . Rupiah::f($cek->saldo) . ')');
-            }
-            $s2 = Siswa::find($s->id);
-            $trx = Transaksi::create([
-                'tx_id' => $txId, 'tipe' => 'donasi', 'siswa_id' => $s2->id,
-                'siswa_nama' => $s2->nama, 'kelas' => $s2->kelas,
-                'jumlah' => -$jumlah, 'saldo_sesudah' => $s2->saldo,
-                'operator' => 'Kios Santri', 'keterangan' => 'Donasi ' . $p->nama,
-                'donasi_id' => $p->id, 'created_at' => WaktuIso::sekarang(),
-            ]);
+        $hasil = DB::transaction(fn () => DonasiSetor::setor($s, $p, $jumlah, 'Kios Santri', $txId));
 
-            return ['saldo' => $s2->saldo, 'waktu' => $trx->created_at];
-        });
+        // Donasi bisa saja membuat saldo menyentuh ambang — titipan diteteskan
+        // SEKARANG, di luar transaksi di atas, sama seperti setelah belanja
+        // kasir (lihat KasirController::beli). Tanpa ini santri harus tap
+        // ulang kartunya dulu sebelum titipannya ikut terlihat.
+        if ($smart = SmartTopup::diam($s->id, 'donasi kios')) {
+            $hasil['saldo'] = $smart['siswa']->saldo;
+        }
 
         $jawab = [
             'ok' => true, 'program' => $p->nama, 'jumlah' => $jumlah,
@@ -246,6 +233,12 @@ class KiosController extends Controller
 
         $hasil = DB::transaction(fn () => Tabungan::setor($s, $jenis, $jumlah, 'kartu', 'Kios Santri',
             'Tabungan ' . $jenis->nama, $txId));
+
+        // Sisa saldo bisa saja menyentuh ambang — lihat catatan yang sama di
+        // donasi() di atas.
+        if ($smart = SmartTopup::diam($s->id, 'tabungan kios')) {
+            $hasil['siswa'] = $smart['siswa'];
+        }
 
         $jawab = [
             'ok' => true, 'jenis' => $jenis->nama, 'jumlah' => $jumlah,
@@ -409,6 +402,12 @@ class KiosController extends Controller
             return ['saldo' => $sBaru->saldo, 'waktu' => $waktu];
         });
 
+        // Sisi pengirim bisa saja menyentuh ambang — lihat catatan yang sama
+        // di donasi() di atas.
+        if ($smart = SmartTopup::diam($s->id, 'transfer kios')) {
+            $hasil['saldo'] = $smart['siswa']->saldo;
+        }
+
         $jawab = [
             'ok' => true, 'jumlah' => $jumlah, 'saldo' => $hasil['saldo'], 'waktu' => $hasil['waktu'],
             'penerima' => Transfer::penerimaUntukKios($penerima),
@@ -533,6 +532,12 @@ class KiosController extends Controller
 
             return ['saldo' => $sBaru->saldo, 'waktu' => $waktu];
         });
+
+        // Sisi pembayar bisa saja menyentuh ambang — lihat catatan yang sama
+        // di donasi() di atas.
+        if ($smart = SmartTopup::diam($s->id, 'iuran kios')) {
+            $hasil['saldo'] = $smart['siswa']->saldo;
+        }
 
         $jawab = [
             'ok' => true, 'jumlah' => $jumlah, 'saldo' => $hasil['saldo'], 'waktu' => $hasil['waktu'],
@@ -687,12 +692,6 @@ class KiosController extends Controller
         RateLimiter::hit($kunci, 60);
     }
 
-    private function donasiHariIni(int $siswaId): int
-    {
-        return (int) Transaksi::where('tipe', 'donasi')->where('siswa_id', $siswaId)
-            ->where('created_at', '>=', WaktuIso::awalHariIni())->sum(DB::raw('-jumlah'));
-    }
-
     /**
      * Kalau jaringan kios putus tepat setelah transaksi tercatat, kiriman ulang
      * dengan tx_id yang sama harus menerima jawaban yang SAMA — bukan "sesi
@@ -753,8 +752,13 @@ class KiosController extends Controller
     /** Bekal awal layar kios setelah tap: identitas, jatah, dan menu yang benar-benar bisa dipakai. */
     private function bekal(Siswa $s, string $token): array
     {
-        $cfg = Pengaturan::sekolah();
-        $sudah = $this->donasiHariIni($s->id);
+        // untuk($s), bukan sekolah() apa adanya: tidak ada kunci di sini yang
+        // termasuk Pengaturan::BATAS_GOLONGAN hari ini (jadi perilakunya sama
+        // persis), tapi memakai sekolah() langsung adalah jebakan yang sudah
+        // dua kali jadi bug nyata di tempat lain — lebih aman dibiasakan
+        // untuk($s) di sini juga sebelum kunci baru ditambahkan nanti.
+        $cfg = Pengaturan::untuk($s);
+        $sudah = DonasiSetor::hariIni($s->id);
         $g = Pengaturan::golongan($s->golongan);
         $hariT = Transfer::hariIni($s->id);
 
@@ -784,6 +788,10 @@ class KiosController extends Controller
             'golongan' => ['kode' => $g?->kode, 'nama' => $g?->nama, 'jenis' => $g?->jenis],
             'pin_bawaan' => Pin::tersimpan($s->id) === null,   // true = masih memakai NIS
             'pin_siap' => Pin::siap($s),
+            // Sisa jatah jajan hari ini (bukan donasi/transfer/iuran/tabungan
+            // di atas) — supaya santri tahu LEBIH DULU kenapa belanjanya bisa
+            // ditolak kasir, bukan baru tahu sesudahnya.
+            'sisa_jajan' => Rekap::sisaHarian($s),
             'program' => DonasiController::daftar(false),
             'donasi_hari_ini' => $sudah,
             'sisa_donasi' => max(0, $cfg['donasi_maks_harian'] - $sudah),

@@ -709,6 +709,18 @@ body.kios .k-sub { color: var(--muted); font-size: 14px; }
   padding: 10px 12px; margin-top: 10px; font-size: 14px; color: var(--navy); }
 .titipan-catatan b { font-variant-numeric: tabular-nums; }
 
+/* --- sisa jatah jajan harian --- */
+/* Dipakai di kios (kotak penuh di bawah kartu saldo) & kasir (satu baris
+   kecil di dalam kolom saldo — bukan kotak sendiri, supaya tidak menambah
+   gulir persis di tempat yang baru saja dihemat dengan menyembunyikan
+   ajakan tap; lihat renderKasirSiswa) — supaya kasir & santri sama-sama
+   tahu LEBIH DULU kenapa sebuah transaksi bisa ditolak (lihat
+   KasirController::periksaBatasHarian), bukan baru tahu sesudahnya. */
+.jajan-catatan { background: #eef4fb; border-left: 3px solid var(--navy); border-radius: 8px;
+  padding: 10px 12px; margin-top: 10px; font-size: 13px; color: var(--navy); }
+.jajan-catatan b { font-variant-numeric: tabular-nums; }
+.habis { color: var(--err); font-weight: 700; }
+
 /* Tombol utama di luar .filterbar (mis. "Periksa berkas" di Topup Massal). */
 button.go { background: var(--navy); color: var(--gold); border-color: var(--navy); font-weight: 700; }
 /* Keterangan di bawah kotak centang: sengaja lebih ringan dari .set-hint, yang

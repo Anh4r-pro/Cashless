@@ -11,6 +11,7 @@ use App\Models\Tenant;
 use App\Models\Transaksi;
 use App\Models\TransaksiItem;
 use App\Services\Ekspor;
+use App\Services\Izin;
 use App\Services\Kartu;
 use App\Services\Rupiah;
 use App\Services\SqlWaktu;
@@ -37,9 +38,20 @@ use Illuminate\Support\Facades\DB;
  */
 class MartLaporanController extends Controller
 {
-    private function martKu(Request $r): Tenant
+    /**
+     * $izinKode hanya diperiksa untuk SUPERADMIN — akun tenant Mart sendiri
+     * tidak memakai sistem Izin sama sekali (lihat Izin::milik), jangkauannya
+     * sudah dipagari tenant_id di atas. Tanpa pembeda ini, menambahkan
+     * izin:mart.* langsung ke rute akan ikut menolak akun tenant Mart,
+     * karena Izin::milik() mengembalikan [] untuk siapa pun yang bukan
+     * superadmin.
+     */
+    private function martKu(Request $r, ?string $izinKode = null): Tenant
     {
         $u = $this->wajibPeran($r, 'tenant', 'superadmin');
+        if ($izinKode && $u->role === 'superadmin') {
+            Izin::wajib($u, $izinKode);
+        }
         // Superadmin boleh membaca laporan Mart mana pun lewat ?tenant_id=,
         // supaya admin pusat tetap melihat seluruh dagangan unit ini.
         $id = $u->role === 'superadmin' ? (int) $r->query('tenant_id') : (int) $u->tenant_id;
@@ -64,7 +76,7 @@ class MartLaporanController extends Controller
 
     public function dashboard(Request $r)
     {
-        $t = $this->martKu($r);
+        $t = $this->martKu($r, 'mart.dashboard');
         $this->wajibAdminToko($r, 'tenant', 'superadmin');
 
         return response()->json([
@@ -215,7 +227,7 @@ class MartLaporanController extends Controller
      */
     public function spd(Request $r)
     {
-        $t = $this->martKu($r);
+        $t = $this->martKu($r, 'mart.spd');
 
         $hariIni = Kartu::hariIni();
         $tgl = fn ($v, $bawaan) => preg_match('/^\d{4}-\d{2}-\d{2}$/', (string) $v) && strtotime((string) $v)
@@ -451,7 +463,7 @@ class MartLaporanController extends Controller
      */
     public function teksSpd(Request $r)
     {
-        $t = $this->martKu($r);
+        $t = $this->martKu($r, 'mart.spd');
 
         return response()->json(['teks' => $this->teksLaporanSpd($t)]);
     }
@@ -621,7 +633,7 @@ class MartLaporanController extends Controller
     /** Laporan keuangan rinci satu periode + daftar transaksinya. */
     public function keuangan(Request $r)
     {
-        $t = $this->martKu($r);
+        $t = $this->martKu($r, 'mart.keuangan');
         $this->wajibAdminToko($r, 'tenant', 'superadmin');
         $periode = in_array($r->query('periode'), ['hari', 'pekan', 'bulan', 'semua'], true)
             ? $r->query('periode') : 'bulan';
