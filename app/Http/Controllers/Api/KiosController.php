@@ -199,7 +199,12 @@ class KiosController extends Controller
 
         ['token' => $token, 'sesi' => $sesi, 'siswa' => $s] = SesiKios::ambil($r->input('token'));
 
-        $jenis = TabunganJenis::where('id', (int) $r->input('jenis_id'))->where('aktif', true)->first();
+        // Diperiksa ulang di sini, bukan percaya daftar yang sudah ditampilkan
+        // bekal() tadi — jenis khusus audiens lain tidak boleh bisa diisi
+        // hanya dengan mengirim jenis_id-nya langsung.
+        $audiensTabungan = Pengaturan::golongan($s->golongan)?->jenis === 'siswa' ? 'siswa' : 'pegawai';
+        $jenis = TabunganJenis::where('id', (int) $r->input('jenis_id'))->where('aktif', true)
+            ->whereIn('untuk', ['semua', $audiensTabungan])->first();
         if (! $jenis) {
             throw new ApiError(404, 'Jenis tabungan tidak tersedia');
         }
@@ -777,7 +782,11 @@ class KiosController extends Controller
         $hariI = Iuran::hariIni($s->id);
         $sisaIuranHarian = max(0, $cfg['iuran_maks_harian'] - $hariI['kirim']);
 
-        $jenisTabungan = TabunganController::daftar(false);
+        // Kios melayani layar Santri maupun SDM sekaligus (lihat komentar di
+        // routes/api.php) — jenis tabungan khusus salah satu golongan (mis.
+        // "Tabungan Menikah" untuk pegawai) hanya ditawarkan ke audiensnya.
+        $audiensTabungan = $g?->jenis === 'siswa' ? 'siswa' : 'pegawai';
+        $jenisTabungan = TabunganController::daftar(false, $audiensTabungan);
         $sudahTabungan = Tabungan::hariIni($s->id);
         $sisaTabunganHarian = max(0, ($cfg['tabungan_maks_harian'] ?? 0) - $sudahTabungan);
 

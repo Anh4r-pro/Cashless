@@ -64,7 +64,9 @@ class OrtuPegawaiController extends Controller
         $hariT = Transfer::hariIni($s->id);
 
         return response()->json([
-            'tabungan_jenis' => TabunganController::daftar(false),
+            // 'pegawai' langsung, bukan dihitung dari $g->jenis: pegawai($r)
+            // sudah memastikan golongan ini bukan 'siswa'.
+            'tabungan_jenis' => TabunganController::daftar(false, 'pegawai'),
             'tabungan_saldo' => Tabungan::daftarSaldo($s->id),
             'tabungan_min' => $cfg['tabungan_min'] ?? 0,
             'sisa_tabungan_harian' => max(0, ($cfg['tabungan_maks_harian'] ?? 0) - Tabungan::hariIni($s->id)),
@@ -224,7 +226,11 @@ class OrtuPegawaiController extends Controller
                 'jumlah' => -$dupe->jumlah, 'saldo' => Siswa::find($s->id)->saldo, 'waktu' => $dupe->created_at]);
         }
 
-        $jenis = TabunganJenis::where('id', (int) $r->input('jenis_id'))->where('aktif', true)->first();
+        // Diperiksa ulang, bukan percaya daftar yang sudah ditampilkan opsi()
+        // tadi — jenis khusus santri tidak boleh bisa diisi lewat sini hanya
+        // dengan mengirim jenis_id-nya langsung.
+        $jenis = TabunganJenis::where('id', (int) $r->input('jenis_id'))->where('aktif', true)
+            ->whereIn('untuk', ['semua', 'pegawai'])->first();
         if (! $jenis) {
             throw new ApiError(404, 'Jenis tabungan tidak tersedia');
         }

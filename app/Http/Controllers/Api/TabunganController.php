@@ -84,9 +84,12 @@ class TabunganController extends Controller
                 }
             }
 
+            $untukKiriman = $j['untuk'] ?? 'semua';
+            $untuk = in_array($untukKiriman, ['semua', 'siswa', 'pegawai'], true) ? $untukKiriman : 'semua';
+
             $bersih[] = [
                 'id' => isset($j['id']) && is_int($j['id']) ? $j['id'] : null,
-                'nama' => $nama, 'target' => $target,
+                'nama' => $nama, 'target' => $target, 'untuk' => $untuk,
                 'deskripsi' => mb_substr(preg_replace('/\s+/', ' ', trim((string) ($j['deskripsi'] ?? ''))), 0, 200),
                 'aktif' => ($j['aktif'] ?? true) !== false,
             ];
@@ -99,13 +102,13 @@ class TabunganController extends Controller
             foreach ($bersih as $i => $j) {
                 if ($j['id'] !== null && in_array($j['id'], $adaId, true)) {
                     TabunganJenis::where('id', $j['id'])->update([
-                        'nama' => $j['nama'], 'deskripsi' => $j['deskripsi'],
+                        'nama' => $j['nama'], 'deskripsi' => $j['deskripsi'], 'untuk' => $j['untuk'],
                         'target' => $j['target'], 'urutan' => $i, 'aktif' => $j['aktif'],
                     ]);
                     $id = $j['id'];
                 } else {
                     $id = TabunganJenis::create([
-                        'nama' => $j['nama'], 'deskripsi' => $j['deskripsi'],
+                        'nama' => $j['nama'], 'deskripsi' => $j['deskripsi'], 'untuk' => $j['untuk'],
                         'target' => $j['target'], 'urutan' => $i, 'aktif' => $j['aktif'],
                     ])->id;
                 }
@@ -212,14 +215,14 @@ class TabunganController extends Controller
 
         $perJenis = TabunganJenis::query()
             ->leftJoin('tabungan_saldo', 'tabungan_saldo.jenis_id', '=', 'tabungan_jenis.id')
-            ->selectRaw('tabungan_jenis.id, tabungan_jenis.nama, tabungan_jenis.target, tabungan_jenis.aktif')
+            ->selectRaw('tabungan_jenis.id, tabungan_jenis.nama, tabungan_jenis.target, tabungan_jenis.aktif, tabungan_jenis.untuk')
             ->selectRaw('COUNT(DISTINCT CASE WHEN tabungan_saldo.saldo > 0 THEN tabungan_saldo.siswa_id END) AS n_penabung')
             ->selectRaw('COALESCE(SUM(tabungan_saldo.saldo),0) AS total')
             ->groupBy('tabungan_jenis.id', 'tabungan_jenis.nama', 'tabungan_jenis.target',
-                'tabungan_jenis.aktif', 'tabungan_jenis.urutan')
+                'tabungan_jenis.aktif', 'tabungan_jenis.untuk', 'tabungan_jenis.urutan')
             ->orderBy('tabungan_jenis.urutan')->orderBy('tabungan_jenis.id')->get()
             ->map(fn ($j) => ['id' => (int) $j->id, 'nama' => $j->nama, 'target' => $j->target === null ? null : (int) $j->target,
-                'aktif' => (int) $j->aktif, 'n_penabung' => (int) $j->n_penabung, 'total' => (int) $j->total,
+                'aktif' => (int) $j->aktif, 'untuk' => $j->untuk, 'n_penabung' => (int) $j->n_penabung, 'total' => (int) $j->total,
                 'top_penabung' => $topPenabung[(int) $j->id] ?? []]);
 
         $total = TabunganSaldo::sum('saldo');
@@ -355,10 +358,17 @@ class TabunganController extends Controller
     }
 
     /** Jenis beserta flag aktifnya, urut sesuai tampilan di kios. */
-    public static function daftar(bool $semua): array
+    /**
+     * $audiens ('siswa'/'pegawai') menyaring ke jenis yang boleh dilihat
+     * golongan itu ('semua' + audiensnya sendiri) — dipakai kios & portal
+     * pegawai. Dikosongkan (null) di layar ADMIN, yang harus melihat &
+     * mengelola SELURUH jenis apa pun audiensnya.
+     */
+    public static function daftar(bool $semua, ?string $audiens = null): array
     {
         return TabunganJenis::query()
             ->when(! $semua, fn ($q) => $q->where('aktif', true))
+            ->when($audiens, fn ($q) => $q->whereIn('untuk', ['semua', $audiens]))
             ->orderBy('urutan')->orderBy('id')->get()
             ->map(fn ($j) => $j->toArray())->all();
     }

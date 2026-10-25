@@ -8288,7 +8288,7 @@ function tabunganView(el) {
   </div>`;
 
   $('#tb-tambah').onclick = () => {
-    tabunganRows.push({ id: null, nama: '', deskripsi: '', target: '', aktif: true, terpakai: 0 });
+    tabunganRows.push({ id: null, nama: '', deskripsi: '', target: '', untuk: 'semua', aktif: true, terpakai: 0 });
     tbGambarBaris();
     const kotak = document.querySelectorAll('#tb-baris .tb-nama');
     kotak[kotak.length - 1]?.focus();
@@ -8388,19 +8388,21 @@ async function muatJenisTabungan() {
     const d = await api('/api/tabungan/jenis?semua=1');
     tabunganRows = d.jenis.map((j) => ({
       id: j.id, nama: j.nama, deskripsi: j.deskripsi,
-      target: j.target === null ? '' : String(j.target), aktif: j.aktif === 1,
+      target: j.target === null ? '' : String(j.target), untuk: j.untuk || 'semua', aktif: j.aktif === 1,
       terpakai: j.terpakai, terkumpul: j.terkumpul,
     }));
     tbGambarBaris();
   } catch (e) { toast(e.message, 'err'); }
 }
 
+const TB_UNTUK_LABEL = { semua: 'Santri & pegawai', siswa: 'Santri saja', pegawai: 'Pegawai saja' };
+
 function tbGambarBaris() {
   $('#tb-baris').innerHTML = tabunganRows.map((r, i) => `
     <div class="dn-row">
       <div class="dn-row-atas">
         <input class="tb-nama" data-i="${i}" value="${esc(r.nama)}" maxlength="60" placeholder="nama jenis tabungan">
-        <label class="kat-aktif" title="Tampilkan di kios santri">
+        <label class="kat-aktif" title="Tampilkan ke audiensnya (lihat pilihan &quot;Untuk&quot; di bawah)">
           <input type="checkbox" class="tb-aktif" data-i="${i}" ${r.aktif ? 'checked' : ''}> tampil
         </label>
         <button class="linkbtn danger" data-hapus="${i}"
@@ -8409,8 +8411,14 @@ function tbGambarBaris() {
       </div>
       <input class="tb-desk" data-i="${i}" value="${esc(r.deskripsi)}" maxlength="200"
         placeholder="keterangan singkat (tampil di kios)">
-      <input class="tb-target uang-daftar" data-i="${i}" value="${esc(r.target)}" inputmode="numeric"
-        autocomplete="off" placeholder="target (opsional, mis. 500.000 — kosongkan untuk bebas)">
+      <div style="display:flex; gap:8px; margin-top:8px">
+        <input class="tb-target uang-daftar" data-i="${i}" value="${esc(r.target)}" inputmode="numeric"
+          autocomplete="off" style="flex:1" placeholder="target (opsional, mis. 500.000 — kosongkan untuk bebas)">
+        <select class="tb-untuk" data-i="${i}" style="flex:none; width:auto">
+          ${Object.entries(TB_UNTUK_LABEL).map(([v, l]) =>
+            `<option value="${v}" ${r.untuk === v ? 'selected' : ''}>${l}</option>`).join('')}
+        </select>
+      </div>
       ${r.terpakai ? `<span class="muted">sudah dipakai ${r.terpakai} santri · terkumpul ${rp(r.terkumpul)}</span>` : ''}
     </div>`).join('') || '<p class="muted">Belum ada jenis tabungan. Tambahkan di atas.</p>';
 
@@ -8422,6 +8430,9 @@ function tbGambarBaris() {
   ikat('.tb-target', (r, inp) => { r.target = inp.value; });
   $('#tb-baris').querySelectorAll('.tb-aktif').forEach((c) => {
     c.onchange = () => { tabunganRows[Number(c.dataset.i)].aktif = c.checked; };
+  });
+  $('#tb-baris').querySelectorAll('.tb-untuk').forEach((sel) => {
+    sel.onchange = () => { tabunganRows[Number(sel.dataset.i)].untuk = sel.value; };
   });
   $('#tb-baris').querySelectorAll('[data-hapus]').forEach((b) => {
     b.onclick = () => { tabunganRows.splice(Number(b.dataset.hapus), 1); tbGambarBaris(); };
@@ -8437,6 +8448,7 @@ async function simpanJenisTabungan() {
       .map((r) => ({
         id: r.id, nama: r.nama.trim(), deskripsi: r.deskripsi.trim(), aktif: r.aktif,
         target: r.target.trim() === '' ? null : Number(digitUang(r.target)),
+        untuk: r.untuk || 'semua',
       }));
     for (const j of kirim) {
       if (j.nama.length < 3) throw new Error('Nama jenis tabungan minimal 3 huruf');
@@ -8486,7 +8498,8 @@ async function muatRekapTabungan(hari) {
 
     $('#tb-perjenis').innerHTML = d.per_jenis.map((j) => `
       <tr>
-        <td><b>${esc(j.nama)}</b> ${j.aktif ? '' : '<span class="badge nonaktif">disembunyikan</span>'}</td>
+        <td><b>${esc(j.nama)}</b> ${j.aktif ? '' : '<span class="badge nonaktif">disembunyikan</span>'}
+          ${j.untuk && j.untuk !== 'semua' ? `<span class="badge">${j.untuk === 'siswa' ? 'santri saja' : 'pegawai saja'}</span>` : ''}</td>
         <td class="num rp">${j.target === null ? '<span class="muted">bebas</span>' : rp(j.target)}</td>
         <td class="num rp">${rp(j.total)}</td>
         <td class="num">${j.n_penabung}</td>
