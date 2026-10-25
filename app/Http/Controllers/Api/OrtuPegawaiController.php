@@ -9,11 +9,14 @@ use App\Models\Siswa;
 use App\Models\TabunganJenis;
 use App\Models\Transaksi;
 use App\Services\DonasiSetor;
+use App\Services\Kartu;
 use App\Services\Pengaturan;
 use App\Services\Pin;
 use App\Services\Rupiah;
 use App\Services\SmartTopup;
 use App\Services\Tabungan;
+use App\Services\Transfer;
+use App\Support\WaktuIso;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -57,6 +60,8 @@ class OrtuPegawaiController extends Controller
     {
         $s = $this->pegawai($r);
         $cfg = Pengaturan::untuk($s);
+        $g = Pengaturan::golongan($s->golongan);
+        $hariT = Transfer::hariIni($s->id);
 
         return response()->json([
             'tabungan_jenis' => TabunganController::daftar(false),
@@ -65,7 +70,148 @@ class OrtuPegawaiController extends Controller
             'sisa_tabungan_harian' => max(0, ($cfg['tabungan_maks_harian'] ?? 0) - Tabungan::hariIni($s->id)),
             'donasi_program' => DonasiController::daftar(false),
             'sisa_donasi' => max(0, $cfg['donasi_maks_harian'] - DonasiSetor::hariIni($s->id)),
+            // Golongan yang tidak diizinkan mengirim (lihat $g->transfer) membuat
+            // tombol Transfer tidak pernah ditampilkan, bukan tombol yang ada
+            // tapi selalu ditolak.
+            'transfer_bisa' => (bool) $g?->transfer,
+            'transfer_min' => $cfg['transfer_min'],
+            'transfer_maks' => min($cfg['transfer_maks'], max(0, $cfg['transfer_maks_harian'] - $hariT['kirim']), $s->saldo),
+            'sisa_transfer_harian' => max(0, $cfg['transfer_maks_harian'] - $hariT['kirim']),
+            'sisa_transfer_kali' => max(0, $cfg['transfer_maks_kali_harian'] - $hariT['n_kirim']),
             'saldo' => $s->saldo,
+        ]);
+    }
+
+    /** Cari calon penerima transfer lewat NIS — langkah konfirmasi sebelum layar nominal. */
+    public function cariPenerima(Request $r)
+    {
+        $s = $this->pegawai($r);
+        Transfer::harusAktif();
+        $g = Pengaturan::golongan($s->golongan);
+        if (! $g?->transfer) {
+            throw new ApiError(403, "Kartu {$g?->nama} tidak bisa mengirim saldo");
+        }
+
+        $p = Transfer::cariPenerima($r->input('nis'), $s);
+        Transfer::wajibSamaGenderAtauKeluarga($s, $p);
+        $cfg = Pengaturan::untuk($s);
+        $hari = Transfer::hariIni($s->id);
+
+        return response()->json([
+            'ok' => true,
+            'penerima' => Transfer::penerimaUntukKios($p),
+            'min' => $cfg['transfer_min'],
+            'maks' => min($cfg['transfer_maks'], max(0, $cfg['transfer_maks_harian'] - $hari['kirim']), $s->saldo),
+            'sisa_harian' => max(0, $cfg['transfer_maks_harian'] - $hari['kirim']),
+            'sisa_kali' => max(0, $cfg['transfer_maks_kali_harian'] - $hari['n_kirim']),
+            'saldo' => $s->saldo,
+        ]);
+    }
+
+    public function transfer(Request $r)
+    {
+        $s = $this->pegawai($r);
+        Transfer::harusAktif();
+        $g = Pengaturan::golongan($s->golongan);
+        if (! $g?->transfer) {
+            throw new ApiError(403, "Kartu {$g?->nama} tidak bisa mengirim saldo");
+        }
+        $txId = $r->input('tx_id') ? mb_substr((string) $r->input('tx_id'), 0, 80) : null;
+        if ($dupe = $this->dupe($txId)) {
+            return response()->json(['ok' => true, 'duplikat' => true, 'jumlah' => -$dupe->jumlah,
+                'saldo' => Siswa::find($s->id)->saldo,
+                'penerima' => ['nama' => $dupe->lawan_nama], 'waktu' => $dupe->created_at]);
+        }
+
+        $penerima = Transfer::cariPenerima($r->input('nis'), $s);
+        // Diperiksa ulang, bukan percaya hasil cariPenerima() tadi — portal
+        // ini bisa saja mengirim 'nis' baru tanpa lewat cariPenerima() lagi,
+        // pola yang sama dipakai KiosController::transfer().
+        Transfer::wajibSamaGenderAtauKeluarga($s, $penerima);
+        $jumlah = (int) floor((float) $r->input('jumlah'));
+        $catatan = mb_substr(trim((string) $r->input('catatan', '')), 0, 60);
+        $cfg = Pengaturan::untuk($s);
+
+        if ($jumlah <= 0) {
+            throw new ApiError(400, 'Nominal transfer tidak valid');
+        }
+        if ($jumlah < $cfg['transfer_min']) {
+            throw new ApiError(400, 'Minimal kirim ' . Rupiah::f($cfg['transfer_min']));
+        }
+        if ($jumlah > $cfg['transfer_maks']) {
+            throw new ApiError(400, 'Maksimal sekali kirim ' . Rupiah::f($cfg['transfer_maks']));
+        }
+
+        Pin::verifikasi($s, $r->input('pin'), $r);
+        Kartu::pastikanBerlaku($s);
+
+        $hari = Transfer::hariIni($s->id);
+        if ($hari['n_kirim'] >= $cfg['transfer_maks_kali_harian']) {
+            throw new ApiError(429, "Sudah {$hari['n_kirim']}x kirim hari ini (batas {$cfg['transfer_maks_kali_harian']}x/hari)");
+        }
+        if ($hari['kirim'] + $jumlah > $cfg['transfer_maks_harian']) {
+            throw new ApiError(429, 'Melebihi batas kirim harian (hari ini sudah ' . Rupiah::f($hari['kirim']) .
+                ', batas ' . Rupiah::f($cfg['transfer_maks_harian']) . ')');
+        }
+        $hariP = Transfer::hariIni($penerima->id);
+        if ($hariP['terima'] + $jumlah > $cfg['transfer_terima_harian']) {
+            throw new ApiError(429, "{$penerima->nama} sudah menerima " . Rupiah::f($hariP['terima']) .
+                ' hari ini — batasnya ' . Rupiah::f($cfg['transfer_terima_harian']) . '/hari');
+        }
+
+        $maksPenerima = Pengaturan::untuk($penerima, $cfg)['max_saldo'];
+        if ($penerima->saldo + $jumlah > $maksPenerima) {
+            throw new ApiError(400, "Saldo {$penerima->nama} akan melebihi batas " .
+                Rupiah::f($maksPenerima) . ' — kirim nominal lebih kecil');
+        }
+
+        $hasil = DB::transaction(function () use ($s, $penerima, $jumlah, $txId, $maksPenerima, $catatan) {
+            $keluar = Siswa::where('id', $s->id)->where('saldo', '>=', $jumlah)->where('status', 'aktif')
+                ->update(['saldo' => DB::raw("saldo - {$jumlah}")]);
+            if ($keluar === 0) {
+                $cek = Siswa::find($s->id);
+                if ($cek->status !== 'aktif') {
+                    throw new ApiError(403, 'Kartu sedang diblokir');
+                }
+                throw new ApiError(402, 'Saldo tidak cukup (saldo ' . Rupiah::f($cek->saldo) . ')');
+            }
+            $masuk = Siswa::where('id', $penerima->id)->where('status', 'aktif')
+                ->whereRaw('saldo + ? <= ?', [$jumlah, $maksPenerima])
+                ->update(['saldo' => DB::raw("saldo + {$jumlah}")]);
+            if ($masuk === 0) {
+                throw new ApiError(409, "Saldo {$penerima->nama} sudah penuh — coba nominal lebih kecil");
+            }
+
+            $sBaru = Siswa::find($s->id);
+            $pBaru = Siswa::find($penerima->id);
+            $waktu = WaktuIso::sekarang();
+
+            Transaksi::create([
+                'tx_id' => $txId, 'tipe' => 'transfer_keluar', 'siswa_id' => $sBaru->id,
+                'siswa_nama' => $sBaru->nama, 'kelas' => $sBaru->kelas,
+                'jumlah' => -$jumlah, 'saldo_sesudah' => $sBaru->saldo, 'operator' => 'Portal Pegawai',
+                'keterangan' => "Kirim ke {$pBaru->nama} (NIS {$pBaru->nis})" . ($catatan ? " — {$catatan}" : ''),
+                'lawan_id' => $pBaru->id, 'lawan_nama' => $pBaru->nama, 'created_at' => $waktu,
+            ]);
+            Transaksi::create([
+                'tx_id' => $txId ? $txId . '-r' : null, 'tipe' => 'transfer_masuk', 'siswa_id' => $pBaru->id,
+                'siswa_nama' => $pBaru->nama, 'kelas' => $pBaru->kelas,
+                'jumlah' => $jumlah, 'saldo_sesudah' => $pBaru->saldo, 'operator' => 'Portal Pegawai',
+                'keterangan' => "Terima dari {$sBaru->nama} (NIS {$sBaru->nis})" . ($catatan ? " — {$catatan}" : ''),
+                'lawan_id' => $sBaru->id, 'lawan_nama' => $sBaru->nama, 'created_at' => $waktu,
+            ]);
+
+            return ['saldo' => $sBaru->saldo, 'waktu' => $waktu];
+        });
+
+        if ($smart = SmartTopup::diam($s->id, 'transfer portal pegawai')) {
+            $hasil['saldo'] = $smart['siswa']->saldo;
+        }
+
+        return response()->json([
+            'ok' => true, 'jumlah' => $jumlah, 'saldo' => $hasil['saldo'], 'waktu' => $hasil['waktu'],
+            'penerima' => Transfer::penerimaUntukKios($penerima),
+            'sisa_harian' => max(0, $cfg['transfer_maks_harian'] - ($hari['kirim'] + $jumlah)),
         ]);
     }
 

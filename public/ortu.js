@@ -467,6 +467,11 @@ function tutupModal() { $('#o-modal-root').innerHTML = ''; }
 // bukan pengajuan yang menunggu admin — sama seperti di kios, hanya pintu
 // masuknya yang beda (sesi login /ortu, bukan tap kartu).
 let pegawaiOpsi = null;
+// NIS yang baru dicari (langkah 1 Transfer) — Transfer::penerimaUntukKios()
+// sengaja TIDAK membawa NIS penerima dalam hasil pencarian (tidak membocorkan
+// NIS orang lain selain yang sudah diketik sendiri), jadi disimpan di sini
+// untuk dipakai ulang saat benar-benar mengirim di langkah 2.
+let layananTransferNisAsal = '';
 
 async function mulaiLayanan() {
   let d;
@@ -492,6 +497,11 @@ function layananMenu() {
         <span><b>Donasi</b><span class="muted">${d.donasi_program.length
           ? `Sisa jatah hari ini ${rp(d.sisa_donasi)}` : 'Belum ada program donasi dibuka sekolah'}</span></span>
       </button>
+      <button class="o-metode" id="o-pg-pilih-transfer" ${d.transfer_bisa ? '' : 'disabled'}>
+        <span class="o-metode-lg">➤</span>
+        <span><b>Transfer</b><span class="muted">${d.transfer_bisa
+          ? `Sisa jatah hari ini ${rp(d.sisa_transfer_harian)} · ${d.sisa_transfer_kali}x` : 'Golongan ini tidak bisa mengirim saldo'}</span></span>
+      </button>
       <button class="o-metode" id="o-pg-pilih-pin">
         <span class="o-metode-lg">🔑</span>
         <span><b>Ganti PIN</b><span class="muted">Dipakai untuk semua layanan ini & di kios</span></span>
@@ -501,6 +511,7 @@ function layananMenu() {
 
   $('#o-pg-pilih-tabungan').onclick = layananTabunganForm;
   $('#o-pg-pilih-donasi').onclick = layananDonasiProgram;
+  $('#o-pg-pilih-transfer').onclick = layananTransferNis;
   $('#o-pg-pilih-pin').onclick = layananPinForm;
 }
 
@@ -604,6 +615,89 @@ async function layananDonasiKirim(program, jumlah) {
     muatRingkasan();
   } catch (e) {
     err.textContent = e.message; err.classList.remove('hidden');
+  }
+}
+
+/** Langkah 1: masukkan NIS penerima, lalu cari dulu (nama dikonfirmasi
+ *  sebelum nominal diketik — salah ketik NIS tidak boleh terlihat baru
+ *  setelah uang terkirim). */
+function layananTransferNis() {
+  const d = pegawaiOpsi;
+  bukaModal(`
+    <h2>Transfer Saldo</h2>
+    <p class="muted">Sisa jatah kirim hari ini <b>${rp(d.sisa_transfer_harian)}</b>
+      (${d.sisa_transfer_kali}x lagi).</p>
+    <div class="field"><label>NIS penerima</label>
+      <input id="o-pg-nis" inputmode="numeric" autocomplete="off" placeholder="NIS teman/santri tujuan"></div>
+    <p id="o-pg-err" class="o-err hidden"></p>`,
+    `<button id="om-batal">Batal</button>
+     <button id="om-kembali">‹ Layanan lain</button>
+     <button id="om-kirim" class="primary">Cari</button>`);
+  $('#om-kembali').onclick = layananMenu;
+  $('#om-kirim').onclick = layananTransferCari;
+  $('#o-pg-nis').addEventListener('keydown', (e) => { if (e.key === 'Enter') layananTransferCari(); });
+}
+
+async function layananTransferCari() {
+  const btn = $('#om-kirim');
+  const err = $('#o-pg-err');
+  err.classList.add('hidden');
+  const nis = $('#o-pg-nis').value.trim();
+  if (!nis) { err.textContent = 'Isi NIS penerima.'; err.classList.remove('hidden'); return; }
+  btn.disabled = true; btn.textContent = 'Mencari…';
+  try {
+    const d = await api('/api/ortu/pegawai/cari-penerima', { method: 'POST', body: { nis } });
+    layananTransferNisAsal = nis;
+    layananTransferNominal(d);
+  } catch (e) {
+    err.textContent = e.message; err.classList.remove('hidden');
+    btn.disabled = false; btn.textContent = 'Cari';
+  }
+}
+
+/** Langkah 2: nama penerima sudah dikonfirmasi — tinggal nominal + PIN. */
+function layananTransferNominal(hasil) {
+  const p = hasil.penerima;
+  bukaModal(`
+    <h2>Kirim ke ${esc(p.nama)}</h2>
+    <p class="muted">${esc(p.kelas || p.golongan || '')}</p>
+    <div class="field"><label>Nominal</label>
+      ${inputUang({ id: 'o-pg-jumlah', placeholder: 'contoh: 10.000' })}
+      <span class="muted hint">Minimal ${rp(hasil.min)}, maksimal ${rp(hasil.maks)} kali ini</span></div>
+    <div class="field"><label>Catatan (opsional)</label>
+      <input id="o-pg-catatan" maxlength="60" placeholder="mis. buat jajan besok"></div>
+    <div class="field"><label>PIN</label>
+      <input id="o-pg-pin" type="password" inputmode="numeric" maxlength="20" autocomplete="off" placeholder="PIN kartu Anda"></div>
+    <p id="o-pg-err" class="o-err hidden"></p>`,
+    `<button id="om-batal">Batal</button>
+     <button id="om-kembali">‹ Cari NIS lain</button>
+     <button id="om-kirim" class="primary">Kirim</button>`);
+  $('#om-kembali').onclick = layananTransferNis;
+  // layananTransferNisAsal diisi oleh layananTransferCari() SEBELUM modal ini
+  // dibuka — elemen #o-pg-nis milik langkah 1 sudah tidak ada lagi di DOM
+  // begitu bukaModal() di atas mengganti isinya.
+  $('#om-kirim').onclick = () => layananTransferKirim(layananTransferNisAsal);
+}
+
+async function layananTransferKirim(nis) {
+  const btn = $('#om-kirim');
+  const err = $('#o-pg-err');
+  err.classList.add('hidden');
+  const jumlah = nilaiUang('#o-pg-jumlah') ?? 0;
+  const catatan = $('#o-pg-catatan').value.trim();
+  const pin = $('#o-pg-pin').value;
+  if (!jumlah) { err.textContent = 'Isi nominal.'; err.classList.remove('hidden'); return; }
+  if (!pin) { err.textContent = 'Isi PIN.'; err.classList.remove('hidden'); return; }
+  btn.disabled = true; btn.textContent = 'Memproses…';
+  try {
+    const d = await api('/api/ortu/pegawai/transfer', { method: 'POST',
+      body: { nis, jumlah, catatan, pin, tx_id: pegawaiTxId('trf') } });
+    tutupModal();
+    toast(`Transfer ${rp(d.jumlah)} ke ${d.penerima.nama} berhasil.`, 'ok');
+    muatRingkasan();
+  } catch (e) {
+    err.textContent = e.message; err.classList.remove('hidden');
+    btn.disabled = false; btn.textContent = 'Kirim';
   }
 }
 

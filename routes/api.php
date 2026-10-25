@@ -295,6 +295,8 @@ Route::middleware('ortu')->group(function () {
 // (sesi itu harus pintu pegawai, bukan wali — lihat docblock kelasnya).
 Route::middleware('ortu')->group(function () {
     Route::get('ortu/pegawai/opsi', [OrtuPegawaiController::class, 'opsi']);
+    Route::post('ortu/pegawai/cari-penerima', [OrtuPegawaiController::class, 'cariPenerima']);
+    Route::post('ortu/pegawai/transfer', [OrtuPegawaiController::class, 'transfer']);
     Route::post('ortu/pegawai/tabungan', [OrtuPegawaiController::class, 'tabungan']);
     Route::post('ortu/pegawai/donasi', [OrtuPegawaiController::class, 'donasi']);
     Route::post('ortu/pegawai/ganti-pin', [OrtuPegawaiController::class, 'gantiPin']);
