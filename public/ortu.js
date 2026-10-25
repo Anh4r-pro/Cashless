@@ -555,6 +555,7 @@ async function layananTabunganKirim() {
     tutupModal();
     toast(`Tabungan ${d.jenis} ${rp(d.jumlah)} berhasil.`, 'ok');
     muatRingkasan();
+    muatTransaksi();
   } catch (e) {
     err.textContent = e.message; err.classList.remove('hidden');
     btn.disabled = false; btn.textContent = 'Setor';
@@ -613,6 +614,7 @@ async function layananDonasiKirim(program, jumlah) {
     tutupModal();
     toast(`Donasi ${d.program} ${rp(d.jumlah)} berhasil.`, 'ok');
     muatRingkasan();
+    muatTransaksi();
   } catch (e) {
     err.textContent = e.message; err.classList.remove('hidden');
   }
@@ -695,6 +697,7 @@ async function layananTransferKirim(nis) {
     tutupModal();
     toast(`Transfer ${rp(d.jumlah)} ke ${d.penerima.nama} berhasil.`, 'ok');
     muatRingkasan();
+    muatTransaksi();
   } catch (e) {
     err.textContent = e.message; err.classList.remove('hidden');
     btn.disabled = false; btn.textContent = 'Kirim';

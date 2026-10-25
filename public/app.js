@@ -810,6 +810,18 @@ function kasirJajanHtml(j) {
   return `<br><span class="muted" style="font-size:11px">sisa jajan: ${teks}</span>`;
 }
 
+/**
+ * Versi teks polos (bukan HTML) dari sisa jajan, dipakai di toast SETELAH
+ * transaksi selesai — berbeda dari kasirJajanHtml() yang baru tampil kalau
+ * mepet, di sini selalu ditampilkan apa adanya: baru saja ada transaksi, jadi
+ * kasir/santri wajar ingin tahu sisanya sekarang, bukan cuma saat hampir habis.
+ */
+function sisaJajanTeks(j) {
+  if (!j) return '';
+  const satu = (label, x) => `${label} ${rp(x.rp)}`;
+  return ` Sisa jajan hari ini: ${satu('makanan', j.makanan)} · ${satu('non-makanan', j.nonmakanan)}.`;
+}
+
 function renderKasirSiswa(pesan) {
   const s = kasir.siswa;
   kasirTampilAjakanTap(false);
@@ -891,7 +903,7 @@ async function doBayar() {
     const pesanSmart = d.smart
       ? ` 💡 Saldo terisi ulang otomatis ${rp(d.smart.isi)} dari titipan (sisa titipan ${rp(d.smart.sisa_titipan)}).`
       : '';
-    toast(`✔ Berhasil — sisa saldo ${rp(d.siswa.saldo)}.${pesanSmart}`, 'ok');
+    toast(`✔ Berhasil — sisa saldo ${rp(d.siswa.saldo)}.${pesanSmart}${sisaJajanTeks(d.sisa_harian)}`, 'ok');
     // Satu tap = satu transaksi: begitu transaksinya selesai, identitas &
     // saldo santri ini TIDAK ditampilkan lagi — layar kembali kosong seperti
     // sebelum kartu ditap. Membiarkannya tertampil membuka peluang kasir
@@ -1502,7 +1514,8 @@ function martRenderBayar() {
       ${s ? `<div class="stucard">${avatarHtml(s)}
           <div><b>${esc(s.nama)}</b><br><span class="muted">${esc(s.kelas)} · NIS ${esc(s.nis)}</span></div>
           <div class="saldo"><span class="muted">Saldo</span><br><b class="rp">${rp(s.saldo)}</b>
-            <br><span class="muted" style="font-size:11px">sisa ${rp(s.saldo - total)}</span></div></div>`
+            <br><span class="muted" style="font-size:11px">sisa ${rp(s.saldo - total)}</span>
+            ${kasirJajanHtml(mart.sisaHarian)}</div></div>`
         : `<div class="tapzone" style="margin-top:4px"><div class="big">💳</div>
             <b>Tempelkan kartu</b><br><span class="muted">saldo dipotong otomatis</span></div>`}
       ${martStrukPilihan()}
@@ -1638,6 +1651,7 @@ async function martTapKartu(uid) {
     if (!d.siswa) { toast('Kartu belum terdaftar', 'err'); return; }
     mart.siswa = d.siswa;
     mart.tapToken = d.tap_token;
+    mart.sisaHarian = d.sisa_harian;
     martRenderBayar();
   } catch (e) { toast(e.message, 'err'); }
 }
@@ -1662,7 +1676,7 @@ async function martBayarKartu() {
       tap_token: mart.tapToken,
       tx_id: 'mart-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8),
     }});
-    toast(`✔ Terbayar — sisa saldo ${rp(d.siswa.saldo)}`, 'ok');
+    toast(`✔ Terbayar — sisa saldo ${rp(d.siswa.saldo)}.${sisaJajanTeks(d.sisa_harian)}`, 'ok');
     if (mart.struk) martCetak({ metode: 'Kartu (RFID)', item: salinan, subtotal: total,
       diskon: 0, total, bayar: total, kembalian: 0, no: martNoStruk('kartu', d.transaksi?.id),
       ket: `${d.siswa.nama} · sisa ${rp(d.siswa.saldo)}` });
@@ -1944,6 +1958,7 @@ function martSelesai() {
   mart.struk = false;
   mart.siswa = null;
   mart.tapToken = null;
+  mart.sisaHarian = null;
   mart.uang = 0;
   mart.diskon = 0;
   mart.pilih = null;

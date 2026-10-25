@@ -119,11 +119,13 @@ class KasirController extends Controller
 
         $txId = $r->input('tx_id') ? (string) $r->input('tx_id') : null;
         if ($txId && $dupe = Transaksi::where('tx_id', $txId)->first()) {
+            $sDupe = Siswa::find($siswaId);
             return response()->json([
                 'ok' => true,
-                'siswa' => Siswa::find($siswaId)->only(self::KOLOM_KARTU),
+                'siswa' => $sDupe->only(self::KOLOM_KARTU),
                 'transaksi' => $dupe,
                 'duplikat' => true,
+                'sisa_harian' => Rekap::sisaHarian($sDupe),
             ]);
         }
 
@@ -184,6 +186,11 @@ class KasirController extends Controller
             $hasil['smart'] = ['isi' => $smart['isi'], 'sisa_titipan' => $smart['sisa_titipan']];
             $hasil['siswa'] = $smart['siswa']->only(self::KOLOM_KARTU);
         }
+
+        // Supaya kasir (dan santri) langsung tahu sisa jatah hari ini SETELAH
+        // belanja barusan ikut terhitung — sebelum ini cuma tampil saat tap,
+        // sebelum transaksi, jadi sisanya sudah basi begitu belanja selesai.
+        $hasil['sisa_harian'] = Rekap::sisaHarian(Siswa::find($siswaId));
 
         return response()->json($hasil);
     }
