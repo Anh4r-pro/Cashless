@@ -6550,24 +6550,40 @@ function setorModal(tenantId, nama, outstanding) {
       await api('/api/settlements', { method: 'POST', body });
       toast('✔ Setoran tercatat', 'ok');
       // Panelnya kini tinggal di layar Tenant; hanya bagian uangnya yang
-      // digambar ulang supaya tabel pengelolaan tenant tidak berkedip.
-      muatUangTenant();
+      // digambar ulang supaya tabel pengelolaan tenant tidak berkedip. Setoran
+      // baru mengubah KEDUANYA (tagihan berjalan & riwayat setoran) — kembali
+      // ke halaman 1 masing-masing supaya setoran yang baru saja dicatat
+      // langsung terlihat.
+      tuState.hal = 1;
+      stState.hal = 1;
+      muatPenghasilanTenant();
+      muatSetoranTenant();
     }, 'Catat Setoran');
 }
 
 // ╔══════════════════════════════════════════════════════════╗
 // ║ ANALITIK — tren & pola transaksi (kedua role)             ║
 // ╚══════════════════════════════════════════════════════════╝
+// Bawaannya 30 hari terakhir — entri PERTAMA di sini yang jadi pilihan
+// bawaan dropdown (lihat terapkanPreset()), bukan "Juli 2026" yang dulu
+// dipilih tetap untuk kebutuhan demo.
 const PRESET_RENTANG = [
-  ['juli', 'Juli 2026', '2026-07-01', '2026-07-31'],
   ['30h', '30 hari terakhir', null, null],
   ['7h', '7 hari terakhir', null, null],
+  ['juli', 'Juli 2026', '2026-07-01', '2026-07-31'],
   ['semua', 'Semua data', '', ''],
 ];
 
 function tglMinus(n) {
   return new Date(Date.now() + 7 * 3600 * 1000 - n * 86400000).toISOString().slice(0, 10);
 }
+
+// Tiga daftar Analitik yang dipaginasi di sisi klien (lihat paginasiKlien) —
+// direset ke halaman 1 tiap kali filternya diterapkan ulang (loadAnalitik/
+// loadAnalitikMenu dipanggil dari awal).
+let anTenantState = { hal: 1, nHalaman: 1 };
+let anMenuState = { hal: 1, nHalaman: 1 };
+let anTrenState = { hal: 1, nHalaman: 1 };
 
 function analitikView(el) {
   const isSA = USER.role === 'superadmin';
@@ -6614,7 +6630,7 @@ function analitikView(el) {
   });
   if (isSA) $('#a-tenant').onchange = loadAnalitik;
 
-  terapkanPreset();       // default: Juli 2026
+  terapkanPreset();       // default: 30 hari terakhir
   loadAnalitik();
 }
 
@@ -6630,8 +6646,11 @@ async function loadAnalitikMenu(paramsUtama, labelPeriode, tipLabel) {
   if (!wadah) return;
   let d, tren;
   try {
+    // limit=200: server membatasi 50 baris bila tidak diminta lebih (lihat
+    // AnalitikController::menu) — di sini seluruh menu diambil sekali supaya
+    // bisa dipaginasi 10/halaman di klien tanpa panggilan API per halaman.
     [d, tren] = await Promise.all([
-      api('/api/analitik/menu?' + paramsUtama),
+      api('/api/analitik/menu?' + paramsUtama + '&limit=200'),
       api('/api/analitik/menu-tren?' + paramsUtama),
     ]);
   } catch (e) {
@@ -6682,14 +6701,18 @@ async function loadAnalitikMenu(paramsUtama, labelPeriode, tipLabel) {
         <b>tidak punya rincian barang</b> — transaksi yang tercatat sebelum fitur ini ada, atau
         yang dikirim kasir versi lama. Angkanya sengaja disebut supaya total per menu di bawah
         bisa dicocokkan dengan total penjualan ${rp(r.belanja_total)}.</p>` : ''}
-      <div id="ch-menu"></div>
-      <div class="tblwrap" style="margin-top:12px"><table>
-        <thead><tr><th class="num">#</th><th>Menu</th>${isSA ? '<th>Tenant</th>' : ''}
-          <th class="num">Porsi terjual</th><th class="num">Nilai</th><th class="num">Porsi nilai</th>
-          <th class="num">Pembeli</th><th class="num">Harga kini</th><th>Terakhir laku</th></tr></thead>
-        <tbody>${d.menu.map(barisMenu).join('') ||
-          `<tr><td colspan="${isSA ? 9 : 8}" class="muted">Belum ada penjualan berincian pada rentang ini</td></tr>`}</tbody>
-      </table></div>
+      <div class="row">
+        <div id="ch-menu"></div>
+        <div>
+          <div class="tblwrap"><table>
+            <thead><tr><th class="num">#</th><th>Menu</th>${isSA ? '<th>Tenant</th>' : ''}
+              <th class="num">Porsi terjual</th><th class="num">Nilai</th><th class="num">Porsi nilai</th>
+              <th class="num">Pembeli</th><th class="num">Harga kini</th><th>Terakhir laku</th></tr></thead>
+            <tbody id="an-menu-body"></tbody>
+          </table></div>
+          <div id="an-menu-nav" style="display:flex; gap:8px; align-items:center; justify-content:center; flex-wrap:wrap; margin-top:12px"></div>
+        </div>
+      </div>
     </div>
 
     <div class="panel">
@@ -6718,6 +6741,10 @@ async function loadAnalitikMenu(paramsUtama, labelPeriode, tipLabel) {
           '<tr><td colspan="2" class="muted">Tidak ada data</td></tr>'}</tbody>
       </table></div>
     </div>`;
+
+  anMenuState.hal = 1;
+  paginasiKlien('an-menu-body', 'an-menu-nav', d.menu, anMenuState, barisMenu,
+    `<tr><td colspan="${isSA ? 9 : 8}" class="muted">Belum ada penjualan berincian pada rentang ini</td></tr>`);
 
   vizHBar($('#ch-menu'), {
     data: d.menu.slice(0, 12).map((m) => ({
@@ -6797,23 +6824,24 @@ async function loadAnalitik() {
       <div id="ch-frek"></div>
     </div>
 
-    <div class="row">
-      <div class="panel">
-        <h2>Jam ramai</h2>
-        <p class="muted">Sebaran pembelian menurut jam (WIB).</p>
-        <div id="ch-jam"></div>
-      </div>
-      <div class="panel${d.scoped_tenant ? ' hidden' : ''}">
-        <h2>Kontribusi tenant</h2>
-        <p class="muted">Nilai penjualan per tenant pada rentang terpilih.</p>
+    <div class="panel">
+      <h2>Jam ramai</h2>
+      <p class="muted">Sebaran pembelian menurut jam (WIB).</p>
+      <div id="ch-jam"></div>
+    </div>
+
+    <div class="panel${d.scoped_tenant ? ' hidden' : ''}">
+      <h2>Kontribusi tenant</h2>
+      <p class="muted">Nilai penjualan per tenant pada rentang terpilih.</p>
+      <div class="row">
         <div id="ch-tenant"></div>
-        <div class="tblwrap" style="margin-top:12px"><table>
-          <thead><tr><th>Tenant</th><th class="num">Transaksi</th><th class="num">Nilai</th><th class="num">Porsi</th></tr></thead>
-          <tbody>${d.per_tenant.map((t) => `<tr><td>${esc(t.nama)}</td>
-            <td class="num">${t.n.toLocaleString('id-ID')}</td><td class="num rp">${rp(t.total)}</td>
-            <td class="num">${r.belanja ? Math.round(t.total / r.belanja * 100) : 0}%</td></tr>`).join('') ||
-            '<tr><td colspan="4" class="muted">Tidak ada data</td></tr>'}</tbody>
-        </table></div>
+        <div>
+          <div class="tblwrap"><table>
+            <thead><tr><th>Tenant</th><th class="num">Transaksi</th><th class="num">Nilai</th><th class="num">Porsi</th></tr></thead>
+            <tbody id="an-tenant-body"></tbody>
+          </table></div>
+          <div id="an-tenant-nav" style="display:flex; gap:8px; align-items:center; justify-content:center; flex-wrap:wrap; margin-top:12px"></div>
+        </div>
       </div>
     </div>
 
@@ -6841,17 +6869,27 @@ async function loadAnalitik() {
       <div class="tblwrap"><table>
         <thead><tr><th>Periode</th><th class="num">Belanja</th>${d.scoped_tenant ? '' : '<th class="num">Top up</th>'}
         <th class="num">Jumlah transaksi</th><th class="num">Santri aktif</th></tr></thead>
-        <tbody>${d.series.map((s) => `<tr><td>${esc(tipLabel(s.periode))}</td>
-          <td class="num rp">${rp(s.belanja)}</td>${d.scoped_tenant ? '' : `<td class="num rp">${rp(s.topup)}</td>`}
-          <td class="num">${s.n_beli.toLocaleString('id-ID')}</td>
-          <td class="num">${s.siswa_aktif.toLocaleString('id-ID')}</td></tr>`).join('') ||
-          '<tr><td colspan="5" class="muted">Tidak ada data pada rentang ini</td></tr>'}</tbody>
+        <tbody id="an-tren-body"></tbody>
       </table></div>
+      <div id="an-tren-nav" style="display:flex; gap:8px; align-items:center; justify-content:center; flex-wrap:wrap; margin-top:12px"></div>
     </div>`;
 
   // Panel menu memakai endpoint tersendiri (tabel rincian baris, bukan tabel
   // transaksi) dan dimuat menyusul supaya grafik utama tidak menunggunya.
   loadAnalitikMenu(p, labelPeriode, tipLabel);
+
+  // Filter baru diterapkan → datanya baru, kembali ke halaman 1.
+  anTenantState.hal = 1;
+  anTrenState.hal = 1;
+  paginasiKlien('an-tenant-body', 'an-tenant-nav', d.per_tenant, anTenantState, (t) => `<tr><td>${esc(t.nama)}</td>
+    <td class="num">${t.n.toLocaleString('id-ID')}</td><td class="num rp">${rp(t.total)}</td>
+    <td class="num">${r.belanja ? Math.round(t.total / r.belanja * 100) : 0}%</td></tr>`,
+    '<tr><td colspan="4" class="muted">Tidak ada data</td></tr>');
+  paginasiKlien('an-tren-body', 'an-tren-nav', d.series, anTrenState, (s) => `<tr><td>${esc(tipLabel(s.periode))}</td>
+    <td class="num rp">${rp(s.belanja)}</td>${d.scoped_tenant ? '' : `<td class="num rp">${rp(s.topup)}</td>`}
+    <td class="num">${s.n_beli.toLocaleString('id-ID')}</td>
+    <td class="num">${s.siswa_aktif.toLocaleString('id-ID')}</td></tr>`,
+    '<tr><td colspan="5" class="muted">Tidak ada data pada rentang ini</td></tr>');
 
   const dataX = d.series.map((s) => ({ label: labelPeriode(s.periode), tooltipLabel: tipLabel(s.periode) }));
 
@@ -7851,6 +7889,7 @@ async function loadPenyesuaian() {
 // jenis donasi beserta PILIHAN BESARANNYA. Santri tidak pernah bisa mengetik
 // nominal sendiri — server hanya menerima angka yang ada di daftar ini.
 let donasiRows = [];        // salinan yang sedang disunting di layar
+let dnState = { hal: 1, nHalaman: 1, dari: '', sampai: '', cari: '' };
 
 function donasiView(el) {
   el.innerHTML = `
@@ -7869,6 +7908,12 @@ function donasiView(el) {
         <th class="num">Total</th><th class="num">Donatur</th><th class="num">Transaksi</th></tr></thead>
       <tbody id="dn-perprogram"></tbody>
     </table></div>
+  </div>
+
+  <div class="panel">
+    <h2>Santri Paling Aktif Berdonasi</h2>
+    <p class="muted">5 santri teratas per jenis donasi, pada rentang yang sama dengan rekap di atas.</p>
+    <div id="dn-top-donatur" class="row"></div>
   </div>
 
   <div class="row">
@@ -7916,12 +7961,14 @@ function donasiView(el) {
     </div>
   </div>
 
-  <div class="panel">
-    <h2>20 Donasi Terakhir</h2>
+  <div class="panel" id="dn-riwayat-panel">
+    <h2>Riwayat Donasi</h2>
+    ${filterRiwayatHtml('dn', 'Cari', 'nama atau kelas santri…')}
     <div class="tblwrap"><table>
       <thead><tr><th>Waktu</th><th>Santri</th><th>Kelas</th><th>Jenis</th><th class="num">Jumlah</th></tr></thead>
       <tbody id="dn-terakhir"></tbody>
     </table></div>
+    <div id="dn-nav" style="display:flex; gap:8px; align-items:center; justify-content:center; flex-wrap:wrap; margin-top:12px"></div>
   </div>`;
 
   $('#dn-rentang').onclick = (e) => {
@@ -7940,9 +7987,79 @@ function donasiView(el) {
   $('#dn-simpan-set').onclick = simpanPengaturanKios;
   $('#dn-simpan-sandi').onclick = simpanSandiKios;
 
+  dnState = { hal: 1, nHalaman: 1, dari: '', sampai: '', cari: '' };
   muatProgramDonasi();
   muatPengaturanKios();
   muatRekapDonasi(30);
+  dnMuatRiwayat();
+}
+
+function dnQs(dgnHal) {
+  const p = new URLSearchParams();
+  if (dgnHal) { p.set('hal', dnState.hal); p.set('per', 10); }
+  if (dnState.dari) p.set('dari', dnState.dari);
+  if (dnState.sampai) p.set('sampai', dnState.sampai);
+  if (dnState.cari) p.set('cari', dnState.cari);
+  return p.toString();
+}
+
+/** Riwayat Donasi — riwayat PENUH berpaginasi (bukan cuma 20 terakhir),
+ *  dengan pencarian santri, rentang tanggal, dan unduhan. Terpisah dari
+ *  muatRekapDonasi() supaya tidak ikut dipanggil ulang tiap tombol rentang
+ *  cepat rekap ditekan. */
+async function dnMuatRiwayat() {
+  const wadah = $('#dn-riwayat-panel');
+  if (!wadah) return;
+  try {
+    const d = await api('/api/donasi/riwayat?' + dnQs(true));
+    dnState.nHalaman = d.n_halaman || 1;
+    $('#dn-terakhir').innerHTML = d.donasi.map((t) => `
+      <tr>
+        <td style="white-space:nowrap">${esc(waktuSingkat(t.created_at))}</td>
+        <td>${esc(t.siswa_nama)}</td><td>${esc(t.kelas)}</td>
+        <td class="muted">${esc(t.keterangan)}</td>
+        <td class="num rp">${rp(-t.jumlah)}</td>
+      </tr>`).join('') || '<tr><td colspan="5" class="muted">Belum ada donasi yang cocok</td></tr>';
+
+    $('#dn-dari').value = dnState.dari;
+    $('#dn-sampai').value = dnState.sampai;
+    $('#dn-cari').value = dnState.cari;
+    const terapkan = () => {
+      dnState.dari = $('#dn-dari').value;
+      dnState.sampai = $('#dn-sampai').value;
+      dnState.cari = $('#dn-cari').value.trim();
+      dnState.hal = 1;
+      dnMuatRiwayat();
+    };
+    $('#dn-go').onclick = terapkan;
+    $('#dn-cari').addEventListener('keydown', (e) => { if (e.key === 'Enter') terapkan(); });
+    $('#dn-unduh').onclick = () => unduhRiwayat('dn', '/api/donasi/riwayat', dnQs(false), dnCetakRiwayat);
+    $('#dn-cetak').onclick = dnCetakRiwayat;
+
+    const nav = $('#dn-nav');
+    nav.innerHTML = navHalamanHtml(dnState.hal, dnState.nHalaman);
+    pasangNavHalaman(nav, dnState, dnMuatRiwayat);
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function dnCetakRiwayat() {
+  const d = await api('/api/donasi/riwayat?' + dnQs(false));
+  const rows = d.donasi || [];
+  if (!rows.length) { toast('Tidak ada data untuk dicetak', 'err'); return; }
+  const gaya = `body{font:12px/1.5 system-ui;margin:18px;color:#111} h1{font-size:17px;margin:0}
+    table{width:100%;border-collapse:collapse;margin-top:10px}
+    th,td{border:1px solid #bbb;padding:5px 8px;text-align:left} th{background:#eee}
+    .n{text-align:right}`;
+  cetakLembar('Riwayat Donasi', gaya, `
+    <h1>Riwayat Donasi</h1>
+    <div>${esc(dnState.dari || '…')} s/d ${esc(dnState.sampai || '…')}
+      ${dnState.cari ? ' · cari: ' + esc(dnState.cari) : ''} · dicetak ${new Date().toLocaleString('id-ID')}</div>
+    <table>
+      <thead><tr><th>Waktu</th><th>Santri</th><th>Kelas</th><th>Jenis</th><th class="n">Jumlah</th></tr></thead>
+      <tbody>${rows.map((t) => `<tr>
+        <td>${esc(waktuSingkat(t.created_at))}</td><td>${esc(t.siswa_nama)}</td><td>${esc(t.kelas)}</td>
+        <td>${esc(t.keterangan)}</td><td class="n">${rp(-t.jumlah)}</td></tr>`).join('')}</tbody>
+    </table>`);
 }
 
 async function muatProgramDonasi() {
@@ -8075,14 +8192,18 @@ async function muatRekapDonasi(hari) {
         <td class="num rp">${rp(p.total)}</td><td class="num">${p.donatur}</td><td class="num">${p.n}</td>
       </tr>`).join('') || '<tr><td colspan="6" class="muted">Belum ada jenis donasi</td></tr>';
 
-    $('#dn-terakhir').innerHTML = d.terakhir.map((t) => `
-      <tr>
-        <td style="white-space:nowrap">${new Date(t.created_at).toLocaleString('id-ID',
-          { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' })}</td>
-        <td>${esc(t.siswa_nama)}</td><td>${esc(t.kelas)}</td>
-        <td class="muted">${esc(t.keterangan)}</td>
-        <td class="num rp">${rp(-t.jumlah)}</td>
-      </tr>`).join('') || '<tr><td colspan="5" class="muted">Belum ada donasi masuk</td></tr>';
+    // Santri paling aktif/banyak berdonasi, PER jenis donasi, pada rentang
+    // yang sama ("periode" di atas) — satu kartu kecil per jenis.
+    const adaTop = d.per_program.filter((p) => p.top_donatur.length > 0);
+    $('#dn-top-donatur').innerHTML = adaTop.length ? adaTop.map((p) => `
+      <div class="panel" style="margin:0">
+        <h3 style="margin-top:0">${esc(p.nama)}</h3>
+        <ol style="margin:0; padding-left:20px">
+          ${p.top_donatur.map((t) => `<li>${esc(t.siswa_nama)}
+            <span class="muted">(${esc(t.kelas)})</span> — <b class="rp">${rp(t.total)}</b>
+            <span class="muted">(${t.n}x)</span></li>`).join('')}
+        </ol>
+      </div>`).join('') : '<p class="muted">Belum ada donasi pada rentang ini</p>';
   } catch (e) { toast(e.message, 'err'); }
 }
 
@@ -8094,12 +8215,18 @@ async function muatRekapDonasi(hari) {
 // tapi menyetor besar & mencairkan SENGAJA hanya lewat admin di layar ini.
 let tabunganRows = [];
 let tabunganSantri = null;    // santri yang sedang dipilih di panel Setor & Cairkan
+let tbState = { hal: 1, nHalaman: 1, dari: '', sampai: '', cari: '' };
 
 function tabunganView(el) {
   el.innerHTML = `
   <div class="panel">
     <div class="kat-head">
       <h2>Rekap Tabungan</h2>
+      <div class="quick" id="tb-rentang">
+        <button data-hari="7">7 hari</button>
+        <button data-hari="30" class="sel">30 hari</button>
+        <button data-hari="365">1 tahun</button>
+      </div>
     </div>
     <div class="cards" id="tb-kartu"></div>
     <div class="tblwrap"><table>
@@ -8107,6 +8234,14 @@ function tabunganView(el) {
         <th class="num">Penabung</th></tr></thead>
       <tbody id="tb-perjenis"></tbody>
     </table></div>
+  </div>
+
+  <div class="panel">
+    <h2>Santri Paling Aktif Menabung</h2>
+    <p class="muted">5 santri teratas per jenis tabungan (dihitung dari total SETORAN pada
+      rentang yang sama dengan rekap di atas — bukan saldo kini, supaya pencairan
+      tidak mengurangi "keaktifan" menabungnya).</p>
+    <div id="tb-top-penabung" class="row"></div>
   </div>
 
   <div class="row">
@@ -8140,6 +8275,16 @@ function tabunganView(el) {
       <div id="tb-hasil-cari"></div>
       <div id="tb-panel-santri"></div>
     </div>
+  </div>
+
+  <div class="panel" id="tb-riwayat-panel">
+    <h2>Riwayat Tabungan</h2>
+    ${filterRiwayatHtml('tbr', 'Cari', 'nama atau kelas santri…')}
+    <div class="tblwrap"><table>
+      <thead><tr><th>Waktu</th><th>Santri</th><th>Kelas</th><th>Jenis</th><th>Mutasi</th><th class="num">Jumlah</th></tr></thead>
+      <tbody id="tb-terakhir"></tbody>
+    </table></div>
+    <div id="tb-nav" style="display:flex; gap:8px; align-items:center; justify-content:center; flex-wrap:wrap; margin-top:12px"></div>
   </div>`;
 
   $('#tb-tambah').onclick = () => {
@@ -8151,10 +8296,91 @@ function tabunganView(el) {
   $('#tb-simpan').onclick = simpanJenisTabungan;
   $('#tb-simpan-set').onclick = simpanPengaturanTabungan;
   $('#tb-cari').addEventListener('input', debounce(tbCariSantri, 300));
+  $('#tb-rentang').onclick = (e) => {
+    const b = e.target.closest('button[data-hari]');
+    if (!b) return;
+    document.querySelectorAll('#tb-rentang button').forEach((x) => x.classList.toggle('sel', x === b));
+    muatRekapTabungan(Number(b.dataset.hari));
+  };
 
+  tbState = { hal: 1, nHalaman: 1, dari: '', sampai: '', cari: '' };
   muatJenisTabungan();
   muatPengaturanTabungan();
-  muatRekapTabungan();
+  muatRekapTabungan(30);
+  tbMuatRiwayat();
+}
+
+function tbQs(dgnHal) {
+  const p = new URLSearchParams();
+  if (dgnHal) { p.set('hal', tbState.hal); p.set('per', 10); }
+  if (tbState.dari) p.set('dari', tbState.dari);
+  if (tbState.sampai) p.set('sampai', tbState.sampai);
+  if (tbState.cari) p.set('cari', tbState.cari);
+  return p.toString();
+}
+
+/** Riwayat Tabungan — dulu TIDAK PERNAH ditampilkan sama sekali walau
+ *  backend sudah menghitungnya (lihat catatan TabunganController::rekap) —
+ *  sekarang dibangun langsung sebagai riwayat PENUH berpaginasi, pola
+ *  persis Riwayat Donasi/Setoran Tenant. */
+async function tbMuatRiwayat() {
+  const wadah = $('#tb-riwayat-panel');
+  if (!wadah) return;
+  try {
+    const d = await api('/api/tabungan/riwayat?' + tbQs(true));
+    tbState.nHalaman = d.n_halaman || 1;
+    $('#tb-terakhir').innerHTML = d.mutasi.map((m) => `
+      <tr>
+        <td style="white-space:nowrap">${esc(waktuSingkat(m.created_at))}</td>
+        <td>${esc(m.siswa_nama)}</td><td>${esc(m.kelas)}</td>
+        <td class="muted">${esc(m.jenis_nama)}</td>
+        <td>${m.jenis_mutasi === 'masuk' ? 'setor' : 'cairkan'}</td>
+        <td class="num rp ${m.jenis_mutasi === 'masuk' ? 'plus' : 'minus'}">${m.jenis_mutasi === 'masuk' ? '+' : '−'}${rp(m.jumlah)}</td>
+      </tr>`).join('') || '<tr><td colspan="6" class="muted">Belum ada mutasi yang cocok</td></tr>';
+
+    // Prefix "tbr" (bukan "tb"): id "tb-cari" sudah dipakai kotak cari
+    // santri di panel Setor & Cairkan di atas — dua kotak cari ini harus
+    // punya id yang berbeda supaya tidak saling menimpa.
+    $('#tbr-dari').value = tbState.dari;
+    $('#tbr-sampai').value = tbState.sampai;
+    $('#tbr-cari').value = tbState.cari;
+    const terapkan = () => {
+      tbState.dari = $('#tbr-dari').value;
+      tbState.sampai = $('#tbr-sampai').value;
+      tbState.cari = $('#tbr-cari').value.trim();
+      tbState.hal = 1;
+      tbMuatRiwayat();
+    };
+    $('#tbr-go').onclick = terapkan;
+    $('#tbr-cari').addEventListener('keydown', (e) => { if (e.key === 'Enter') terapkan(); });
+    $('#tbr-unduh').onclick = () => unduhRiwayat('tbr', '/api/tabungan/riwayat', tbQs(false), tbCetakRiwayat);
+    $('#tbr-cetak').onclick = tbCetakRiwayat;
+
+    const nav = $('#tb-nav');
+    nav.innerHTML = navHalamanHtml(tbState.hal, tbState.nHalaman);
+    pasangNavHalaman(nav, tbState, tbMuatRiwayat);
+  } catch (e) { toast(e.message, 'err'); }
+}
+
+async function tbCetakRiwayat() {
+  const d = await api('/api/tabungan/riwayat?' + tbQs(false));
+  const rows = d.mutasi || [];
+  if (!rows.length) { toast('Tidak ada data untuk dicetak', 'err'); return; }
+  const gaya = `body{font:12px/1.5 system-ui;margin:18px;color:#111} h1{font-size:17px;margin:0}
+    table{width:100%;border-collapse:collapse;margin-top:10px}
+    th,td{border:1px solid #bbb;padding:5px 8px;text-align:left} th{background:#eee}
+    .n{text-align:right}`;
+  cetakLembar('Riwayat Tabungan', gaya, `
+    <h1>Riwayat Tabungan</h1>
+    <div>${esc(tbState.dari || '…')} s/d ${esc(tbState.sampai || '…')}
+      ${tbState.cari ? ' · cari: ' + esc(tbState.cari) : ''} · dicetak ${new Date().toLocaleString('id-ID')}</div>
+    <table>
+      <thead><tr><th>Waktu</th><th>Santri</th><th>Kelas</th><th>Jenis</th><th>Mutasi</th><th class="n">Jumlah</th></tr></thead>
+      <tbody>${rows.map((m) => `<tr>
+        <td>${esc(waktuSingkat(m.created_at))}</td><td>${esc(m.siswa_nama)}</td><td>${esc(m.kelas)}</td>
+        <td>${esc(m.jenis_nama)}</td><td>${m.jenis_mutasi === 'masuk' ? 'setor' : 'cairkan'}</td>
+        <td class="n">${rp(m.jumlah)}</td></tr>`).join('')}</tbody>
+    </table>`);
 }
 
 async function muatJenisTabungan() {
@@ -8244,9 +8470,16 @@ async function simpanPengaturanTabungan() {
   btn.disabled = false;
 }
 
-async function muatRekapTabungan() {
+async function muatRekapTabungan(hari) {
+  // Dipanggil ulang tanpa argumen sesudah menyetor/mencairkan/mengubah
+  // daftar jenis — pakai rentang yang SEDANG dipilih pengguna, bukan
+  // melompat balik ke 30 hari setiap kali.
+  if (!hari) {
+    const sel = $('#tb-rentang .sel');
+    hari = sel ? Number(sel.dataset.hari) : 30;
+  }
   try {
-    const d = await api('/api/tabungan/rekap');
+    const d = await api('/api/tabungan/rekap?hari=' + hari);
     $('#tb-kartu').innerHTML = [
       ['Terkumpul seluruhnya (semua jenis)', rp(d.total)],
     ].map(([l, v]) => `<div class="statcard"><span class="muted">${l}</span><br><b class="rp">${v}</b></div>`).join('');
@@ -8258,6 +8491,18 @@ async function muatRekapTabungan() {
         <td class="num rp">${rp(j.total)}</td>
         <td class="num">${j.n_penabung}</td>
       </tr>`).join('') || '<tr><td colspan="4" class="muted">Belum ada jenis tabungan</td></tr>';
+
+    // Santri paling aktif/banyak menabung, PER jenis, pada rentang yang sama.
+    const adaTop = d.per_jenis.filter((j) => j.top_penabung.length > 0);
+    $('#tb-top-penabung').innerHTML = adaTop.length ? adaTop.map((j) => `
+      <div class="panel" style="margin:0">
+        <h3 style="margin-top:0">${esc(j.nama)}</h3>
+        <ol style="margin:0; padding-left:20px">
+          ${j.top_penabung.map((t) => `<li>${esc(t.siswa_nama)}
+            <span class="muted">(${esc(t.kelas)})</span> — <b class="rp">${rp(t.total)}</b>
+            <span class="muted">(${t.n}x setor)</span></li>`).join('')}
+        </ol>
+      </div>`).join('') : '<p class="muted">Belum ada setoran pada rentang ini</p>';
   } catch (e) { toast(e.message, 'err'); }
 }
 
@@ -8332,6 +8577,8 @@ async function tbRenderPanelSantri() {
       toast('✔ Tabungan disetor', 'ok');
       tbRenderPanelSantri();
       muatRekapTabungan();
+      tbState.hal = 1;
+      tbMuatRiwayat();
     } catch (e) { toast(e.message, 'err'); }
     btn.disabled = false;
   };
@@ -8357,6 +8604,8 @@ function tbCairkanModal(jenisId) {
       toast('✔ Tabungan dicairkan', 'ok');
       tbRenderPanelSantri();
       muatRekapTabungan();
+      tbState.hal = 1;
+      tbMuatRiwayat();
     }, 'Ya, cairkan');
 }
 
@@ -9189,6 +9438,94 @@ function assignCardModal(s, presetUid) {
   }
 }
 
+// ------------------------------------------------- paginasi & ekspor umum
+/**
+ * Markup navigasi "← sebelumnya · halaman X dari Y · berikutnya →", dipakai
+ * ulang oleh SETIAP daftar berpaginasi di bawah (Tenant, Penghasilan &
+ * Tagihan, Setoran, Donasi, Tabungan, serta tiga daftar Analitik yang
+ * dipaginasi di sisi klien) — satu sumber supaya gaya & perilakunya selalu
+ * sama. Kosong (tanpa navigasi) kalau cuma satu halaman.
+ */
+function navHalamanHtml(hal, nHalaman) {
+  if (nHalaman <= 1) return '';
+
+  return `
+    <button class="nav-hal-prev" ${hal <= 1 ? 'disabled' : ''}>← sebelumnya</button>
+    <span class="muted">halaman ${hal} dari ${nHalaman}</span>
+    <button class="nav-hal-next" ${hal >= nHalaman ? 'disabled' : ''}>berikutnya →</button>`;
+}
+/** Menyambungkan tombol hasil navHalamanHtml() di dalam elemen `wadah`. */
+function pasangNavHalaman(wadah, state, muatUlang) {
+  const prev = wadah.querySelector('.nav-hal-prev');
+  const next = wadah.querySelector('.nav-hal-next');
+  if (prev) prev.onclick = () => { state.hal -= 1; muatUlang(); };
+  if (next) next.onclick = () => { state.hal += 1; muatUlang(); };
+}
+
+/**
+ * Paginasi di SISI KLIEN — dipakai 3 daftar Analitik (Kontribusi tenant,
+ * Penjualan per Menu, Tabel data tren) yang datanya sudah lengkap di memori
+ * sekali ambil (terikat rentang tanggal yang dipilih, bukan riwayat yang
+ * tumbuh tanpa batas seperti Setoran/Donasi/Tabungan) — memotong ulang array
+ * yang sama tanpa panggilan API baru per halaman. `renderBaris(baris,
+ * indeksGlobal)` mengembalikan HTML satu `<tr>`; indeksnya GLOBAL (bukan
+ * nol-ulang tiap halaman) supaya nomor urut "#" tetap benar di halaman 2 dst.
+ */
+function paginasiKlien(tbodyId, navId, data, state, renderBaris, kosongHtml) {
+  const per = 10;
+  state.nHalaman = Math.max(1, Math.ceil(data.length / per));
+  if (state.hal > state.nHalaman) state.hal = state.nHalaman;
+  const mulai = (state.hal - 1) * per;
+  const potongan = data.slice(mulai, mulai + per);
+  const tbody = document.getElementById(tbodyId);
+  if (tbody) {
+    tbody.innerHTML = potongan.length
+      ? potongan.map((row, i) => renderBaris(row, mulai + i)).join('') : kosongHtml;
+  }
+  const nav = document.getElementById(navId);
+  if (nav) {
+    nav.innerHTML = navHalamanHtml(state.hal, state.nHalaman);
+    pasangNavHalaman(nav, state, () => paginasiKlien(tbodyId, navId, data, state, renderBaris, kosongHtml));
+  }
+}
+
+/**
+ * Filterbar "cari + rentang tanggal + unduh" untuk riwayat yang tumbuh
+ * terus (Setoran ke Tenant, Donasi, Tabungan) — pola select format
+ * (xls/doc/pdf) + unduh + cetak meniru persis `martSpdView` (app.js
+ * ~baris 3238-3245), supaya kebiasaan yang sama berlaku di semua layar.
+ * `idPrefix` memisahkan id elemennya per layar.
+ */
+function filterRiwayatHtml(idPrefix, labelCari, placeholderCari) {
+  return `
+  <div class="filterbar">
+    <div class="field"><label>${esc(labelCari)}</label>
+      <input id="${idPrefix}-cari" placeholder="${esc(placeholderCari)}" autocomplete="off"></div>
+    <div class="field"><label>Dari</label><input type="date" id="${idPrefix}-dari"></div>
+    <div class="field"><label>Sampai</label><input type="date" id="${idPrefix}-sampai"></div>
+    <button class="go" id="${idPrefix}-go">Terapkan</button>
+    <span style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-left:auto">
+      <select id="${idPrefix}-format" class="k-chip-select" style="width:auto">
+        <option value="xls">Excel (.xls)</option>
+        <option value="doc">Word (.doc)</option>
+        <option value="pdf">PDF (lewat dialog cetak)</option>
+      </select>
+      <button class="linkbtn" id="${idPrefix}-unduh">⬇ unduh</button> ·
+      <button class="linkbtn" id="${idPrefix}-cetak">🖨 cetak</button>
+    </span>
+  </div>`;
+}
+/** "unduh" non-PDF turun lewat tautan (berkasnya bukan JSON); "pdf" memanggil `cetakFn`. */
+function unduhRiwayat(idPrefix, urlDasar, qs, cetakFn) {
+  const fmt = $(`#${idPrefix}-format`).value;
+  if (fmt === 'pdf') { cetakFn(); return; }
+  const a = document.createElement('a');
+  a.href = `${urlDasar}?${qs}&format=${fmt}`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
 // ╔══════════════════════════════════════════════════════════╗
 // ║ SUPERADMIN: TENANT                                        ║
 // ╚══════════════════════════════════════════════════════════╝
@@ -9201,6 +9538,13 @@ function assignCardModal(s, presetUid) {
  * menu. Sekarang ketiganya satu layar, dan Dashboard kembali menjadi
  * ringkasan sekolah, bukan tempat menagih.
  */
+// Tiga daftar yang kini berpaginasi punya halaman masing-masing INDEPENDEN
+// (daftar Tenant boleh di halaman 3 sementara Riwayat Setoran di halaman 1)
+// — tiga state terpisah, bukan satu.
+let tnState = { hal: 1, nHalaman: 1 };
+let tuState = { hal: 1, nHalaman: 1 };
+let stState = { hal: 1, nHalaman: 1, dari: '', sampai: '', cari: '', rows: [] };
+
 function tenantView(el) {
   el.innerHTML = `<div class="panel">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px">
@@ -9211,84 +9555,22 @@ function tenantView(el) {
       <thead><tr><th>Tenant</th><th>Jenis</th><th>Pemilik</th><th>Akun Login</th><th>Status</th><th></th></tr></thead>
       <tbody id="tn-body"></tbody>
     </table></div>
+    <div id="tn-nav" style="display:flex; gap:8px; align-items:center; justify-content:center; flex-wrap:wrap; margin-top:12px"></div>
   </div>
-  <div id="tn-uang"><p class="muted">memuat penghasilan & setoran…</p></div>`;
+  <div id="tn-penghasilan"><p class="muted">memuat penghasilan…</p></div>
+  <div id="tn-setoran"><p class="muted">memuat riwayat setoran…</p></div>`;
   $('#btn-add-tenant').onclick = () => tenantModal(null);
+  tnState = { hal: 1, nHalaman: 1 };
+  tuState = { hal: 1, nHalaman: 1 };
+  stState = { hal: 1, nHalaman: 1, dari: '', sampai: '', cari: '', rows: [] };
   loadTenants();
-  muatUangTenant();
-}
-
-/** Panel tagihan + riwayat setoran. Dipisah supaya bisa disegarkan sendiri
- *  sesudah menyetor, tanpa menggambar ulang tabel pengelolaan tenant. */
-async function muatUangTenant() {
-  const wadah = $('#tn-uang');
-  if (!wadah) return;
-  try {
-    const [d, st] = await Promise.all([
-      api('/api/tenants?stat=1'),
-      api('/api/settlements'),
-    ]);
-    wadah.innerHTML = `
-    <div class="panel">
-      <h2>Penghasilan & Tagihan Tenant</h2>
-      <div class="tblwrap"><table>
-        <thead><tr><th>Tenant</th><th>Status</th><th class="num">Hari Ini</th><th class="num">Total Penjualan</th>
-        <th class="num">Sudah Disetor</th><th class="num">Tagihan Berjalan</th><th></th></tr></thead>
-        <tbody>${d.tenants.map((t) => `
-          <tr><td><b>${esc(t.nama)}</b><br><span class="muted">${esc(t.pemilik)}</span></td>
-          <td><span class="badge ${t.status}">${t.status}</span></td>
-          <td class="num rp">${rp(t.hari_ini)}</td>
-          <td class="num rp">${rp(t.total)}</td>
-          <td class="num rp">${rp(t.disetor)}</td>
-          <td class="num rp" style="font-weight:800; color:${t.outstanding > 0 ? 'var(--err)' : 'var(--ok)'}">${rp(t.outstanding)}</td>
-          <td>${t.outstanding > 0 ? `<button class="linkbtn" data-setor="${t.id}" data-nama="${esc(t.nama)}" data-out="${t.outstanding}">💰 setor</button>` : ''}</td>
-          </tr>`).join('')}</tbody>
-      </table></div>
-    </div>
-    <div class="panel">
-      <h2>Riwayat Setoran ke Tenant</h2>
-      <div class="tblwrap"><table>
-        <thead><tr><th>Tanggal</th><th>Tenant</th><th class="num">Jumlah</th><th>Metode</th><th>Bukti</th><th>Oleh</th><th>Keterangan</th></tr></thead>
-        <tbody>${st.settlements.map((s) => `
-          <tr><td>${new Date(s.created_at).toLocaleDateString('id-ID', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
-          <td>${esc(s.tenant_nama)}</td><td class="num rp">${rp(s.jumlah)}</td><td>${esc(s.metode)}</td>
-          <td>${s.bukti
-            ? `<button class="linkbtn" data-bukti="${esc(s.bukti)}">lihat</button>`
-            : `<button class="linkbtn" data-upbukti="${s.id}">upload bukti</button>`}</td>
-          <td>${esc(s.operator)}</td><td class="muted">${esc(s.keterangan)}</td></tr>`).join('') ||
-          '<tr><td colspan="7" class="muted">Belum ada setoran</td></tr>'}</tbody>
-      </table></div>
-    </div>`;
-
-    bindBuktiButtons(wadah);
-    wadah.querySelectorAll('[data-setor]').forEach((b) => {
-      b.onclick = () => setorModal(Number(b.dataset.setor), b.dataset.nama, Number(b.dataset.out));
-    });
-    wadah.querySelectorAll('[data-upbukti]').forEach((b) => {
-      b.onclick = () => openModal(`
-        <h2>Upload Bukti Setoran</h2>
-        <div class="field"><label>Foto/scan bukti (JPG/PNG)</label>
-        <input type="file" id="m-file" accept="image/*"></div>`,
-        async () => {
-          const f = $('#m-file').files[0];
-          if (!f) throw new Error('Pilih file dulu');
-          const data = (await kompresGambar(f)).dataUrl;
-          await api(`/api/settlements/${b.dataset.upbukti}/bukti`, { method: 'POST', body: { data } });
-          toast('✔ Bukti tersimpan', 'ok');
-          muatUangTenant();
-        });
-    });
-  } catch (e) {
-    // Gagalnya bagian ini tidak boleh ikut menjatuhkan tabel pengelolaan
-    // tenant di atasnya — menambah atau menonaktifkan tenant harus tetap bisa.
-    wadah.innerHTML = `<div class="panel"><p class="muted">Gagal memuat penghasilan &
-      setoran: ${esc(e.message)}. <button class="linkbtn" id="tn-uang-ulang">coba lagi</button></p></div>`;
-    $('#tn-uang-ulang').onclick = muatUangTenant;
-  }
+  muatPenghasilanTenant();
+  muatSetoranTenant();
 }
 
 async function loadTenants() {
-  const d = await api('/api/tenants');
+  const d = await api(`/api/tenants?hal=${tnState.hal}&per=10`);
+  tnState.nHalaman = d.n_halaman || 1;
   $('#tn-body').innerHTML = d.tenants.map((t) => `
     <tr>
       <td><b>${esc(t.nama)}</b></td>
@@ -9313,10 +9595,159 @@ async function loadTenants() {
         tenant hanya akan dinonaktifkan (riwayat keuangan tidak boleh hilang).</p>`, async () => {
         const r = await api('/api/tenants/' + t.id, { method: 'DELETE' });
         toast(r.nonaktif ? 'Tenant dinonaktifkan (punya riwayat)' : 'Tenant dihapus', 'ok');
+        tnState.hal = 1;
         loadTenants();
       }, 'Hapus');
     };
   });
+  const nav = $('#tn-nav');
+  nav.innerHTML = navHalamanHtml(tnState.hal, tnState.nHalaman);
+  pasangNavHalaman(nav, tnState, loadTenants);
+}
+
+/** Panel Penghasilan & Tagihan — disendirikan dari Riwayat Setoran di
+ *  bawah supaya tiap-tiap punya halaman sendiri dan bisa disegarkan sendiri
+ *  sesudah menyetor, tanpa menggambar ulang tabel pengelolaan tenant. */
+async function muatPenghasilanTenant() {
+  const wadah = $('#tn-penghasilan');
+  if (!wadah) return;
+  try {
+    const d = await api(`/api/tenants?stat=1&hal=${tuState.hal}&per=10`);
+    tuState.nHalaman = d.n_halaman || 1;
+    wadah.innerHTML = `
+    <div class="panel">
+      <h2>Penghasilan & Tagihan Tenant</h2>
+      <div class="tblwrap"><table>
+        <thead><tr><th>Tenant</th><th>Status</th><th class="num">Hari Ini</th><th class="num">Total Penjualan</th>
+        <th class="num">Sudah Disetor</th><th class="num">Tagihan Berjalan</th><th></th></tr></thead>
+        <tbody>${d.tenants.map((t) => `
+          <tr><td><b>${esc(t.nama)}</b><br><span class="muted">${esc(t.pemilik)}</span></td>
+          <td><span class="badge ${t.status}">${t.status}</span></td>
+          <td class="num rp">${rp(t.hari_ini)}</td>
+          <td class="num rp">${rp(t.total)}</td>
+          <td class="num rp">${rp(t.disetor)}</td>
+          <td class="num rp" style="font-weight:800; color:${t.outstanding > 0 ? 'var(--err)' : 'var(--ok)'}">${rp(t.outstanding)}</td>
+          <td>${t.outstanding > 0 ? `<button class="linkbtn" data-setor="${t.id}" data-nama="${esc(t.nama)}" data-out="${t.outstanding}">💰 setor</button>` : ''}</td>
+          </tr>`).join('')}</tbody>
+      </table></div>
+      <div id="tu-nav" style="display:flex; gap:8px; align-items:center; justify-content:center; flex-wrap:wrap; margin-top:12px"></div>
+    </div>`;
+
+    wadah.querySelectorAll('[data-setor]').forEach((b) => {
+      b.onclick = () => setorModal(Number(b.dataset.setor), b.dataset.nama, Number(b.dataset.out));
+    });
+    const nav = $('#tu-nav');
+    nav.innerHTML = navHalamanHtml(tuState.hal, tuState.nHalaman);
+    pasangNavHalaman(nav, tuState, muatPenghasilanTenant);
+  } catch (e) {
+    // Gagalnya bagian ini tidak boleh ikut menjatuhkan tabel pengelolaan
+    // tenant di atasnya — menambah atau menonaktifkan tenant harus tetap bisa.
+    wadah.innerHTML = `<div class="panel"><p class="muted">Gagal memuat penghasilan:
+      ${esc(e.message)}. <button class="linkbtn" id="tu-ulang">coba lagi</button></p></div>`;
+    $('#tu-ulang').onclick = muatPenghasilanTenant;
+  }
+}
+
+function stQs(dgnHal) {
+  const p = new URLSearchParams();
+  if (dgnHal) { p.set('hal', stState.hal); p.set('per', 10); }
+  if (stState.dari) p.set('dari', stState.dari);
+  if (stState.sampai) p.set('sampai', stState.sampai);
+  if (stState.cari) p.set('cari', stState.cari);
+  return p.toString();
+}
+
+/** Riwayat Setoran ke Tenant — riwayat PENUH berpaginasi (bukan cuma
+ *  beberapa setoran terakhir), dengan pencarian nama tenant/petugas
+ *  pencairan, rentang tanggal, dan unduhan. */
+async function muatSetoranTenant() {
+  const wadah = $('#tn-setoran');
+  if (!wadah) return;
+  try {
+    const st = await api('/api/settlements?' + stQs(true));
+    stState.nHalaman = st.n_halaman || 1;
+    stState.rows = st.settlements;
+    wadah.innerHTML = `
+    <div class="panel">
+      <h2>Riwayat Setoran ke Tenant</h2>
+      ${filterRiwayatHtml('st', 'Cari', 'nama tenant atau petugas pencairan…')}
+      <div class="tblwrap"><table>
+        <thead><tr><th>Tanggal</th><th>Tenant</th><th class="num">Jumlah</th><th>Metode</th><th>Bukti</th><th>Petugas Pencairan</th><th>Keterangan</th></tr></thead>
+        <tbody>${st.settlements.map((s) => `
+          <tr><td>${esc(waktuSingkat(s.created_at))}</td>
+          <td>${esc(s.tenant_nama)}</td><td class="num rp">${rp(s.jumlah)}</td><td>${esc(s.metode)}</td>
+          <td>${s.bukti
+            ? `<button class="linkbtn" data-bukti="${esc(s.bukti)}">lihat</button>`
+            : `<button class="linkbtn" data-upbukti="${s.id}">upload bukti</button>`}</td>
+          <td>${esc(s.operator)}</td><td class="muted">${esc(s.keterangan)}</td></tr>`).join('') ||
+          '<tr><td colspan="7" class="muted">Belum ada setoran</td></tr>'}</tbody>
+      </table></div>
+      <div id="st-nav" style="display:flex; gap:8px; align-items:center; justify-content:center; flex-wrap:wrap; margin-top:12px"></div>
+    </div>`;
+
+    bindBuktiButtons(wadah);
+    wadah.querySelectorAll('[data-upbukti]').forEach((b) => {
+      b.onclick = () => openModal(`
+        <h2>Upload Bukti Setoran</h2>
+        <div class="field"><label>Foto/scan bukti (JPG/PNG)</label>
+        <input type="file" id="m-file" accept="image/*"></div>`,
+        async () => {
+          const f = $('#m-file').files[0];
+          if (!f) throw new Error('Pilih file dulu');
+          const data = (await kompresGambar(f)).dataUrl;
+          await api(`/api/settlements/${b.dataset.upbukti}/bukti`, { method: 'POST', body: { data } });
+          toast('✔ Bukti tersimpan', 'ok');
+          muatSetoranTenant();
+        });
+    });
+
+    $('#st-dari').value = stState.dari;
+    $('#st-sampai').value = stState.sampai;
+    $('#st-cari').value = stState.cari;
+    const terapkan = () => {
+      stState.dari = $('#st-dari').value;
+      stState.sampai = $('#st-sampai').value;
+      stState.cari = $('#st-cari').value.trim();
+      stState.hal = 1;
+      muatSetoranTenant();
+    };
+    $('#st-go').onclick = terapkan;
+    $('#st-cari').addEventListener('keydown', (e) => { if (e.key === 'Enter') terapkan(); });
+    $('#st-unduh').onclick = () => unduhRiwayat('st', '/api/settlements', stQs(false), stCetakSetoran);
+    $('#st-cetak').onclick = stCetakSetoran;
+
+    const nav = $('#st-nav');
+    nav.innerHTML = navHalamanHtml(stState.hal, stState.nHalaman);
+    pasangNavHalaman(nav, stState, muatSetoranTenant);
+  } catch (e) {
+    wadah.innerHTML = `<div class="panel"><p class="muted">Gagal memuat riwayat setoran:
+      ${esc(e.message)}. <button class="linkbtn" id="st-ulang">coba lagi</button></p></div>`;
+    $('#st-ulang').onclick = muatSetoranTenant;
+  }
+}
+
+/** Cetak (PDF via dialog cetak) memuat ULANG seluruh baris yang cocok
+ *  dengan saringan — bukan cuma 10 baris yang sedang tampil di layar —
+ *  supaya laporan yang dicetak benar-benar lengkap untuk rentangnya. */
+async function stCetakSetoran() {
+  const d = await api('/api/settlements?' + stQs(false));
+  const rows = d.settlements || [];
+  if (!rows.length) { toast('Tidak ada data untuk dicetak', 'err'); return; }
+  const gaya = `body{font:12px/1.5 system-ui;margin:18px;color:#111} h1{font-size:17px;margin:0}
+    table{width:100%;border-collapse:collapse;margin-top:10px}
+    th,td{border:1px solid #bbb;padding:5px 8px;text-align:left} th{background:#eee}
+    .n{text-align:right}`;
+  cetakLembar('Riwayat Setoran ke Tenant', gaya, `
+    <h1>Riwayat Setoran ke Tenant</h1>
+    <div>${esc(stState.dari || '…')} s/d ${esc(stState.sampai || '…')}
+      ${stState.cari ? ' · cari: ' + esc(stState.cari) : ''} · dicetak ${new Date().toLocaleString('id-ID')}</div>
+    <table>
+      <thead><tr><th>Tanggal</th><th>Tenant</th><th class="n">Jumlah</th><th>Metode</th><th>Petugas Pencairan</th><th>Keterangan</th></tr></thead>
+      <tbody>${rows.map((s) => `<tr>
+        <td>${esc(waktuSingkat(s.created_at))}</td><td>${esc(s.tenant_nama)}</td>
+        <td class="n">${rp(s.jumlah)}</td><td>${esc(s.metode)}</td>
+        <td>${esc(s.operator)}</td><td>${esc(s.keterangan)}</td></tr>`).join('')}</tbody>
+    </table>`);
 }
 
 function tenantModal(t) {

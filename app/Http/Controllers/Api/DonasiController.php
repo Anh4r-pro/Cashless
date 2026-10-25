@@ -8,6 +8,7 @@ use App\Models\DonasiProgram;
 use App\Models\KiosConfig;
 use App\Models\Setting;
 use App\Models\Transaksi;
+use App\Services\Ekspor;
 use App\Services\Pengaturan;
 use App\Services\Rupiah;
 use App\Support\WaktuIso;
@@ -234,12 +235,37 @@ class DonasiController extends Controller
         return response()->json(['ok' => true, 'pengaturan' => $p]);
     }
 
+    /** Santri teratas per program, dalam rentang `$sejak` yang sama dengan rekap. */
+    private const TOP_DONATUR = 5;
+
+    private function topDonaturPerProgram(string $sejak): array
+    {
+        $baris = Transaksi::where('tipe', 'donasi')
+            ->where('created_at', '>=', $sejak)
+            ->whereNotNull('donasi_id')
+            ->selectRaw('donasi_id, siswa_id, siswa_nama, kelas, SUM(-jumlah) AS total, COUNT(*) AS n')
+            ->groupBy('donasi_id', 'siswa_id', 'siswa_nama', 'kelas')
+            ->orderByDesc('total')
+            ->get();
+
+        $per = [];
+        foreach ($baris->groupBy('donasi_id') as $donasiId => $grup) {
+            $per[(int) $donasiId] = $grup->take(self::TOP_DONATUR)->values()->map(fn ($x) => [
+                'siswa_id' => (int) $x->siswa_id, 'siswa_nama' => $x->siswa_nama, 'kelas' => $x->kelas,
+                'total' => (int) $x->total, 'n' => (int) $x->n,
+            ])->all();
+        }
+
+        return $per;
+    }
+
     public function rekap(Request $r)
     {
         $this->wajibPeran($r, 'superadmin');
         $hari = min(365, max(7, (int) $r->query('hari', 30) ?: 30));
         $sejak = WaktuIso::awalHari($hari);
         $hariIni = WaktuIso::awalHariIni();
+        $topDonatur = $this->topDonaturPerProgram($sejak);
 
         $perProgram = DonasiProgram::query()
             ->leftJoin('transaksi', function ($j) {
@@ -259,6 +285,9 @@ class DonasiController extends Controller
                 'id' => (int) $p->id, 'nama' => $p->nama, 'aktif' => (int) $p->aktif,
                 'n' => (int) $p->n, 'total' => (int) $p->total, 'donatur' => (int) $p->donatur,
                 'periode' => (int) $p->periode, 'hari_ini' => (int) $p->hari_ini,
+                // Santri paling aktif/banyak berdonasi PADA PROGRAM INI, dalam
+                // rentang yang sama dengan "periode" di atas — bukan sepanjang masa.
+                'top_donatur' => $topDonatur[(int) $p->id] ?? [],
             ]);
 
         $total = Transaksi::where('tipe', 'donasi')
@@ -272,14 +301,65 @@ class DonasiController extends Controller
             ->groupBy('kelas')->orderByDesc('total')->limit(10)->get()
             ->map(fn ($x) => ['kelas' => $x->kelas, 'n' => (int) $x->n, 'total' => (int) $x->total]);
 
-        $terakhir = Transaksi::where('tipe', 'donasi')
-            ->select('siswa_nama', 'kelas', 'jumlah', 'keterangan', 'created_at')
-            ->orderByDesc('created_at')->orderByDesc('id')->limit(20)->get();
-
         return response()->json(array_merge([
-            'hari' => $hari, 'per_program' => $perProgram,
-            'per_kelas' => $perKelas, 'terakhir' => $terakhir,
+            'hari' => $hari, 'per_program' => $perProgram, 'per_kelas' => $perKelas,
         ], array_map('intval', (array) $total->getAttributes())));
+    }
+
+    /**
+     * Riwayat donasi PENUH berpaginasi — dulu "20 Donasi Terakhir" di
+     * dalam rekap(), dipisah ke sini supaya bisa dibuka ke halaman lama
+     * (bukan cuma 20 transaksi terakhir) dengan pencarian & unduhan sendiri,
+     * tanpa ikut terpanggil ulang setiap tombol rentang cepat rekap ditekan.
+     */
+    public function riwayat(Request $r)
+    {
+        $this->wajibPeran($r, 'superadmin');
+        $dari = $r->query('dari');
+        $sampai = $r->query('sampai');
+        $cari = mb_substr(trim((string) $r->query('cari', '')), 0, 60);
+        $like = '%' . $cari . '%';
+
+        $q = Transaksi::where('tipe', 'donasi')
+            ->when($dari, fn ($w) => $w->where('created_at', '>=', $dari))
+            ->when($sampai, fn ($w) => $w->where('created_at', '<=', $sampai))
+            ->when($cari !== '', fn ($w) => $w->where(fn ($x) => $x
+                ->where('siswa_nama', 'like', $like)->orWhere('kelas', 'like', $like)));
+
+        if ($r->query('format')) {
+            return $this->riwayatUnduh((clone $q)->orderByDesc('created_at')->get(),
+                Ekspor::formatSah($r->query('format')), $dari, $sampai);
+        }
+
+        $hal = max(1, (int) $r->query('hal', 1));
+        $per = min(100, max(10, (int) $r->query('per', 10) ?: 10));
+        $total = (clone $q)->count();
+        $nHalaman = max(1, (int) ceil($total / $per));
+        $baris = $q->select('siswa_nama', 'kelas', 'jumlah', 'keterangan', 'created_at')
+            ->orderByDesc('created_at')->orderByDesc('id')->limit($per)->offset(($hal - 1) * $per)->get();
+
+        return response()->json(['donasi' => $baris, 'hal' => $hal, 'n_halaman' => $nHalaman]);
+    }
+
+    private function riwayatUnduh($rows, string $format, ?string $dari, ?string $sampai)
+    {
+        $kepala = ['Tanggal', 'Santri', 'Kelas', 'Jumlah (Rp)', 'Keterangan'];
+        $isi = $rows->map(fn ($t) => [
+            substr((string) $t->created_at, 0, 16), $t->siswa_nama, $t->kelas, (int) -$t->jumlah, $t->keterangan,
+        ])->all();
+        $judul = 'Riwayat Donasi';
+        $catatan = array_filter([($dari || $sampai) ? 'Periode: ' . ($dari ?: '…') . ' s/d ' . ($sampai ?: '…') : null]);
+        $nama = 'riwayat-donasi' . ($dari ? "-{$dari}" : '') . ($sampai ? "-sd-{$sampai}" : '') . ".{$format}";
+        [$tipe] = Ekspor::TIPE[$format];
+
+        $badan = $format === 'csv'
+            ? Ekspor::csvUmum($kepala, array_merge($isi, [[]], [[$judul]], array_map(fn ($c) => [$c], $catatan)))
+            : Ekspor::tabelUmum($judul, $kepala, $isi, $catatan, [3]);
+
+        return response($badan, 200, [
+            'Content-Type' => $tipe,
+            'Content-Disposition' => "attachment; filename=\"{$nama}\"",
+        ]);
     }
 
     /** Program beserta pilihan nominalnya, urut sesuai tampilan di kios. */

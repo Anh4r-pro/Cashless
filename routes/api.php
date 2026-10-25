@@ -307,6 +307,7 @@ Route::middleware('peran:superadmin')->group(function () {
     Route::get('donasi/pengaturan', [DonasiController::class, 'pengaturan'])->middleware('izin:donasi.lihat');
     Route::put('donasi/pengaturan', [DonasiController::class, 'simpanPengaturan'])->middleware('izin:donasi.pengaturan');
     Route::get('donasi/rekap', [DonasiController::class, 'rekap'])->middleware('izin:donasi.lihat');
+    Route::get('donasi/riwayat', [DonasiController::class, 'riwayat'])->middleware('izin:donasi.lihat');
     Route::put('kios/sandi-layar', [KiosController::class, 'sandiLayar'])->middleware('izin:kios.pengaturan');
 });
 
@@ -317,6 +318,7 @@ Route::middleware('peran:superadmin')->group(function () {
     Route::get('tabungan/pengaturan', [TabunganController::class, 'pengaturan'])->middleware('izin:tabungan.lihat');
     Route::put('tabungan/pengaturan', [TabunganController::class, 'simpanPengaturan'])->middleware('izin:tabungan.kelola');
     Route::get('tabungan/rekap', [TabunganController::class, 'rekap'])->middleware('izin:tabungan.lihat');
+    Route::get('tabungan/riwayat', [TabunganController::class, 'riwayat'])->middleware('izin:tabungan.lihat');
     Route::get('tabungan/saldo/{siswaId}', [TabunganController::class, 'saldoSiswa'])->middleware('izin:tabungan.lihat');
     Route::post('tabungan/setor', [TabunganController::class, 'setor'])->middleware('izin:tabungan.setor');
     Route::post('tabungan/cairkan', [TabunganController::class, 'cairkan'])->middleware('izin:tabungan.cairkan');

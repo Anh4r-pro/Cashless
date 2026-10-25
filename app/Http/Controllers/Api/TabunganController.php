@@ -8,9 +8,11 @@ use App\Models\Siswa;
 use App\Models\TabunganJenis;
 use App\Models\TabunganMutasi;
 use App\Models\TabunganSaldo;
+use App\Services\Ekspor;
 use App\Services\Pengaturan;
 use App\Services\PotongSaldo;
 use App\Services\Tabungan;
+use App\Support\WaktuIso;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
@@ -174,9 +176,39 @@ class TabunganController extends Controller
         return response()->json(['ok' => true, 'pengaturan' => $p]);
     }
 
+    /** Santri teratas per jenis (dihitung dari total SETORAN, bukan saldo kini — pencairan tidak mengurangi "keaktifan"). */
+    private const TOP_PENABUNG = 5;
+
+    private function topPenabungPerJenis(string $sejak): array
+    {
+        $baris = TabunganMutasi::where('jenis_mutasi', 'masuk')
+            ->where('tabungan_mutasi.created_at', '>=', $sejak)
+            ->join('siswa', 'siswa.id', '=', 'tabungan_mutasi.siswa_id')
+            ->selectRaw('tabungan_mutasi.jenis_id, tabungan_mutasi.siswa_id, siswa.nama AS siswa_nama, siswa.kelas')
+            ->selectRaw('SUM(tabungan_mutasi.jumlah) AS total, COUNT(*) AS n')
+            ->groupBy('tabungan_mutasi.jenis_id', 'tabungan_mutasi.siswa_id', 'siswa.nama', 'siswa.kelas')
+            ->orderByDesc('total')
+            ->get();
+
+        $per = [];
+        foreach ($baris->groupBy('jenis_id') as $jenisId => $grup) {
+            $per[(int) $jenisId] = $grup->take(self::TOP_PENABUNG)->values()->map(fn ($x) => [
+                'siswa_id' => (int) $x->siswa_id, 'siswa_nama' => $x->siswa_nama, 'kelas' => $x->kelas,
+                'total' => (int) $x->total, 'n' => (int) $x->n,
+            ])->all();
+        }
+
+        return $per;
+    }
+
     public function rekap(Request $r)
     {
         $this->wajibPeran($r, 'superadmin');
+        // Bawaan 30 hari, pola sama dengan DonasiController::rekap — rentang cepat
+        // yang sebelumnya tidak ada sama sekali di layar Tabungan.
+        $hari = min(365, max(7, (int) $r->query('hari', 30) ?: 30));
+        $sejak = WaktuIso::awalHari($hari);
+        $topPenabung = $this->topPenabungPerJenis($sejak);
 
         $perJenis = TabunganJenis::query()
             ->leftJoin('tabungan_saldo', 'tabungan_saldo.jenis_id', '=', 'tabungan_jenis.id')
@@ -187,17 +219,75 @@ class TabunganController extends Controller
                 'tabungan_jenis.aktif', 'tabungan_jenis.urutan')
             ->orderBy('tabungan_jenis.urutan')->orderBy('tabungan_jenis.id')->get()
             ->map(fn ($j) => ['id' => (int) $j->id, 'nama' => $j->nama, 'target' => $j->target === null ? null : (int) $j->target,
-                'aktif' => (int) $j->aktif, 'n_penabung' => (int) $j->n_penabung, 'total' => (int) $j->total]);
+                'aktif' => (int) $j->aktif, 'n_penabung' => (int) $j->n_penabung, 'total' => (int) $j->total,
+                'top_penabung' => $topPenabung[(int) $j->id] ?? []]);
 
         $total = TabunganSaldo::sum('saldo');
-        $terakhir = TabunganMutasi::join('siswa', 'siswa.id', '=', 'tabungan_mutasi.siswa_id')
-            ->join('tabungan_jenis', 'tabungan_jenis.id', '=', 'tabungan_mutasi.jenis_id')
-            ->select('siswa.nama as siswa_nama', 'siswa.kelas', 'tabungan_jenis.nama as jenis_nama',
-                'tabungan_mutasi.jenis_mutasi', 'tabungan_mutasi.jumlah', 'tabungan_mutasi.keterangan',
-                'tabungan_mutasi.created_at')
-            ->orderByDesc('tabungan_mutasi.created_at')->orderByDesc('tabungan_mutasi.id')->limit(20)->get();
 
-        return response()->json(['per_jenis' => $perJenis, 'total' => (int) $total, 'terakhir' => $terakhir]);
+        return response()->json(['hari' => $hari, 'per_jenis' => $perJenis, 'total' => (int) $total]);
+    }
+
+    /**
+     * Riwayat setoran/pencairan PENUH berpaginasi — dulu "20 Setoran
+     * Terakhir" (terhitung di rekap() tapi TIDAK PERNAH ditampilkan layar).
+     * Dipisah dari rekap() dengan pola persis DonasiController::riwayat.
+     */
+    public function riwayat(Request $r)
+    {
+        $this->wajibPeran($r, 'superadmin');
+        $dari = $r->query('dari');
+        $sampai = $r->query('sampai');
+        $cari = mb_substr(trim((string) $r->query('cari', '')), 0, 60);
+        $like = '%' . $cari . '%';
+
+        $q = TabunganMutasi::join('siswa', 'siswa.id', '=', 'tabungan_mutasi.siswa_id')
+            ->join('tabungan_jenis', 'tabungan_jenis.id', '=', 'tabungan_mutasi.jenis_id')
+            ->when($dari, fn ($w) => $w->where('tabungan_mutasi.created_at', '>=', $dari))
+            ->when($sampai, fn ($w) => $w->where('tabungan_mutasi.created_at', '<=', $sampai))
+            ->when($cari !== '', fn ($w) => $w->where(fn ($x) => $x
+                ->where('siswa.nama', 'like', $like)->orWhere('siswa.kelas', 'like', $like)));
+
+        if ($r->query('format')) {
+            return $this->riwayatUnduh((clone $q)->select('siswa.nama as siswa_nama', 'siswa.kelas',
+                'tabungan_jenis.nama as jenis_nama', 'tabungan_mutasi.jenis_mutasi', 'tabungan_mutasi.jumlah',
+                'tabungan_mutasi.keterangan', 'tabungan_mutasi.created_at')
+                ->orderByDesc('tabungan_mutasi.created_at')->get(),
+                Ekspor::formatSah($r->query('format')), $dari, $sampai);
+        }
+
+        $hal = max(1, (int) $r->query('hal', 1));
+        $per = min(100, max(10, (int) $r->query('per', 10) ?: 10));
+        $total = (clone $q)->count();
+        $nHalaman = max(1, (int) ceil($total / $per));
+        $baris = $q->select('siswa.nama as siswa_nama', 'siswa.kelas', 'tabungan_jenis.nama as jenis_nama',
+            'tabungan_mutasi.jenis_mutasi', 'tabungan_mutasi.jumlah', 'tabungan_mutasi.keterangan',
+            'tabungan_mutasi.created_at')
+            ->orderByDesc('tabungan_mutasi.created_at')->orderByDesc('tabungan_mutasi.id')
+            ->limit($per)->offset(($hal - 1) * $per)->get();
+
+        return response()->json(['mutasi' => $baris, 'hal' => $hal, 'n_halaman' => $nHalaman]);
+    }
+
+    private function riwayatUnduh($rows, string $format, ?string $dari, ?string $sampai)
+    {
+        $kepala = ['Tanggal', 'Santri', 'Kelas', 'Jenis Tabungan', 'Jenis Mutasi', 'Jumlah (Rp)', 'Keterangan'];
+        $isi = $rows->map(fn ($m) => [
+            substr((string) $m->created_at, 0, 16), $m->siswa_nama, $m->kelas, $m->jenis_nama,
+            $m->jenis_mutasi === 'masuk' ? 'setor' : 'cairkan', (int) $m->jumlah, $m->keterangan,
+        ])->all();
+        $judul = 'Riwayat Tabungan';
+        $catatan = array_filter([($dari || $sampai) ? 'Periode: ' . ($dari ?: '…') . ' s/d ' . ($sampai ?: '…') : null]);
+        $nama = 'riwayat-tabungan' . ($dari ? "-{$dari}" : '') . ($sampai ? "-sd-{$sampai}" : '') . ".{$format}";
+        [$tipe] = Ekspor::TIPE[$format];
+
+        $badan = $format === 'csv'
+            ? Ekspor::csvUmum($kepala, array_merge($isi, [[]], [[$judul]], array_map(fn ($c) => [$c], $catatan)))
+            : Ekspor::tabelUmum($judul, $kepala, $isi, $catatan, [5]);
+
+        return response($badan, 200, [
+            'Content-Type' => $tipe,
+            'Content-Disposition' => "attachment; filename=\"{$nama}\"",
+        ]);
     }
 
     /** Saldo tabungan satu santri, semua jenis — dipakai layar setor/cairkan. */

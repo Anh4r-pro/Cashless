@@ -31,15 +31,39 @@ class TenantController extends Controller
     {
         $this->wajibPeran($r, 'superadmin');
 
-        $tenants = Tenant::orderBy('id')
-            ->selectRaw("tenant.*, (SELECT GROUP_CONCAT(username) FROM users u WHERE u.tenant_id = tenant.id) AS usernames")
-            ->get();
+        $q = Tenant::selectRaw("tenant.*, (SELECT GROUP_CONCAT(username) FROM users u WHERE u.tenant_id = tenant.id) AS usernames");
+
+        // Paginasi OPSIONAL, dipicu lewat ?hal=: pemanggil lama (isian
+        // saringan di layar Riwayat & Analitik, yang hanya butuh daftar nama
+        // utuh untuk dropdown) tidak mengirim ?hal= sama sekali dan tetap
+        // menerima seluruh tenant persis seperti sebelumnya — sama persis
+        // dengan ?stat= di atas, menambah perilaku tanpa mengubah bawaan.
+        $berpaginasi = $r->has('hal');
+        $hal = 1;
+        $nHalaman = 1;
+        if ($berpaginasi) {
+            $hal = max(1, (int) $r->query('hal', 1));
+            $per = min(100, max(10, (int) $r->query('per', 10) ?: 10));
+            $total = (clone $q)->count();
+            $nHalaman = max(1, (int) ceil($total / $per));
+            $q->orderByDesc('id')->limit($per)->offset(($hal - 1) * $per);
+        } else {
+            $q->orderBy('id');
+        }
+
+        $tenants = $q->get();
 
         if ($r->boolean('stat')) {
             $tenants = $tenants->map(fn ($t) => array_merge($t->toArray(), StatistikTenant::untuk($t->id)));
         }
 
-        return response()->json(['tenants' => $tenants]);
+        $jawab = ['tenants' => $tenants];
+        if ($berpaginasi) {
+            $jawab['hal'] = $hal;
+            $jawab['n_halaman'] = $nHalaman;
+        }
+
+        return response()->json($jawab);
     }
 
     public function store(Request $r)
