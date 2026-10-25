@@ -8388,7 +8388,7 @@ async function muatJenisTabungan() {
     const d = await api('/api/tabungan/jenis?semua=1');
     tabunganRows = d.jenis.map((j) => ({
       id: j.id, nama: j.nama, deskripsi: j.deskripsi,
-      target: j.target === null ? '' : String(j.target), untuk: j.untuk || 'semua', aktif: j.aktif === 1,
+      target: j.target === null ? '' : teksUang(j.target), untuk: j.untuk || 'semua', aktif: j.aktif === 1,
       terpakai: j.terpakai, terkumpul: j.terkumpul,
     }));
     tbGambarBaris();
@@ -8412,7 +8412,7 @@ function tbGambarBaris() {
       <input class="tb-desk" data-i="${i}" value="${esc(r.deskripsi)}" maxlength="200"
         placeholder="keterangan singkat (tampil di kios)">
       <div style="display:flex; gap:8px; margin-top:8px">
-        <input class="tb-target uang-daftar" data-i="${i}" value="${esc(r.target)}" inputmode="numeric"
+        <input class="tb-target uang" data-i="${i}" value="${esc(r.target)}" inputmode="numeric"
           autocomplete="off" style="flex:1" placeholder="target (opsional, mis. 500.000 — kosongkan untuk bebas)">
         <select class="tb-untuk" data-i="${i}" style="flex:none; width:auto">
           ${Object.entries(TB_UNTUK_LABEL).map(([v, l]) =>
