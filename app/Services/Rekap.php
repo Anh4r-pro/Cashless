@@ -25,14 +25,19 @@ class Rekap
             ->selectRaw('COUNT(*) AS n')
             ->selectRaw('COALESCE(SUM(-jumlah),0) AS total')
             ->selectRaw('COALESCE(SUM(nonmakanan),0) AS nm')
+            // Porsi yang DIKECUALIKAN (lihat JatahKecuali) — dijumlahkan
+            // terpisah supaya bisa disingkirkan dari bucket makanan maupun
+            // non-makanan di bawah, bukan diam-diam ikut salah satunya.
+            ->selectRaw('COALESCE(SUM(kecuali),0) AS kecuali')
             ->selectRaw('COALESCE(SUM(CASE WHEN nonmakanan > 0 THEN 1 ELSE 0 END),0) AS n_nm')
-            ->selectRaw('COALESCE(SUM(CASE WHEN -jumlah > nonmakanan THEN 1 ELSE 0 END),0) AS n_mk')
+            ->selectRaw('COALESCE(SUM(CASE WHEN -jumlah > (nonmakanan + kecuali) THEN 1 ELSE 0 END),0) AS n_mk')
             ->first();
 
         return [
             'n' => (int) $r->n,
             'total' => (int) $r->total,
             'nm' => (int) $r->nm,
+            'kecuali' => (int) $r->kecuali,
             'n_nm' => (int) $r->n_nm,
             'n_mk' => (int) $r->n_mk,
         ];
@@ -61,7 +66,10 @@ class Rekap
     {
         $cfg = Pengaturan::untuk($s);
         $h = self::belanjaHariIni($s->id);
-        $belanjaMakanan = $h['total'] - $h['nm'];
+        // Porsi yang dikecualikan (lihat JatahKecuali) tidak boleh ikut
+        // mengempiskan sisa jatah makanan — bukan jajan, jadi tidak menyentuh
+        // jatah apa pun.
+        $belanjaMakanan = $h['total'] - $h['nm'] - $h['kecuali'];
 
         return [
             'makanan' => [

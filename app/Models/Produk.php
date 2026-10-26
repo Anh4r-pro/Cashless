@@ -29,6 +29,10 @@ class Produk extends Model
         'harga',
         'aktif',
         'kategori',
+        // Hanya bermakna saat kategori='non_makanan': barang ini dikecualikan
+        // TOTAL dari limit non-makanan harian (lihat JatahKecuali). NULL =
+        // ikut limit seperti biasa, keadaan seluruh barang lama.
+        'jatah_kecuali_id',
         // Khusus Mart: kategori dagang (etalase), modal, dan stok.
         // `stok` NULL berarti barang ini tidak dilacak stoknya sama sekali.
         'kategori_id',
@@ -56,6 +60,11 @@ class Produk extends Model
     public function tenant(): \Illuminate\Database\Eloquent\Relations\BelongsTo
     {
         return $this->belongsTo(Tenant::class, 'tenant_id');
+    }
+
+    public function jatahKecuali(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(JatahKecuali::class, 'jatah_kecuali_id');
     }
 
     /**

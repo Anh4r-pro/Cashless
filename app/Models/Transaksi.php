@@ -22,7 +22,7 @@ class Transaksi extends Model
 
     protected $fillable = [
         'tx_id', 'tipe', 'siswa_id', 'siswa_nama', 'kelas', 'tenant_id', 'tenant_nama',
-        'jumlah', 'saldo_sesudah', 'operator', 'keterangan', 'donasi_id', 'nonmakanan',
+        'jumlah', 'saldo_sesudah', 'operator', 'keterangan', 'donasi_id', 'nonmakanan', 'kecuali',
         'lawan_id', 'lawan_nama', 'created_at',
     ];
 
@@ -30,6 +30,7 @@ class Transaksi extends Model
         'jumlah' => 'int',
         'saldo_sesudah' => 'int',
         'nonmakanan' => 'int',
+        'kecuali' => 'int',
     ];
 
     public function items(): \Illuminate\Database\Eloquent\Relations\HasMany

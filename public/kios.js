@@ -18,6 +18,17 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '
 const normUid = (s) => String(s || '').replace(/[^0-9a-zA-Z]/g, '').toUpperCase();
 const initials = (nama) => String(nama || '?').split(/\s+/).slice(0, 2).map((w) => w[0] || '').join('').toUpperCase();
 
+/** Progres menuju target tabungan — kosong untuk jenis tanpa target (bebas). */
+function tabunganProgresHtml(saldo, target) {
+  if (!target) return '';
+  const pct = Math.min(100, Math.floor((saldo / target) * 100));
+  return `<div class="hbar-row" style="margin:4px 0 0">
+    <div class="hbar-head" style="font-size:11.5px"><span class="muted">Target ${rp(target)}</span>
+      <b style="color:var(--ok)">${pct}%</b></div>
+    <div class="hbar-track" style="height:6px"><div class="hbar-fill" style="width:${pct}%; background:var(--ok)"></div></div>
+  </div>`;
+}
+
 /*
  * Ikon digambar sebagai SVG, bukan emoji: kios sekolah biasanya PC Linux tanpa
  * papan huruf emoji, dan di sana emoji muncul sebagai kotak kosong.
@@ -495,7 +506,8 @@ function siswaHtml() {
       ${saldoTabungan.map((t) => `
         <div class="k-tx">
           <span class="k-tx-ikon plus">●</span>
-          <span class="k-tx-isi"><b>${esc(t.nama)}</b>${t.target ? `<span class="k-sub">target ${rp(t.target)}</span>` : ''}</span>
+          <span class="k-tx-isi"><b>${esc(t.nama)}</b>${t.target
+            ? tabunganProgresHtml(t.saldo, t.target) : '<span class="k-sub">tanpa target</span>'}</span>
           <span class="k-tx-nilai plus">${rp(t.saldo)}</span>
         </div>`).join('')}
     </div>` : ''}
@@ -747,6 +759,7 @@ function mulaiIuran() {
 
 function tabPilihHtml() {
   const daftar = SESI.tabungan_jenis || [];
+  const saldoPer = SESI.tabungan_saldo || [];
   return `${kepalaHtml('Pilih Jenis Tabungan')}
   <main class="k-main">
     <p class="k-sub">Dari <b>${esc(SESI.siswa.nama)}</b> · saldo ${rp(SESI.siswa.saldo)} ·
@@ -755,7 +768,7 @@ function tabPilihHtml() {
       <button class="k-pilih" data-jenis="${j.id}">
         <b>${esc(j.nama)}</b>
         ${j.deskripsi ? `<span class="k-sub">${esc(j.deskripsi)}</span>` : ''}
-        ${j.target ? `<span class="k-sub">target ${rp(j.target)}</span>` : ''}
+        ${j.target ? tabunganProgresHtml(saldoPer.find((t) => t.jenis_id === j.id)?.saldo || 0, j.target) : ''}
       </button>`).join('')}
     </div>
     <button class="k-btn k-btn-kecil" data-aksi="kembali">‹ Batal</button>

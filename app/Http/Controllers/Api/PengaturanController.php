@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Exceptions\ApiError;
 use App\Models\AlasanPotong;
+use App\Models\JatahKecuali;
 use App\Models\Setting;
 use App\Models\Siswa;
 use App\Services\Neraca;
@@ -18,6 +19,8 @@ use Illuminate\Support\Facades\DB;
 class PengaturanController extends Controller
 {
     private const MAX_ALASAN = 30;
+
+    private const MAX_KECUALI = 30;
 
     /** Batas pokok yang berlaku untuk seluruh sekolah. */
     public const LABEL_POKOK = [
@@ -282,6 +285,87 @@ class PengaturanController extends Controller
         });
 
         return response()->json(['ok' => true, 'alasan' => $hasil]);
+    }
+
+    // ------------------------------------------- pengecualian limit non-makanan
+
+    /**
+     * Daftar pengecualian limit non-makanan (lihat JatahKecuali). Dipakai
+     * layar Barang & Stok/input manual kasir (hanya aktif) dan layar
+     * pengelolaannya sendiri (semua, termasuk yang nonaktif).
+     */
+    public function kecuali(Request $r)
+    {
+        $this->wajibPeran($r, 'superadmin', 'tenant');
+        $q = JatahKecuali::orderBy('urutan')->orderBy('id');
+        if ($r->query('semua') !== '1') {
+            $q->where('aktif', true);
+        }
+
+        return response()->json(['kecuali' => $q->get()]);
+    }
+
+    /**
+     * Simpan seluruh daftar sekaligus, pola persis simpanAlasan() — urutan
+     * mengikuti urutan array, baris yang hilang dari kiriman dihapus (FK-nya
+     * nullOnDelete, jadi barang/transaksi lama yang menunjuk ke situ hanya
+     * kehilangan tandanya, bukan ikut gagal).
+     */
+    public function simpanKecuali(Request $r)
+    {
+        $this->wajibPeran($r, 'superadmin');
+        $kiriman = $r->input('kecuali');
+        if (! is_array($kiriman)) {
+            throw new ApiError(400, 'Format daftar pengecualian tidak valid');
+        }
+        if (count($kiriman) > self::MAX_KECUALI) {
+            throw new ApiError(400, 'Maksimal ' . self::MAX_KECUALI . ' pengecualian');
+        }
+
+        $bersih = [];
+        $terlihat = [];
+        foreach ($kiriman as $k) {
+            $nama = mb_substr(preg_replace('/\s+/', ' ', trim((string) ($k['nama'] ?? ''))), 0, 60);
+            if (mb_strlen($nama) < 3) {
+                throw new ApiError(400, 'Nama pengecualian minimal 3 huruf');
+            }
+            $kunci = mb_strtolower($nama);
+            if (isset($terlihat[$kunci])) {
+                throw new ApiError(409, "Pengecualian \"{$nama}\" tertulis dua kali");
+            }
+            $terlihat[$kunci] = true;
+            $bersih[] = [
+                'id' => isset($k['id']) && is_int($k['id']) ? $k['id'] : null,
+                'nama' => $nama,
+                'deskripsi' => mb_substr(preg_replace('/\s+/', ' ', trim((string) ($k['deskripsi'] ?? ''))), 0, 200),
+                'wajib_keterangan' => ($k['wajib_keterangan'] ?? false) === true,
+                'aktif' => ($k['aktif'] ?? true) !== false,
+            ];
+        }
+
+        $hasil = DB::transaction(function () use ($bersih) {
+            $adaId = JatahKecuali::pluck('id')->all();
+            $simpan = [];
+            foreach ($bersih as $i => $k) {
+                if ($k['id'] !== null && in_array($k['id'], $adaId, true)) {
+                    JatahKecuali::where('id', $k['id'])->update([
+                        'nama' => $k['nama'], 'deskripsi' => $k['deskripsi'],
+                        'wajib_keterangan' => $k['wajib_keterangan'], 'urutan' => $i, 'aktif' => $k['aktif'],
+                    ]);
+                    $simpan[] = $k['id'];
+                } else {
+                    $simpan[] = JatahKecuali::create([
+                        'nama' => $k['nama'], 'deskripsi' => $k['deskripsi'],
+                        'wajib_keterangan' => $k['wajib_keterangan'], 'urutan' => $i, 'aktif' => $k['aktif'],
+                    ])->id;
+                }
+            }
+            JatahKecuali::whereNotIn('id', $simpan ?: [0])->delete();
+
+            return JatahKecuali::orderBy('urutan')->orderBy('id')->get();
+        });
+
+        return response()->json(['ok' => true, 'kecuali' => $hasil]);
     }
 
     /** Daftar kelas yang benar-benar terpakai — untuk saringan di layar riwayat. */

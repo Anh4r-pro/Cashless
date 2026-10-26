@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Exceptions\ApiError;
+use App\Models\JatahKecuali;
 use App\Models\MartKategori;
 use App\Models\MartStokMutasi;
 use App\Models\Produk;
@@ -127,7 +128,7 @@ class MartStokController extends Controller
     public function index(Request $r)
     {
         $t = $this->martKu($r);
-        $q = Produk::where('tenant_id', $t->id);
+        $q = Produk::where('tenant_id', $t->id)->with('jatahKecuali:id,nama');
 
         if ($cari = trim((string) $r->query('cari', ''))) {
             $like = '%' . $cari . '%';
@@ -148,6 +149,10 @@ class MartStokController extends Controller
             'produk' => $q->orderBy('nama')->get()->map(fn ($p) => $this->baris($p, $kat)),
             'kategori' => $this->daftarKategori($t),
             'ringkas' => $this->ringkasStok($t),
+            // Dibundel di sini (bukan dipanggil terpisah) supaya form barang
+            // bisa langsung menggambar pilihannya tanpa permintaan tambahan —
+            // persis pola `kategori` di atas.
+            'jatah_kecuali' => JatahKecuali::where('aktif', true)->orderBy('urutan')->orderBy('id')->get(['id', 'nama', 'wajib_keterangan']),
         ]);
     }
 
@@ -280,6 +285,8 @@ class MartStokController extends Controller
             'id' => $p->id, 'nama' => $p->nama, 'barcode' => $p->barcode,
             'kategori_id' => $p->kategori_id, 'kategori_nama' => $kat[$p->kategori_id] ?? null,
             'kategori' => $p->kategori,                 // makanan / non_makanan (penentu jatah santri)
+            'jatah_kecuali_id' => $p->jatah_kecuali_id, // lihat JatahKecuali
+            'jatah_kecuali_nama' => $p->jatahKecuali?->nama,
             'hpp' => $hpp, 'harga' => $harga,
             // Margin dihitung atas HARGA JUAL (bukan atas modal): itu yang
             // lazim dibaca pemilik toko sebagai "berapa persen untungnya".
@@ -470,10 +477,21 @@ class MartStokController extends Controller
         $jatah = ($b['kategori'] ?? 'makanan') === 'non_makanan' && $t->jenis === 'koperasi'
             ? 'non_makanan' : 'makanan';
 
+        // Pengecualian limit non-makanan (lihat JatahKecuali) — hanya bermakna
+        // untuk barang non-makanan; dipaksa null untuk makanan supaya tidak
+        // ada sisa pilihan yang membingungkan kalau kategorinya diubah lagi.
+        $jatahKecualiId = null;
+        if ($jatah === 'non_makanan' && ! empty($b['jatah_kecuali_id'])) {
+            $jatahKecualiId = (int) $b['jatah_kecuali_id'];
+            if (! JatahKecuali::where('id', $jatahKecualiId)->where('aktif', true)->exists()) {
+                throw new ApiError(400, 'Pengecualian limit yang dipilih sudah tidak tersedia');
+            }
+        }
+
         $isi = [
             'tenant_id' => $t->id, 'nama' => $nama, 'harga' => $harga, 'hpp' => $hpp,
             'barcode' => $barcode ?: null, 'barcode_grosir' => $barcodeGrosir ?: null,
-            'kategori_id' => $katId ?: null, 'kategori' => $jatah,
+            'kategori_id' => $katId ?: null, 'kategori' => $jatah, 'jatah_kecuali_id' => $jatahKecualiId,
             'stok_min' => max(0, (int) ($b['stok_min'] ?? 5)),
             'isi_grosir' => $isiGrosir, 'hpp_grosir' => $hppGrosir, 'harga_grosir' => $hargaGrosir,
             'expired' => $expired ?: null,

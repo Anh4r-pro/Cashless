@@ -612,7 +612,7 @@ function onCardTapped(uid) {
 // ╔══════════════════════════════════════════════════════════╗
 // ║ TENANT: KASIR                                             ║
 // ╚══════════════════════════════════════════════════════════╝
-let kasir = { siswa: null, tapToken: null, cart: [], produk: [], sisaHarian: null };
+let kasir = { siswa: null, tapToken: null, cart: [], produk: [], sisaHarian: null, jatahKecuali: [] };
 
 function kasirView(el) {
   // tenant = keterangan tenant yang login (dipakai untuk tahu apakah ini koperasi,
@@ -651,12 +651,19 @@ function kasirView(el) {
           </select>
           <button class="go" id="btn-add-manual" style="flex:none">+ Tambah</button>
         </div>
+        <select id="manual-kecuali" class="hidden" style="width:100%; margin-top:8px">
+          <option value="">— kecualikan dari limit non-makanan? (opsional) —</option>
+        </select>
+        <input id="manual-kecuali-ket" class="hidden" maxlength="200" style="margin-top:8px"
+          placeholder="keterangan barangnya (wajib untuk pilihan ini)">
       </div>
       <div class="cart" id="cart-box"></div>
       <div class="total"><span>Total</span><span class="rp" id="cart-total">Rp0</span></div>
       <button class="paybtn" id="btn-bayar" disabled>Bayar</button>
     </div>
   </div>`;
+
+  api('/api/jatah-kecuali').then((d) => { kasir.jatahKecuali = d.kecuali; gambarManualKecuali(); }).catch(() => {});
 
   api('/api/produk').then((d) => {
     kasir.produk = d.produk.filter((p) => p.aktif);
@@ -693,6 +700,26 @@ function kasirView(el) {
     renderCart();
   });
 
+  // Opsi "kecuali" cuma berguna untuk barang non-makanan — disembunyikan
+  // sama sekali kalau kategorinya makanan, supaya tidak ada pilihan yang
+  // tampil tapi tidak pernah bermakna (kategori non_makanan sendiri sudah
+  // disembunyikan untuk tenant bukan koperasi).
+  const gambarManualKecuali = () => {
+    $('#manual-kecuali').innerHTML = '<option value="">— kecualikan dari limit non-makanan? (opsional) —</option>' +
+      kasir.jatahKecuali.map((k) => `<option value="${k.id}">${esc(k.nama)}</option>`).join('');
+  };
+  const sinkronManualKecuali = () => {
+    const nm = kasir.tenant?.jenis === 'koperasi' && $('#manual-kat').value === 'non_makanan';
+    $('#manual-kecuali').classList.toggle('hidden', !nm);
+    if (!nm) { $('#manual-kecuali').value = ''; $('#manual-kecuali-ket').classList.add('hidden'); return; }
+    const k = kasir.jatahKecuali.find((x) => x.id === Number($('#manual-kecuali').value));
+    $('#manual-kecuali-ket').classList.toggle('hidden', !$('#manual-kecuali').value);
+    $('#manual-kecuali-ket').placeholder = k?.wajib_keterangan
+      ? 'keterangan barangnya (wajib untuk pilihan ini)' : 'keterangan barangnya (opsional)';
+  };
+  $('#manual-kat').addEventListener('change', sinkronManualKecuali);
+  $('#manual-kecuali').addEventListener('change', sinkronManualKecuali);
+
   $('#btn-manual').onclick = () => { const uid = normUid($('#manual-uid').value); if (uid) onCardTapped(uid); };
   $('#manual-uid').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('#btn-manual').click(); } });
   $('#btn-add-manual').onclick = () => {
@@ -705,9 +732,22 @@ function kasirView(el) {
     }
     if (!h || h <= 0) { toast('Isi nominal manual dulu', 'err'); $('#manual-harga').focus(); return; }
     const kategori = kasir.tenant?.jenis === 'koperasi' ? $('#manual-kat').value : 'makanan';
-    kasir.cart.push({ manual: true, nama: desk || 'Input manual', harga: h, kategori });
+    const jatahKecualiId = kategori === 'non_makanan' && $('#manual-kecuali').value
+      ? Number($('#manual-kecuali').value) : null;
+    const kecualiKet = $('#manual-kecuali-ket').value.trim();
+    const kJk = kasir.jatahKecuali.find((x) => x.id === jatahKecualiId);
+    if (jatahKecualiId && kJk?.wajib_keterangan && !kecualiKet) {
+      toast(`"${kJk.nama}" wajib disertai keterangan singkat`, 'err');
+      $('#manual-kecuali-ket').focus();
+      return;
+    }
+    kasir.cart.push({ manual: true, nama: desk || 'Input manual', harga: h, kategori,
+      jatah_kecuali_id: jatahKecualiId, jatah_kecuali_keterangan: kecualiKet });
     $('#manual-desk').value = '';
     $('#manual-harga').value = '';
+    $('#manual-kecuali').value = '';
+    $('#manual-kecuali-ket').value = '';
+    sinkronManualKecuali();
     $('#manual-desk').focus();
     renderCart();
   };
@@ -857,7 +897,8 @@ function renderCart() {
   box.innerHTML = kasir.cart.length
     ? kasir.cart.map((p, i) =>
         `<div class="cart-line"><span>${esc(p.nama)}${p.kategori === 'non_makanan'
-          ? ' <span class="katdot">non-makanan</span>' : ''}</span>
+          ? ' <span class="katdot">non-makanan</span>' : ''}${p.jatah_kecuali_id
+          ? ' <span class="katdot">kecuali limit</span>' : ''}</span>
          <span><span class="rp">${rp(p.harga)}</span> <button data-i="${i}">✕</button></span></div>`).join('')
     : `<div class="muted">Keranjang kosong — klik ${
         kasir.tenant?.mode_kasir !== 'bebas' && kasir.tenant?.input_manual === false
@@ -895,7 +936,8 @@ async function doBayar() {
       // Rincian dikirim apa adanya; server menghitung ulang harga dari basis data
       // dan menyusun keterangannya sendiri.
       items: kasir.cart.map((p) => p.manual
-        ? { manual: true, harga: p.harga, kategori: p.kategori, nama: p.nama }
+        ? { manual: true, harga: p.harga, kategori: p.kategori, nama: p.nama,
+            jatah_kecuali_id: p.jatah_kecuali_id, jatah_kecuali_keterangan: p.jatah_kecuali_keterangan }
         : { produk_id: p.produk_id }),
       tap_token: kasir.tapToken,
       tx_id: txId,
@@ -988,7 +1030,7 @@ function martView(el) {
     // yang membayar pakai kartu dan tidak memerlukan kertas. Kasir mencentangnya
     // sendiri saat ada pembeli luar yang memintanya.
     info: null, barcodeBaru: null, produk: [], struk: false,
-    pilih: null, member: [], memberId: null };
+    pilih: null, member: [], memberId: null, jatahKecuali: [] };
   el.innerHTML = `
   <div class="row mart-pos">
     <div class="panel">
@@ -1010,6 +1052,11 @@ function martView(el) {
           <option value="makanan">Makanan</option>
           <option value="non_makanan">Non-makanan</option>
         </select>
+        <select id="mart-manual-kecuali" class="hidden" style="flex:none; width:auto">
+          <option value="">— kecuali limit? —</option>
+        </select>
+        <input id="mart-manual-kecuali-ket" class="hidden" maxlength="200" style="flex:1"
+          placeholder="keterangan barangnya (wajib untuk pilihan ini)">
         <button class="linkbtn" id="mart-manual-tambah" style="flex:none">+ Tambah</button>
       </div>
       <div id="mart-hasil"></div>
@@ -1049,6 +1096,23 @@ function martView(el) {
   $('#mart-q').addEventListener('input', debounce(() => martGambarKatalog(), 250));
   // Tersembunyi sampai diminta — supaya etalase barcode tidak selalu
   // menampilkan jalan pintas yang bisa dipakai menginput harga sembarangan.
+  api('/api/jatah-kecuali').then((d) => {
+    mart.jatahKecuali = d.kecuali;
+    $('#mart-manual-kecuali').innerHTML = '<option value="">— kecuali limit? —</option>' +
+      d.kecuali.map((k) => `<option value="${k.id}">${esc(k.nama)}</option>`).join('');
+  }).catch(() => {});
+  const sinkronMartManualKecuali = () => {
+    const nm = mart.info?.tenant?.jenis === 'koperasi' && $('#mart-manual-kat').value === 'non_makanan';
+    $('#mart-manual-kecuali').classList.toggle('hidden', !nm);
+    if (!nm) { $('#mart-manual-kecuali').value = ''; $('#mart-manual-kecuali-ket').classList.add('hidden'); return; }
+    const k = mart.jatahKecuali.find((x) => x.id === Number($('#mart-manual-kecuali').value));
+    $('#mart-manual-kecuali-ket').classList.toggle('hidden', !$('#mart-manual-kecuali').value);
+    $('#mart-manual-kecuali-ket').placeholder = k?.wajib_keterangan
+      ? 'keterangan barangnya (wajib untuk pilihan ini)' : 'keterangan barangnya (opsional)';
+  };
+  $('#mart-manual-kat').addEventListener('change', sinkronMartManualKecuali);
+  $('#mart-manual-kecuali').addEventListener('change', sinkronMartManualKecuali);
+
   $('#mart-manual-toggle').onclick = () => $('#mart-manual-box').classList.toggle('hidden');
   $('#mart-manual-desk').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); $('#mart-manual-harga').focus(); }
@@ -1062,9 +1126,22 @@ function martView(el) {
     if (desk.length < 3) { toast('Tulis dulu nama barangnya (minimal 3 huruf)', 'err'); $('#mart-manual-desk').focus(); return; }
     if (!h || h <= 0) { toast('Isi harga satuan dulu', 'err'); $('#mart-manual-harga').focus(); return; }
     const kategori = mart.info?.tenant?.jenis === 'koperasi' ? $('#mart-manual-kat').value : 'makanan';
-    mart.cart.push({ manual: true, nama: desk, harga: h, kategori, qty: 1 });
+    const jatahKecualiId = kategori === 'non_makanan' && $('#mart-manual-kecuali').value
+      ? Number($('#mart-manual-kecuali').value) : null;
+    const kecualiKet = $('#mart-manual-kecuali-ket').value.trim();
+    const kJk = mart.jatahKecuali.find((x) => x.id === jatahKecualiId);
+    if (jatahKecualiId && kJk?.wajib_keterangan && !kecualiKet) {
+      toast(`"${kJk.nama}" wajib disertai keterangan singkat`, 'err');
+      $('#mart-manual-kecuali-ket').focus();
+      return;
+    }
+    mart.cart.push({ manual: true, nama: desk, harga: h, kategori, qty: 1,
+      jatah_kecuali_id: jatahKecualiId, jatah_kecuali_keterangan: kecualiKet });
     $('#mart-manual-desk').value = '';
     $('#mart-manual-harga').value = '';
+    $('#mart-manual-kecuali').value = '';
+    $('#mart-manual-kecuali-ket').value = '';
+    sinkronMartManualKecuali();
     martRender();
     // Barang manual biasanya diketik di HP/tablet sambil berdiri. Di layar
     // selebar itu metode bayar ada jauh di bawah, jadi layarnya digulirkan
@@ -1669,7 +1746,8 @@ async function martBayarKartu() {
     const d = await api('/api/beli', { method: 'POST', body: {
       siswa_id: mart.siswa.id, jumlah: total,
       items: mart.cart.map((p) => p.manual
-        ? { manual: true, nama: p.nama, harga: p.harga, kategori: p.kategori, qty: p.qty }
+        ? { manual: true, nama: p.nama, harga: p.harga, kategori: p.kategori, qty: p.qty,
+            jatah_kecuali_id: p.jatah_kecuali_id, jatah_kecuali_keterangan: p.jatah_kecuali_keterangan }
         // Harga tidak dikirim: server membacanya dari kolom yang sesuai
         // satuannya (lihat Services\Keranjang).
         : { produk_id: p.produk_id, qty: p.qty, satuan: p.satuan || 'ecer' }),
@@ -1701,7 +1779,8 @@ async function martBayarMart(metode) {
     const d = await api('/api/mart/jual-tunai', { method: 'POST', body: {
       metode,
       items: mart.cart.map((p) => p.manual
-        ? { manual: true, nama: p.nama, harga: p.harga, kategori: p.kategori, qty: p.qty }
+        ? { manual: true, nama: p.nama, harga: p.harga, kategori: p.kategori, qty: p.qty,
+            jatah_kecuali_id: p.jatah_kecuali_id, jatah_kecuali_keterangan: p.jatah_kecuali_keterangan }
         // Harga tidak dikirim: server membacanya dari kolom yang sesuai
         // satuannya (lihat Services\Keranjang).
         : { produk_id: p.produk_id, qty: p.qty, satuan: p.satuan || 'ecer' }),
@@ -2014,7 +2093,8 @@ async function martTahanSimpan() {
     async () => {
       await api('/api/mart/tahan', { method: 'POST', body: {
         items: mart.cart.map((p) => p.manual
-        ? { manual: true, nama: p.nama, harga: p.harga, kategori: p.kategori, qty: p.qty }
+        ? { manual: true, nama: p.nama, harga: p.harga, kategori: p.kategori, qty: p.qty,
+            jatah_kecuali_id: p.jatah_kecuali_id, jatah_kecuali_keterangan: p.jatah_kecuali_keterangan }
         // Harga tidak dikirim: server membacanya dari kolom yang sesuai
         // satuannya (lihat Services\Keranjang).
         : { produk_id: p.produk_id, qty: p.qty, satuan: p.satuan || 'ecer' }),
@@ -2517,7 +2597,8 @@ async function martMuatStok() {
         p.barcode_grosir ? `<br><span class="muted" style="font-size:11px">dus:
           <code>${esc(p.barcode_grosir)}</code></span>` : ''}</td>
       <td><b>${esc(p.nama)}</b>${p.aktif ? '' : ' <span class="badge nonaktif">nonaktif</span>'}</td>
-      <td>${esc(p.kategori_nama || '—')}${p.kategori === 'non_makanan' ? ' <span class="katdot">non-makanan</span>' : ''}</td>
+      <td>${esc(p.kategori_nama || '—')}${p.kategori === 'non_makanan' ? ' <span class="katdot">non-makanan</span>' : ''}${
+        p.jatah_kecuali_nama ? `<br><span class="muted" style="font-size:11px">kecuali: ${esc(p.jatah_kecuali_nama)}</span>` : ''}</td>
       <td class="num rp">${p.hpp ? rp(p.hpp) : '<span class="muted">—</span>'}</td>
       <td class="num rp">${rp(p.harga)}${p.harga_grosir
         ? `<br><span class="muted" style="font-size:11px">grosir ${rp(p.harga_grosir)} / ${p.isi_grosir}</span>` : ''}</td>
@@ -2705,6 +2786,16 @@ function martBarangModal(p) {
     </select>
       <span class="muted set-hint">Menentukan jatah harian mana yang terpakai saat santri membeli
         pakai kartu — berbeda dari kategori etalase di atas.</span></div>
+    <div class="field ${p?.kategori === 'non_makanan' ? '' : 'hidden'}" id="mb-kecuali-wrap">
+      <label>Kecualikan dari limit non-makanan? <span class="muted">(opsional)</span></label>
+      <select id="mb-kecuali">
+        <option value="">— ikut limit biasa —</option>
+        ${(martStok.jatah_kecuali || []).map((k) => `<option value="${k.id}"
+          ${p?.jatah_kecuali_id === k.id ? 'selected' : ''}>${esc(k.nama)}</option>`).join('')}
+      </select>
+      <span class="muted set-hint">Barang besar sesekali (seragam, alat sekolah) bisa dikecualikan
+        TOTAL dari jatah non-makanan harian — bukan dapat limit sendiri. Kelola daftarnya di
+        Kelola Golongan → "pengecualian limit non-makanan".</span></div>
     <div class="row" style="gap:10px">
       <div class="field"><label>Harga beli (HPP)</label>${inputUang({ id: 'mb-hpp', nilai: p?.hpp || '' })}</div>
       <div class="field"><label>Harga jual</label>${inputUang({ id: 'mb-harga', nilai: p?.harga || '' })}</div>
@@ -2748,6 +2839,8 @@ function martBarangModal(p) {
       const body = {
         nama: $('#mb-nama').value, barcode: $('#mb-barcode').value,
         kategori_id: $('#mb-kat').value || null, kategori: $('#mb-jatah').value,
+        jatah_kecuali_id: $('#mb-jatah').value === 'non_makanan' && $('#mb-kecuali').value
+          ? Number($('#mb-kecuali').value) : null,
         hpp: $('#mb-hpp').value.trim() === '' ? null : nilaiUang('#mb-hpp'),
         harga: nilaiUang('#mb-harga'), stok_min: Number($('#mb-min').value || 5),
         expired: $('#mb-exp').value || '',
@@ -2770,6 +2863,12 @@ function martBarangModal(p) {
       toast('✔ Barang tersimpan', 'ok');
       martMuatStok();
     });
+
+  $('#mb-jatah').onchange = () => {
+    const nm = $('#mb-jatah').value === 'non_makanan';
+    $('#mb-kecuali-wrap').classList.toggle('hidden', !nm);
+    if (!nm) $('#mb-kecuali').value = '';
+  };
 
   const hitungMargin = () => {
     const h = nilaiUang('#mb-harga') || 0;
@@ -7226,6 +7325,82 @@ function kelolaKategoriModal() {
   }).catch((e) => toast(e.message, 'err'));
 }
 
+/**
+ * Pengecualian limit non-makanan harian (Seragam, Alat Sekolah, dst) — barang
+ * yang ditandai salah satu entri ini LOLOS TOTAL dari jatah non-makanan
+ * harian/per-transaksi, bukan sekadar dapat limit sendiri. Dipakai di form
+ * barang Mart (hanya saat kategori non-makanan) dan input manual kasir.
+ */
+function kelolaKecualiModal() {
+  api('/api/jatah-kecuali?semua=1').then((d) => {
+    let baris = d.kecuali.map((k) => ({
+      id: k.id, nama: k.nama, deskripsi: k.deskripsi, wajib_keterangan: k.wajib_keterangan === true, aktif: k.aktif === 1,
+    }));
+
+    const gambar = () => {
+      $('#jk-baris').innerHTML = baris.map((r, i) => `
+        <div class="dn-row">
+          <div class="dn-row-atas">
+            <input class="jk-nama" data-i="${i}" value="${esc(r.nama)}" maxlength="60" placeholder="nama pengecualian">
+            <label class="kat-aktif" title="Tampil sebagai pilihan saat dipakai">
+              <input type="checkbox" class="jk-aktif" data-i="${i}" ${r.aktif ? 'checked' : ''}> tampil
+            </label>
+            <button class="linkbtn danger" data-hapus="${i}" title="hapus">✕</button>
+          </div>
+          <input class="jk-desk" data-i="${i}" value="${esc(r.deskripsi)}" maxlength="200"
+            placeholder="keterangan singkat (untuk admin sendiri, opsional)">
+          <label class="cek" style="margin-top:6px">
+            <input type="checkbox" class="jk-wajib" data-i="${i}" ${r.wajib_keterangan ? 'checked' : ''}>
+            wajib isi keterangan saat dipakai di transaksi (cocok untuk entri "tangkapan" semacam Lainnya,
+            yang namanya sendiri tidak menjelaskan apa-apa di laporan)
+          </label>
+        </div>`).join('') || '<p class="muted">Belum ada pengecualian. Tambahkan di bawah.</p>';
+
+      $('#jk-baris').querySelectorAll('.jk-nama').forEach((inp) => {
+        inp.oninput = () => { baris[Number(inp.dataset.i)].nama = inp.value; };
+      });
+      $('#jk-baris').querySelectorAll('.jk-desk').forEach((inp) => {
+        inp.oninput = () => { baris[Number(inp.dataset.i)].deskripsi = inp.value; };
+      });
+      $('#jk-baris').querySelectorAll('.jk-aktif').forEach((c) => {
+        c.onchange = () => { baris[Number(c.dataset.i)].aktif = c.checked; };
+      });
+      $('#jk-baris').querySelectorAll('.jk-wajib').forEach((c) => {
+        c.onchange = () => { baris[Number(c.dataset.i)].wajib_keterangan = c.checked; };
+      });
+      $('#jk-baris').querySelectorAll('[data-hapus]').forEach((b) => {
+        b.onclick = () => { baris.splice(Number(b.dataset.hapus), 1); gambar(); };
+      });
+    };
+
+    openModal(`
+      <h2>Pengecualian Limit Non-Makanan</h2>
+      <p class="muted">Barang yang ditandai salah satu pengecualian ini TIDAK dihitung sama sekali
+        ke jatah belanja non-makanan harian/per-transaksi — cocok untuk barang besar sesekali
+        (seragam, alat sekolah), bukan jajan harian biasa. Dipilih saat menyimpan barang di
+        Barang &amp; Stok (hanya untuk barang non-makanan), atau oleh kasir saat input manual.</p>
+      <div id="jk-baris"></div>
+      <button class="linkbtn" id="jk-tambah">+ Tambah pengecualian</button>`,
+      async () => {
+        const bersih = baris.map((r) => ({
+          id: r.id, nama: r.nama.trim(), deskripsi: r.deskripsi.trim(),
+          wajib_keterangan: r.wajib_keterangan, aktif: r.aktif,
+        })).filter((r) => r.nama.length);
+        if (bersih.some((r) => r.nama.length < 3)) throw new Error('Setiap pengecualian minimal 3 huruf');
+        await api('/api/jatah-kecuali', { method: 'PUT', body: { kecuali: bersih } });
+        toast('✔ Pengecualian limit disimpan', 'ok');
+      });
+
+    gambar();
+    $('#jk-tambah').onclick = () => {
+      baris.push({ id: null, nama: '', deskripsi: '', wajib_keterangan: false, aktif: true });
+      gambar();
+      const kotak = $('#jk-baris').querySelectorAll('.jk-nama');
+      kotak[kotak.length - 1]?.focus();
+    };
+  }).catch((e) => toast(e.message, 'err'));
+}
+
 const sdPotong = () => saldo.mode === 'potong';
 const sdKolektif = () => saldo.mode === 'kolektif';
 
@@ -9264,10 +9439,12 @@ async function kelolaGolonganModal() {
     <p class="muted">Setiap kartu masuk ke salah satu golongan. Batas yang dikosongkan
       <b>mengikuti pengaturan sekolah</b> — bukan berarti tanpa batas.</p>
     <div class="gol-list">${d.golongan.map(baris).join('')}</div>
-    <button class="linkbtn" id="gol-tambah">+ Tambah golongan</button>`);
+    <button class="linkbtn" id="gol-tambah">+ Tambah golongan</button>
+    <button class="linkbtn" id="gol-kecuali" style="margin-left:8px">⚙ Kelola pengecualian limit non-makanan</button>`);
 
   const segarkan = () => { closeModal(); kelolaGolonganModal(); };
   $('#gol-tambah').onclick = () => golonganFormModal(null, cfg, segarkan);
+  $('#gol-kecuali').onclick = kelolaKecualiModal;
   document.querySelectorAll('[data-ubah]').forEach((b) => {
     b.onclick = () => golonganFormModal(
       d.golongan.find((g) => g.id === Number(b.dataset.ubah)), cfg, segarkan);

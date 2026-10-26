@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Exceptions\ApiError;
+use App\Models\JatahKecuali;
 use App\Models\Produk;
 use App\Models\Tenant;
 
@@ -57,7 +58,11 @@ class Keranjang
 
         $total = 0;
         $nonmakanan = 0;
+        $kecuali = 0;
         $rincian = [];
+        // Dipakai lazy di dalam loop — tabelnya kecil, dan kebanyakan keranjang
+        // tidak menyentuh pengecualian sama sekali.
+        $daftarKecuali = null;
         // Kebutuhan stok dijumlahkan PER BARANG, bukan diperiksa per baris:
         // satu keranjang bisa memuat barang yang sama dalam dua satuan (3 pcs
         // + 1 dus), dan keduanya memakan stok yang sama.
@@ -84,6 +89,9 @@ class Keranjang
                 }
                 $nama = $pr->nama;
                 $kategori = $pr->kategori;
+                // Ditetapkan admin di Barang & Stok, bukan dipilih kasir saat
+                // menjual — sama filosofinya dengan kategori itu sendiri.
+                $jatahKecualiId = $kategori === 'non_makanan' ? $pr->jatah_kecuali_id : null;
 
                 /*
                  * Satuan: eceran (pcs) atau grosir (dus/karton).
@@ -153,6 +161,28 @@ class Keranjang
                 if ($kategori === 'non_makanan' && $tenant->jenis !== 'koperasi') {
                     throw new ApiError(400, 'Hanya tenant koperasi yang boleh menjual barang non-makanan');
                 }
+                // Barang manual tidak punya baris produk untuk ditempeli
+                // pengecualian — kasir memilihnya sendiri saat itu juga, sama
+                // seperti kategorinya.
+                $jatahKecualiId = $kategori === 'non_makanan' && ! empty($it['jatah_kecuali_id'])
+                    ? (int) $it['jatah_kecuali_id'] : null;
+            }
+
+            // Pengecualian limit non-makanan — berlaku sama untuk barang
+            // katalog maupun manual begitu $jatahKecualiId diketahui di atas.
+            $keteranganKecuali = '';
+            if ($jatahKecualiId !== null) {
+                if ($daftarKecuali === null) {
+                    $daftarKecuali = JatahKecuali::where('aktif', true)->get()->keyBy('id');
+                }
+                $jk = $daftarKecuali->get($jatahKecualiId);
+                if (! $jk) {
+                    throw new ApiError(404, 'Pengecualian limit yang dipilih sudah tidak tersedia — muat ulang layar kasir');
+                }
+                $keteranganKecuali = mb_substr(trim((string) ($it['jatah_kecuali_keterangan'] ?? '')), 0, 200);
+                if ($jk->wajib_keterangan && $keteranganKecuali === '') {
+                    throw new ApiError(400, "\"{$jk->nama}\" wajib disertai keterangan singkat — jelaskan barangnya");
+                }
             }
 
             $subtotal = $harga * $qty;
@@ -160,7 +190,13 @@ class Keranjang
             // Sakelar mati = semua barang diperlakukan sebagai makanan, persis
             // seperti sebelum fitur ini ada.
             if ($kategori === 'non_makanan' && ($cfg['nonmakanan_aktif'] ?? 0) === 1) {
-                $nonmakanan += $subtotal;
+                // Dikecualikan TOTAL dari jatah non-makanan, bukan sekadar
+                // dikurangi — lihat komentar `kecuali` di migrasinya.
+                if ($jatahKecualiId !== null) {
+                    $kecuali += $subtotal;
+                } else {
+                    $nonmakanan += $subtotal;
+                }
             }
 
             if ($pr && $pr->stok !== null) {
@@ -173,6 +209,7 @@ class Keranjang
                 'nama' => $nama, 'harga' => $harga, 'hpp' => $hpp, 'qty' => $qty,
                 'satuan' => $satuan, 'isi' => $isi,
                 'subtotal' => $subtotal, 'kategori' => $kategori,
+                'jatah_kecuali_id' => $jatahKecualiId, 'jatah_kecuali_keterangan' => $keteranganKecuali,
             ];
         }
 
@@ -209,6 +246,6 @@ class Keranjang
             $rincian,
         )), 0, 300);
 
-        return compact('total', 'nonmakanan', 'rincian', 'keterangan');
+        return compact('total', 'nonmakanan', 'kecuali', 'rincian', 'keterangan');
     }
 }

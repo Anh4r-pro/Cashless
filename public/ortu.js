@@ -12,6 +12,17 @@ const rp = (n) => 'Rp' + Number(n || 0).toLocaleString('id-ID');
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const digit = (s) => String(s || '').replace(/\D/g, '');
 
+/** Progres menuju target tabungan — kosong untuk jenis tanpa target (bebas). */
+function tabunganProgresHtml(saldo, target) {
+  if (!target) return '';
+  const pct = Math.min(100, Math.floor((saldo / target) * 100));
+  return `<div class="hbar-row" style="margin:4px 0 0">
+    <div class="hbar-head" style="font-size:11.5px"><span class="muted">Target ${rp(target)}</span>
+      <b style="color:var(--ok)">${pct}%</b></div>
+    <div class="hbar-track" style="height:6px"><div class="hbar-fill" style="width:${pct}%; background:var(--ok)"></div></div>
+  </div>`;
+}
+
 const state = { hari: 30, tipe: '', page: 1 };
 
 // Palet grafik disetel ke warna portal (navy & emas redam). VIZ milik
@@ -338,7 +349,7 @@ async function muatRingkasan() {
       <div class="o-tp">
         <div class="o-tp-isi">
           <b>${esc(t.nama || 'Tabungan')}</b>
-          <span class="muted">${t.target ? 'Target ' + rp(t.target) : 'Tanpa target'}</span>
+          ${t.target ? tabunganProgresHtml(t.saldo, t.target) : '<span class="muted">Tanpa target</span>'}
         </div>
         <b>${rp(t.saldo)}</b>
       </div>`).join('');
@@ -488,22 +499,22 @@ function layananMenu() {
     <p class="muted">Saldo kartu saat ini <b>${rp(d.saldo)}</b>.</p>
     <div class="o-metode-grid">
       <button class="o-metode" id="o-pg-pilih-tabungan" ${d.tabungan_jenis.length ? '' : 'disabled'}>
-        <span class="o-metode-lg">💰</span>
+        <span class="o-metode-lg o-pg-ikon ok">💰</span>
         <span><b>Tabungan</b><span class="muted">${d.tabungan_jenis.length
           ? `Sisa jatah hari ini ${rp(d.sisa_tabungan_harian)}` : 'Belum ada jenis tabungan dibuka sekolah'}</span></span>
       </button>
       <button class="o-metode" id="o-pg-pilih-donasi" ${d.donasi_program.length ? '' : 'disabled'}>
-        <span class="o-metode-lg">❤</span>
+        <span class="o-metode-lg o-pg-ikon err">❤</span>
         <span><b>Donasi</b><span class="muted">${d.donasi_program.length
           ? `Sisa jatah hari ini ${rp(d.sisa_donasi)}` : 'Belum ada program donasi dibuka sekolah'}</span></span>
       </button>
       <button class="o-metode" id="o-pg-pilih-transfer" ${d.transfer_bisa ? '' : 'disabled'}>
-        <span class="o-metode-lg">➤</span>
+        <span class="o-metode-lg o-pg-ikon teal">➤</span>
         <span><b>Transfer</b><span class="muted">${d.transfer_bisa
           ? `Sisa jatah hari ini ${rp(d.sisa_transfer_harian)} · ${d.sisa_transfer_kali}x` : 'Golongan ini tidak bisa mengirim saldo'}</span></span>
       </button>
       <button class="o-metode" id="o-pg-pilih-pin">
-        <span class="o-metode-lg">🔑</span>
+        <span class="o-metode-lg o-pg-ikon vio">🔑</span>
         <span><b>Ganti PIN</b><span class="muted">Dipakai untuk semua layanan ini & di kios</span></span>
       </button>
     </div>`,
@@ -521,7 +532,8 @@ function layananTabunganForm() {
   bukaModal(`
     <h2>Tabungan</h2>
     <div class="field"><label>Jenis tabungan</label>
-      <select id="o-pg-jenis">${opsiJenis}</select></div>
+      <select id="o-pg-jenis">${opsiJenis}</select>
+      <div id="o-pg-progres"></div></div>
     <div class="field"><label>Nominal</label>
       ${inputUang({ id: 'o-pg-jumlah', placeholder: 'contoh: 50.000' })}
       <span class="muted hint">Minimal ${rp(d.tabungan_min)}, sisa jatah hari ini ${rp(d.sisa_tabungan_harian)}</span></div>
@@ -533,6 +545,15 @@ function layananTabunganForm() {
      <button id="om-kirim" class="primary">Setor</button>`);
   $('#om-kembali').onclick = layananMenu;
   $('#om-kirim').onclick = layananTabunganKirim;
+
+  const sinkronProgres = () => {
+    const jenisId = Number($('#o-pg-jenis').value);
+    const jenis = d.tabungan_jenis.find((j) => j.id === jenisId);
+    const saldo = d.tabungan_saldo.find((t) => t.jenis_id === jenisId)?.saldo || 0;
+    $('#o-pg-progres').innerHTML = tabunganProgresHtml(saldo, jenis?.target);
+  };
+  $('#o-pg-jenis').addEventListener('change', sinkronProgres);
+  sinkronProgres();
 }
 
 function pegawaiTxId(label) {

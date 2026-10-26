@@ -261,6 +261,7 @@ Route::get('dashboard-tenant', [DashboardController::class, 'tenant'])->middlewa
 
 // --- pengaturan sekolah, neraca kas, kategori potongan --------------------
 Route::get('kelas', [PengaturanController::class, 'kelas'])->middleware('peran:tenant,superadmin');
+Route::get('jatah-kecuali', [PengaturanController::class, 'kecuali'])->middleware('peran:tenant,superadmin');
 
 Route::middleware('peran:superadmin')->group(function () {
     Route::get('settings', [PengaturanController::class, 'index'])->middleware('izin:settings.lihat');
@@ -269,6 +270,7 @@ Route::middleware('peran:superadmin')->group(function () {
     Route::post('neraca/saldo-awal', [PengaturanController::class, 'saldoAwal'])->middleware('izin:neraca.saldo_awal');
     Route::get('alasan-potong', [PengaturanController::class, 'alasan'])->middleware('izin:saldo.lihat,saldo.alasan');
     Route::put('alasan-potong', [PengaturanController::class, 'simpanAlasan'])->middleware('izin:saldo.alasan');
+    Route::put('jatah-kecuali', [PengaturanController::class, 'simpanKecuali'])->middleware('izin:golongan.kelola');
 });
 
 // --- analitik penjualan ---------------------------------------------------

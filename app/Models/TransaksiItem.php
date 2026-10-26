@@ -25,6 +25,8 @@ class TransaksiItem extends Model
         'tenant_nama',
         'nama',
         'kategori',
+        'jatah_kecuali_id',
+        'jatah_kecuali_keterangan',
         'satuan',
         'isi',
         'harga',

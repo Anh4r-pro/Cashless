@@ -97,17 +97,21 @@ class KasirController extends Controller
         Kartu::pastikanBerlaku($pemegang);
         $cfg = Pengaturan::untuk($pemegang);
 
-        [$jumlah, $nonmakanan, $keterangan, $rincian] = $this->hitungBelanja($r, $tenant, $cfg);
+        [$jumlah, $nonmakanan, $kecuali, $keterangan, $rincian] = $this->hitungBelanja($r, $tenant, $cfg);
 
         // Langit-langit mutlak satu transaksi, diturunkan dari batas golongan —
         // bukan angka tetap, supaya kartu VIP yang memang diizinkan berbelanja
         // besar tidak tertolak di sini sebelum pemeriksaan yang sebenarnya.
+        // Barang yang dikecualikan (lihat JatahKecuali) TIDAK dihitung ke
+        // langit-langit ini — itu justru gunanya, seragam Rp150.000 tidak
+        // boleh tertahan oleh atap yang dirancang untuk jajan harian.
         $atapTx = $cfg['max_per_transaksi'] + $cfg['max_nonmakanan_transaksi'];
-        if ($jumlah > $atapTx) {
-            throw new ApiError(400, 'Maksimal transaksi ' . Rupiah::f($atapTx));
+        if (($jumlah - $kecuali) > $atapTx) {
+            throw new ApiError(400, 'Maksimal transaksi ' . Rupiah::f($atapTx) .
+                ' (di luar barang yang dikecualikan dari limit)');
         }
 
-        $makanan = $jumlah - $nonmakanan;
+        $makanan = $jumlah - $nonmakanan - $kecuali;
         if ($makanan > $cfg['max_per_transaksi']) {
             throw new ApiError(400, 'Melebihi batas per transaksi (maks ' . Rupiah::f($cfg['max_per_transaksi']) . ')');
         }
@@ -133,7 +137,7 @@ class KasirController extends Controller
 
         $kunci = TapToken::pakai($r->input('tap_token'), $siswaId);   // kunci token dulu
         try {
-            $hasil = DB::transaction(function () use ($siswaId, $jumlah, $txId, $user, $keterangan, $nonmakanan, $rincian, $tenant) {
+            $hasil = DB::transaction(function () use ($siswaId, $jumlah, $txId, $user, $keterangan, $nonmakanan, $kecuali, $rincian, $tenant) {
                 // Syarat saldo ditaruh di WHERE, bukan diperiksa lebih dulu di PHP:
                 // dua tap yang tiba bersamaan tidak boleh sama-sama lolos.
                 $ubah = Siswa::where('id', $siswaId)
@@ -163,7 +167,7 @@ class KasirController extends Controller
                     'tenant_id' => $tenant->id, 'tenant_nama' => $tenant->nama,
                     'jumlah' => -$jumlah, 'saldo_sesudah' => $s->saldo,
                     'operator' => $user->nama, 'keterangan' => $keterangan,
-                    'nonmakanan' => $nonmakanan, 'created_at' => WaktuIso::sekarang(),
+                    'nonmakanan' => $nonmakanan, 'kecuali' => $kecuali, 'created_at' => WaktuIso::sekarang(),
                 ]);
 
                 // Rincian disimpan DI DALAM transaksi yang sama dengan pemotongan
@@ -215,7 +219,7 @@ class KasirController extends Controller
                     'harga menu saat ini (' . Rupiah::f($x['total']) . ') — muat ulang halaman kasir');
             }
 
-            return [$x['total'], $x['nonmakanan'], $x['keterangan'], $x['rincian']];
+            return [$x['total'], $x['nonmakanan'], $x['kecuali'], $x['keterangan'], $x['rincian']];
         }
 
         if ($tenant->jenis === 'koperasi' && ($cfg['nonmakanan_aktif'] ?? 0) === 1) {
@@ -231,7 +235,7 @@ class KasirController extends Controller
             throw new ApiError(400, 'Nominal tidak valid');
         }
 
-        return [$jumlah, 0, mb_substr((string) $r->input('keterangan', ''), 0, 300), null];
+        return [$jumlah, 0, 0, mb_substr((string) $r->input('keterangan', ''), 0, 300), null];
     }
 
     private function periksaBatasHarian(int $siswaId, int $makanan, int $nonmakanan, array $cfg): void
@@ -242,9 +246,13 @@ class KasirController extends Controller
             if ($h['n_mk'] >= $cfg['max_beli_harian']) {
                 throw new ApiError(429, "Santri sudah {$h['n_mk']}x belanja hari ini (batas {$cfg['max_beli_harian']}x/hari)");
             }
-            if (($h['total'] - $h['nm']) + $makanan > $cfg['max_belanja_harian']) {
+            // Porsi yang dikecualikan ikut disingkirkan dari akumulasi makanan —
+            // kalau tidak, barang yang dikecualikan diam-diam ikut memakan
+            // jatah makanan, padahal sama sekali bukan jajan.
+            $makananHariIni = $h['total'] - $h['nm'] - $h['kecuali'];
+            if ($makananHariIni + $makanan > $cfg['max_belanja_harian']) {
                 throw new ApiError(429,
-                    'Melebihi akumulasi belanja harian (sudah ' . Rupiah::f($h['total'] - $h['nm']) .
+                    'Melebihi akumulasi belanja harian (sudah ' . Rupiah::f($makananHariIni) .
                     ' hari ini, batas ' . Rupiah::f($cfg['max_belanja_harian']) . ')');
             }
         }
@@ -274,6 +282,8 @@ class KasirController extends Controller
                 'transaksi_id' => $trx->id, 'produk_id' => $b['produk_id'],
                 'tenant_id' => $trx->tenant_id, 'tenant_nama' => $tenantNama,
                 'nama' => $b['nama'], 'kategori' => $b['kategori'],
+                'jatah_kecuali_id' => $b['jatah_kecuali_id'] ?? null,
+                'jatah_kecuali_keterangan' => $b['jatah_kecuali_keterangan'] ?? '',
                 'harga' => $b['harga'], 'hpp' => $b['hpp'] ?? null,
                 'qty' => $b['qty'], 'satuan' => $b['satuan'] ?? 'ecer',
                 'isi' => (int) ($b['isi'] ?? 1), 'subtotal' => $b['subtotal'],

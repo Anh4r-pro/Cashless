@@ -290,6 +290,15 @@ footer { text-align: center; font-size: 12px; color: var(--ink-3); margin: 28px 
 .o-metode:hover, .o-metode:focus-visible { border-color: var(--navy-900); }
 .o-metode-lg { width: 44px; height: 44px; border-radius: 13px; background: var(--line-2); color: var(--navy-800);
   display: grid; place-items: center; font-size: 10.5px; font-weight: 800; flex: none; }
+/* Ikon menu "Layanan Pegawai" — lebih besar dan berwarna daripada badge ikon
+   umum di atas, yang juga menampung TEKS singkat ("QRIS"/"BANK") dan karena
+   itu dibuat kecil & netral. Ini khusus emoji, jadi boleh lebih besar dan
+   bebas warna per aksi supaya empat pilihannya mudah dibedakan sekilas. */
+.o-pg-ikon { width: 54px; height: 54px; border-radius: 15px; font-size: 25px; }
+.o-pg-ikon.ok { background: var(--ok-soft); color: var(--ok); }
+.o-pg-ikon.err { background: var(--err-soft); color: var(--err); }
+.o-pg-ikon.teal { background: var(--teal-soft); color: var(--teal); }
+.o-pg-ikon.vio { background: var(--vio-soft); color: var(--vio); }
 .o-metode b { display: block; font-size: 15px; }
 .o-metode .muted { font-size: 12.5px; }
 .o-qris { display: block; width: 100%; max-width: 280px; margin: 6px auto 8px; border-radius: 16px; border: 1px solid var(--line); }
