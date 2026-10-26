@@ -42,9 +42,42 @@ class Rem
         }
     }
 
-    /** Alamat klien. nginx di depan mengisinya dengan $remote_addr yang tak bisa dikarang klien. */
+    /**
+     * Alamat klien untuk kunci rem. Dasarnya REMOTE_ADDR — alamat koneksi
+     * sebenarnya, yang tidak bisa dikarang pengirim.
+     *
+     * Header `X-Real-IP` HANYA dipercaya kalau koneksinya datang dari mesin
+     * ini sendiri (loopback). Dua alasan, dan keduanya penting:
+     *
+     *   1. DI PRODUKSI header itu diabaikan total, karena REMOTE_ADDR di sana
+     *      adalah IP publik klien, bukan loopback. Jadi pengamanannya tidak
+     *      bergantung pada konfigurasi nginx yang benar — aman secara bawaan,
+     *      bahkan kalau aplikasi ini kelak dipasang di server lain yang lupa
+     *      menimpa headernya. Versi sebelumnya mempercayai header itu apa
+     *      adanya dengan anggapan "nginx yang mengisinya", padahal nginx di
+     *      sini tidak pernah mengisinya; akibatnya SELURUH rem per-IP bisa
+     *      dilewati cukup dengan mengganti satu header tiap percobaan —
+     *      sandi layar kios (yang remnya memang HANYA per-IP) jadi bisa
+     *      ditebak tanpa batas. Ditemukan saat audit 26 Okt 2026, dan nginx
+     *      produksi kini juga menimpa header itu sebagai lapis kedua.
+     *   2. DARI LOOPBACK header itu tetap berguna: suite uji memanggil
+     *      `artisan serve` di 127.0.0.1 dan memakai header ini untuk
+     *      mensimulasikan banyak IP berbeda — tanpa itu, rem per-IP tidak
+     *      bisa diuji sama sekali karena semua permintaan uji seolah datang
+     *      dari satu alamat yang sama.
+     *
+     * `X-Forwarded-For` tidak pernah dibaca di mana pun. Kalau kelak ada
+     * proxy/CDN sungguhan di depan, daftarkan lewat `trustProxies()` di
+     * bootstrap/app.php — biar Laravel yang memutuskan header mana yang layak
+     * dipercaya DAN dari pengirim mana, bukan dikarang ulang di sini.
+     */
     public static function ip(\Illuminate\Http\Request $r): string
     {
-        return trim((string) $r->header('X-Real-IP')) ?: ($r->ip() ?? '?');
+        $asli = $r->ip() ?: '?';
+        if (in_array($asli, ['127.0.0.1', '::1'], true)) {
+            return trim((string) $r->header('X-Real-IP')) ?: $asli;
+        }
+
+        return $asli;
     }
 }
