@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Exceptions\ApiError;
+use App\Models\JatahKecuali;
 use App\Models\Produk;
 use App\Models\ProdukAjuan;
 use App\Models\Tenant;
@@ -71,9 +72,32 @@ class ProdukController extends Controller
             throw new ApiError(400, '"' . ($t->nama ?? 'Tenant ini') . '" bukan koperasi — ubah jenisnya dulu ' .
                 'di menu Tenant sebelum menandai barang non-makanan');
         }
-        $pr->update(['kategori' => $kategori]);
+        // Dipaksa null begitu dijadikan makanan — sisa pilihan pengecualian
+        // tidak pernah bermakna untuk barang makanan (lihat Services\Keranjang),
+        // tapi membiarkannya tertinggal di baris hanya membingungkan admin lain.
+        $jatahKecualiId = $kategori === 'non_makanan' ? $this->jatahKecualiId($r) : null;
+        $pr->update(['kategori' => $kategori, 'jatah_kecuali_id' => $jatahKecualiId]);
 
         return response()->json(['ok' => true, 'produk' => $pr->fresh()]);
+    }
+
+    /**
+     * Validasi `jatah_kecuali_id` kiriman — dipakai bersama oleh kategori()
+     * dan setujui() (satu-satunya dua tempat admin boleh menetapkannya di
+     * luar Barang & Stok Mart sendiri). Kosong/null = tidak dikecualikan.
+     */
+    private function jatahKecualiId(Request $r): ?int
+    {
+        $id = $r->input('jatah_kecuali_id');
+        if (empty($id)) {
+            return null;
+        }
+        $id = (int) $id;
+        if (! JatahKecuali::where('id', $id)->where('aktif', true)->exists()) {
+            throw new ApiError(400, 'Pengecualian limit yang dipilih sudah tidak tersedia');
+        }
+
+        return $id;
     }
 
     /**
@@ -644,8 +668,12 @@ class ProdukController extends Controller
         $a = $this->ajuanMenunggu($id);
         $catatan = mb_substr(trim((string) $r->input('catatan', '')), 0, 300);
         $kategoriMinta = $r->input('kategori');
+        // Dibaca SEBELUM transaksi (butuh $r, tidak bisa `use` di closure di
+        // bawah) — hanya bermakna kalau admin benar-benar memilih non_makanan;
+        // dipaksa null kalau tidak, sama seperti di kategori().
+        $jatahKecualiId = $kategoriMinta === 'non_makanan' ? $this->jatahKecualiId($r) : null;
 
-        $hasil = DB::transaction(function () use ($a, $kategoriMinta) {
+        $hasil = DB::transaction(function () use ($a, $kategoriMinta, $jatahKecualiId) {
             if ($a->jenis === 'baru') {
                 // Nama bisa saja keburu dipakai menu lain sejak pengajuan dibuat.
                 $this->tolakNamaKembar($a->tenant_id, $a->nama);
@@ -662,6 +690,7 @@ class ProdukController extends Controller
                 $pr = Produk::create([
                     'tenant_id' => $a->tenant_id, 'nama' => $a->nama,
                     'harga' => $a->harga, 'kategori' => $kategori,
+                    'jatah_kecuali_id' => $kategori === 'non_makanan' ? $jatahKecualiId : null,
                 ])->fresh();
                 $a->update(['produk_id' => $pr->id]);
 

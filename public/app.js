@@ -5635,7 +5635,9 @@ function menuAjuanView(el) {
 async function muatKategoriProduk() {
   const box = $('#kat-tenant');
   if (!box) return;
-  const { tenants } = await api('/api/tenants');
+  const [{ tenants }, { kecuali: daftarKecuali }] = await Promise.all([
+    api('/api/tenants'), api('/api/jatah-kecuali'),
+  ]);
   const koperasi = tenants.filter((t) => t.jenis === 'koperasi');
   if (!koperasi.length) {
     box.innerHTML = `<p class="muted">Belum ada tenant berjenis koperasi. Ubah jenis tenant di
@@ -5644,6 +5646,13 @@ async function muatKategoriProduk() {
   }
   const daftar = await Promise.all(koperasi.map((t) =>
     api('/api/produk?tenant_id=' + t.id).then((d) => ({ t, produk: d.produk }))));
+
+  const opsiKecuali = (p) => `
+    <select data-kecuali="${p.id}" style="margin-top:4px; font-size:12.5px">
+      <option value="">— ikut limit biasa —</option>
+      ${daftarKecuali.map((k) => `<option value="${k.id}" ${p.jatah_kecuali_id === k.id ? 'selected' : ''}>
+        ${esc(k.nama)}</option>`).join('')}
+    </select>`;
 
   box.innerHTML = daftar.map(({ t, produk }) => {
     const nm = produk.filter((p) => p.kategori === 'non_makanan');
@@ -5656,7 +5665,7 @@ async function muatKategoriProduk() {
         <tr>
           <td><b>${esc(p.nama)}</b></td>
           <td class="num rp">${rp(p.harga)}</td>
-          <td>${lencanaKategori(p.kategori)}</td>
+          <td>${lencanaKategori(p.kategori)}${p.kategori === 'non_makanan' ? opsiKecuali(p) : ''}</td>
           <td>${p.aktif ? '<span class="badge aktif">tersedia</span>' : '<span class="badge blokir">habis</span>'}</td>
           <td><button class="linkbtn" data-kat="${p.id}" data-ke="${p.kategori === 'non_makanan' ? 'makanan' : 'non_makanan'}">
             jadikan ${p.kategori === 'non_makanan' ? 'makanan' : 'non-makanan'}</button></td>
@@ -5673,6 +5682,19 @@ async function muatKategoriProduk() {
         toast(`✔ "${d.produk.nama}" kini ${KATEGORI_LABEL[d.produk.kategori].toLowerCase()}`, 'ok');
         muatKategoriProduk();
       } catch (e) { toast(e.message, 'err'); b.disabled = false; }
+    };
+  });
+  // Pengecualian limit — sakelar sendiri, langsung tersimpan saat diganti,
+  // tidak menunggu tombol "jadikan ..." di sampingnya.
+  box.querySelectorAll('[data-kecuali]').forEach((sel) => {
+    sel.onchange = async () => {
+      sel.disabled = true;
+      try {
+        await api(`/api/produk/${sel.dataset.kecuali}/kategori`, { method: 'PUT',
+          body: { kategori: 'non_makanan', jatah_kecuali_id: sel.value ? Number(sel.value) : null } });
+        toast('✔ Pengecualian limit diperbarui', 'ok');
+      } catch (e) { toast(e.message, 'err'); muatKategoriProduk(); }
+      sel.disabled = false;
     };
   });
 }
@@ -5845,10 +5867,12 @@ async function loadAjuanSA() {
   muatPaketAjuan();
   // Daftar tenant hanya dipakai untuk mengenali mana yang koperasi, dan tidak
   // bergantung pada daftar ajuan — jadi keduanya diminta bersamaan.
-  const [d, tenantResp] = await Promise.all([
+  const [d, tenantResp, kecualiResp] = await Promise.all([
     api('/api/produk/ajuan?status=' + ajuanStatus),
     api('/api/tenants').catch(() => ({ tenants: [] })),
+    api('/api/jatah-kecuali').catch(() => ({ kecuali: [] })),
   ]);
+  const daftarKecuali = kecualiResp.kecuali;
   setLencanaAjuan(d.menunggu);
   $('#aju-sa-body').innerHTML = d.ajuan.map((a) => `
     <tr class="${a.status === 'menunggu' ? 'tp-menunggu' : ''}">
@@ -5873,7 +5897,8 @@ async function loadAjuanSA() {
   document.querySelectorAll('#aju-sa-body [data-setuju]').forEach((b) => {
     const a = d.ajuan.find((x) => x.id === Number(b.dataset.setuju));
     const pilihKategori = a.jenis === 'baru' && koperasiId.has(a.tenant_id);
-    b.onclick = () => openModal(`
+    b.onclick = () => {
+      openModal(`
       <h2>Setujui pengajuan?</h2>
       <p><b>${esc(a.tenant_nama)}</b> — ${esc(AJU_JENIS[a.jenis])}<br>${ajuanRingkas(a)}</p>
       <p class="muted">${a.jenis === 'hapus'
@@ -5885,17 +5910,29 @@ async function loadAjuanSA() {
           <option value="makanan">Makanan (jatah belanja biasa)</option>
           <option value="non_makanan">Non-makanan (jatah harian khusus)</option>
         </select>
-        <span class="muted set-hint">Bisa diubah kapan saja di panel Kategori Barang Koperasi.</span></div>` : ''}
+        <span class="muted set-hint">Bisa diubah kapan saja di panel Kategori Barang Koperasi.</span></div>
+      <div class="field hidden" id="aj-kecuali-wrap"><label>Kecualikan dari limit non-makanan? <span class="muted">(opsional)</span></label>
+        <select id="aj-kecuali">
+          <option value="">— ikut limit biasa —</option>
+          ${daftarKecuali.map((k) => `<option value="${k.id}">${esc(k.nama)}</option>`).join('')}
+        </select></div>` : ''}
       <div class="field"><label>Catatan (opsional)</label><input id="aj-catatan"></div>`,
       async () => {
         await api(`/api/produk/ajuan/${a.id}/setujui`, { method: 'POST', body: {
           catatan: $('#aj-catatan').value,
-          ...(pilihKategori ? { kategori: $('#aj-kategori').value } : {}),
+          ...(pilihKategori ? { kategori: $('#aj-kategori').value,
+            jatah_kecuali_id: $('#aj-kategori').value === 'non_makanan' && $('#aj-kecuali').value
+              ? Number($('#aj-kecuali').value) : null } : {}),
         }});
         toast('✔ Pengajuan disetujui', 'ok');
         loadAjuanSA();
         muatKategoriProduk();
       }, 'Setujui');
+      if (pilihKategori) {
+        $('#aj-kategori').onchange = () =>
+          $('#aj-kecuali-wrap').classList.toggle('hidden', $('#aj-kategori').value !== 'non_makanan');
+      }
+    };
   });
   document.querySelectorAll('#aju-sa-body [data-tolak]').forEach((b) => {
     const a = d.ajuan.find((x) => x.id === Number(b.dataset.tolak));
