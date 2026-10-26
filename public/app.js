@@ -5797,10 +5797,15 @@ async function muatPaketAjuan() {
 }
 
 async function paketModal(paket) {
-  let d;
-  try { d = await api('/api/produk/ajuan/paket/' + encodeURIComponent(paket)); }
-  catch (e) { toast(e.message, 'err'); return; }
+  let d, kecResp;
+  try {
+    [d, kecResp] = await Promise.all([
+      api('/api/produk/ajuan/paket/' + encodeURIComponent(paket)),
+      api('/api/jatah-kecuali').catch(() => ({ kecuali: [] })),
+    ]);
+  } catch (e) { toast(e.message, 'err'); return; }
   const kop = d.tenant?.jenis === 'koperasi';
+  const daftarKecuali = kecResp.kecuali;
   const menunggu = d.ajuan.filter((a) => a.status === 'menunggu');
   if (!menunggu.length) { toast('Paket ini sudah diputus seluruhnya', 'ok'); muatPaketAjuan(); return; }
 
@@ -5811,7 +5816,7 @@ async function paketModal(paket) {
       ${kop ? 'Kategori terisi usulan tenant; ubah bila perlu — keputusan akhirnya di sini.' : ''}</p>
     <p><label><input type="checkbox" id="pk-semua" checked style="width:auto"> centang semua</label></p>
     <div class="tblwrap" style="max-height:50vh; overflow:auto"><table>
-      <thead><tr><th></th><th>Barang</th><th class="num">Harga</th>${kop ? '<th>Kategori</th>' : ''}</tr></thead>
+      <thead><tr><th></th><th>Barang</th><th class="num">Harga</th>${kop ? '<th>Kategori</th><th>Kecuali dari limit?</th>' : ''}</tr></thead>
       <tbody>${menunggu.map((a) => `<tr>
         <td><input type="checkbox" class="pk-cek" value="${a.id}" checked style="width:auto"></td>
         <td>${esc(a.nama)}</td>
@@ -5819,6 +5824,10 @@ async function paketModal(paket) {
         ${kop ? `<td><select class="pk-kat" data-id="${a.id}">
           <option value="makanan" ${a.kategori_usulan !== 'non_makanan' ? 'selected' : ''}>Makanan</option>
           <option value="non_makanan" ${a.kategori_usulan === 'non_makanan' ? 'selected' : ''}>Non-makanan</option>
+        </select></td>
+        <td><select class="pk-kecuali" data-id="${a.id}" ${a.kategori_usulan === 'non_makanan' ? '' : 'disabled'}>
+          <option value="">— ikut limit biasa —</option>
+          ${daftarKecuali.map((k) => `<option value="${k.id}">${esc(k.nama)}</option>`).join('')}
         </select></td>` : ''}
       </tr>`).join('')}</tbody>
     </table></div>
@@ -5832,8 +5841,12 @@ async function paketModal(paket) {
       if (!ids.length) throw new Error('Belum ada barang yang dicentang');
       const kategori = {};
       document.querySelectorAll('.pk-kat').forEach((s) => { if (ids.includes(Number(s.dataset.id))) kategori[s.dataset.id] = s.value; });
+      const jatahKecuali = {};
+      document.querySelectorAll('.pk-kecuali').forEach((s) => {
+        if (ids.includes(Number(s.dataset.id)) && s.value) jatahKecuali[s.dataset.id] = Number(s.value);
+      });
       const h = await api(`/api/produk/ajuan/paket/${encodeURIComponent(paket)}/setujui`, {
-        method: 'POST', body: { ids, kategori } });
+        method: 'POST', body: { ids, kategori, jatah_kecuali: jatahKecuali } });
       toast(`✔ ${h.n_disetujui} barang disetujui` +
         (h.n_kembar ? ` · ${h.n_kembar} ditolak karena namanya sudah ada` : '') +
         (h.sisa ? ` · ${h.sisa} masih menunggu` : ''), 'ok');
@@ -5852,6 +5865,17 @@ async function paketModal(paket) {
   };
   document.querySelectorAll('.pk-cek').forEach((c) => { c.onchange = hitung; });
   hitung();
+  // Pilihan "kecuali" per baris hanya bermakna kalau kategorinya non-makanan —
+  // dikunci & dikosongkan begitu baris itu dipindah ke makanan.
+  document.querySelectorAll('.pk-kat').forEach((sel) => {
+    sel.onchange = () => {
+      const kec = document.querySelector(`.pk-kecuali[data-id="${sel.dataset.id}"]`);
+      if (!kec) return;
+      const nm = sel.value === 'non_makanan';
+      kec.disabled = !nm;
+      if (!nm) kec.value = '';
+    };
+  });
   $('#pk-tolak').onclick = async () => {
     try {
       const h = await api(`/api/produk/ajuan/paket/${encodeURIComponent(paket)}/tolak`, {

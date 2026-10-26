@@ -345,6 +345,11 @@ class ProdukController extends Controller
      * body: ids = ajuan yang disetujui (kosong = semua yang menunggu),
      *       kategori = {id: 'makanan'|'non_makanan'} — keputusan admin; yang
      *       tidak disebut memakai usulan tenant.
+     *       jatah_kecuali = {id: jatah_kecuali_id} — opsional, hanya bermakna
+     *       untuk baris yang kategorinya non_makanan. Id yang tidak dikenal
+     *       (mis. terhapus admin lain di tengah jalan) diabaikan diam-diam,
+     *       bukan menggagalkan baris itu — ini cuma penanda opsional, beda
+     *       dari kategori yang memang menentukan jatah mana yang berlaku.
      * Ajuan yang namanya keburu dipakai menu lain tidak menggagalkan seluruh
      * paket: ia ditolak sendiri dengan alasan yang jelas.
      */
@@ -353,9 +358,11 @@ class ProdukController extends Controller
         $u = $this->wajibPeran($r, 'superadmin');
         $ids = array_map('intval', (array) $r->input('ids', []));
         $kat = (array) $r->input('kategori', []);
+        $kec = (array) $r->input('jatah_kecuali', []);
         $catatan = mb_substr(trim((string) $r->input('catatan', '')), 0, 300);
+        $kecValid = JatahKecuali::where('aktif', true)->pluck('id')->flip();
 
-        $hasil = DB::transaction(function () use ($paket, $ids, $kat, $catatan, $u) {
+        $hasil = DB::transaction(function () use ($paket, $ids, $kat, $kec, $kecValid, $catatan, $u) {
             $q = ProdukAjuan::where('paket', $paket)->where('status', 'menunggu')->lockForUpdate();
             if ($ids) {
                 $q->whereIn('id', $ids);
@@ -382,9 +389,11 @@ class ProdukController extends Controller
                 }
                 $minta = $kat[$a->id] ?? $kat[(string) $a->id] ?? $a->kategori_usulan;
                 $kategori = ($minta === 'non_makanan' && $koperasi) ? 'non_makanan' : 'makanan';
+                $kecMinta = (int) ($kec[$a->id] ?? $kec[(string) $a->id] ?? 0);
+                $jatahKecualiId = $kategori === 'non_makanan' && $kecValid->has($kecMinta) ? $kecMinta : null;
                 $pr = Produk::create([
                     'tenant_id' => $a->tenant_id, 'nama' => $a->nama,
-                    'harga' => $a->harga, 'kategori' => $kategori,
+                    'harga' => $a->harga, 'kategori' => $kategori, 'jatah_kecuali_id' => $jatahKecualiId,
                 ]);
                 $a->update(['produk_id' => $pr->id, 'status' => 'disetujui', 'catatan' => $catatan,
                     'penilai' => $u->nama, 'decided_at' => $sekarang]);
