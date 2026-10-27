@@ -56,6 +56,22 @@ $PHP artisan event:cache  >/dev/null || exit 1
 # oleh www-data akan gagal diam-diam.
 chown www-data:www-data bootstrap/cache/*.php 2>/dev/null
 
+# storage/ JUGA, dan ini bukan kehati-hatian berlebihan — pernah membuat
+# seluruh admin/bendahara/kasir tidak bisa login semalaman (26→27 Okt 2026).
+#
+# Sebabnya: `artisan` di atas dijalankan sebagai root, dan artisan menulis ke
+# storage/framework juga (view:cache mengisi views/, dan perintah apa pun yang
+# menyentuh cache membuat subdirektori baru di cache/data/). Subdirektori yang
+# lahir dari tangan root bermode drwxr-xr-x — www-data tidak bisa menulis ke
+# dalamnya. Akibatnya SEBAGIAN kunci cache mati: yang hash-nya kebetulan jatuh
+# ke direktori itu melempar "fopen(...): No such file or directory", sisanya
+# baik-baik saja. Karena SESSION_DRIVER=file dan rem percobaan gagal juga
+# bersandar pada cache, gejalanya jadi login yang gagal/terkunci sebagian —
+# bukan situs mati total, sehingga tidak langsung kelihatan sebagai akibat
+# penerapan. Hanya bootstrap/cache yang dulu dikembalikan di sini; storage
+# terlewat.
+chown -R www-data:www-data storage 2>/dev/null
+
 echo "→ memuat ulang php-fpm (opcache ikut disegarkan)"
 systemctl reload php8.3-fpm 2>/dev/null || systemctl restart php8.3-fpm
 
