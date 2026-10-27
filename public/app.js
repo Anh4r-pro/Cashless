@@ -889,23 +889,44 @@ function kasirLepasKartu() {
 const JAJAN_MEPET_RP = 20000;   // kira-kira harga jajan termurah di kantin
 const JAJAN_MEPET_KALI = 1;
 
+/**
+ * Sisa jatah jajan di kartu santri — SELALU tampil, kedua jatahnya sekaligus.
+ *
+ * Dulu barisnya disembunyikan selama sisanya masih longgar, demi menghemat
+ * ruang di layar kasir (terutama saat dipakai di HP). Diubah atas permintaan
+ * pemilik 27 Okt 2026: kasir perlu tahu sisanya SEBELUM mengetik harga, bukan
+ * baru sadar setelah transaksinya tertolak — disembunyikan justru membuat
+ * penolakan terasa datang tiba-tiba. Satu baris 11px dianggap sepadan.
+ *
+ * Ambang JAJAN_MEPET_* tidak dibuang, hanya BERPINDAH PERAN: dulu penentu
+ * tampil/tidak, sekarang penentu penekanan — kuning saat menipis, merah saat
+ * habis. Tanpa itu, angka yang selalu ada berubah jadi deretan tanpa isyarat
+ * dan justru berhenti dibaca.
+ */
 function kasirJajanHtml(j) {
   if (!j) return '';
+  const habis = (x) => x.rp <= 0 || x.kali <= 0;
   const mepet = (x) => x.rp <= JAJAN_MEPET_RP || x.kali <= JAJAN_MEPET_KALI;
-  if (!mepet(j.makanan) && !mepet(j.nonmakanan)) return '';
+  const gaya = (x) => habis(x) ? ' class="habis"'
+    : mepet(x) ? ' style="color:var(--warn); font-weight:600"' : '';
+  const satu = (label, x) => `${label} <b${gaya(x)}>${rp(x.rp)}</b>`;
+  const teks = [satu('mkn', j.makanan), satu('non', j.nonmakanan)].join(' · ');
 
-  const warna = (x) => x.rp <= 0 || x.kali <= 0 ? ' class="habis"' : '';
-  const satu = (label, x) => mepet(x) ? `${label} <b${warna(x)}>${rp(x.rp)}</b>` : '';
-  const teks = [satu('mkn', j.makanan), satu('non', j.nonmakanan)].filter(Boolean).join(' · ');
-
-  return `<br><span class="muted" style="font-size:11px">sisa jajan: ${teks}</span>`;
+  // Blok selebar kartu, BUKAN <br> di dalam kolom "Saldo": kolom itu sempit
+  // (sepertiga kartu), sehingga "sisa jajan: mkn … · non …" membungkus jadi
+  // tiga-empat baris di HP dan kartunya menggelembung ~55px. Akibatnya tombol
+  // Bayar justru TURUN sesudah tap — persis penghematan gulir yang dulu
+  // diminta tim kasir dan dijaga uji "tombol Bayar tidak turun jauh". Di
+  // baris penuh, teks yang sama cukup satu baris.
+  return `<div class="muted" style="font-size:11px; margin-top:6px">sisa jajan: ${teks}</div>`;
 }
 
 /**
  * Versi teks polos (bukan HTML) dari sisa jajan, dipakai di toast SETELAH
- * transaksi selesai — berbeda dari kasirJajanHtml() yang baru tampil kalau
- * mepet, di sini selalu ditampilkan apa adanya: baru saja ada transaksi, jadi
- * kasir/santri wajar ingin tahu sisanya sekarang, bukan cuma saat hampir habis.
+ * transaksi selesai. Keduanya kini sama-sama selalu menampilkan angkanya;
+ * bedanya tinggal bentuk — di sini kalimat penuh ("makanan"/"non-makanan")
+ * karena toast punya ruang, sedangkan di kartu disingkat ("mkn"/"non") dan
+ * diberi warna saat menipis.
  */
 function sisaJajanTeks(j) {
   if (!j) return '';
@@ -935,9 +956,9 @@ function renderKasirSiswa(pesan) {
           // Titipan tidak bisa dibelanjakan, tapi kasir perlu tahu uangnya ada:
           // santri bersaldo tipis bisa diarahkan ke admin, bukan disuruh pulang.
           ? `<br><span class="muted" style="font-size:11px">titipan ${rp(s.saldo_titipan)}</span>` : ''}
-        ${kasirJajanHtml(kasir.sisaHarian)}
       </div>
     </div>
+    ${kasirJajanHtml(kasir.sisaHarian)}
     ${pesan ? `<p class="muted" style="margin:8px 0 0">${pesan}</p>` : ''}`;
   $('#btn-lepas-kartu').onclick = kasirLepasKartu;
 }
@@ -1643,7 +1664,7 @@ function martRenderBayar() {
           <div><b>${esc(s.nama)}</b><br><span class="muted">${esc(s.kelas)} · NIS ${esc(s.nis)}</span></div>
           <div class="saldo"><span class="muted">Saldo</span><br><b class="rp">${rp(s.saldo)}</b>
             <br><span class="muted" style="font-size:11px">sisa ${rp(s.saldo - total)}</span>
-            ${kasirJajanHtml(mart.sisaHarian)}</div></div>`
+            </div></div>${kasirJajanHtml(mart.sisaHarian)}`
         : `<div class="tapzone" style="margin-top:4px"><div class="big">💳</div>
             <b>Tempelkan kartu</b><br><span class="muted">saldo dipotong otomatis</span></div>`}
       ${martStrukPilihan()}
