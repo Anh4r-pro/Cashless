@@ -93,6 +93,14 @@ class SiswaController extends Controller
             ->selectRaw('EXISTS(SELECT 1 FROM siswa_pin p WHERE p.siswa_id = siswa.id) AS pin_kustom')
             ->limit($limit)->offset(($page - 1) * $limit)->get();
 
+        // Kunci wali dibuka HANYA di sini: form edit santri mengisi isian
+        // "Tanggal lahir" & "HP wali" dari baris ini, dan saat disimpan selalu
+        // mengirim ulang keduanya — kalau baris datang tanpa keduanya, form
+        // terbuka kosong lalu MENIMPA data aslinya dengan kosong. Gerbangnya
+        // (`santri.lihat`/`sdm.lihat`, diperiksa di awal method) memang gerbang
+        // yang tepat untuk kunci portal.
+        $rows->makeVisible(Siswa::KUNCI_WALI);
+
         return response()->json([
             'siswa' => $rows, 'total' => $total, 'page' => $page, 'limit' => $limit,
             'total_saldo' => (int) $jumlah->s, 'total_titipan' => (int) $jumlah->t,
@@ -348,7 +356,10 @@ class SiswaController extends Controller
             'kode_keluarga' => mb_substr(trim((string) ($b['kode_keluarga'] ?? '')), 0, 40) ?: null,
         ], BidangSiswa::ortu($b, null, null), BidangSiswa::golongan($b, null)))->fresh();
 
-        return response()->json(['ok' => true, 'siswa' => $s]);
+        // Admin baru saja mengirim kedua nilai ini; memantulkannya kembali
+        // supaya layar bisa memastikan apa yang benar-benar tersimpan
+        // (nomor HP disaring jadi digit saja oleh BidangSiswa::ortu()).
+        return response()->json(['ok' => true, 'siswa' => $s->makeVisible(Siswa::KUNCI_WALI)]);
     }
 
     public function update(Request $r, int $id)
@@ -421,7 +432,7 @@ class SiswaController extends Controller
             SesiKios::tutupSemua($s->id);
         }
 
-        return response()->json(['ok' => true, 'siswa' => $s->fresh()]);
+        return response()->json(['ok' => true, 'siswa' => $s->fresh()->makeVisible(Siswa::KUNCI_WALI)]);
     }
 
     /**

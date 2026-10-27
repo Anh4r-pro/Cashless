@@ -51,11 +51,33 @@ class Siswa extends Model
     ];
 
     /**
+     * Kunci login portal wali: NIS + tanggal lahir + 4 digit terakhir HP.
+     * NIS memang publik (tercetak di kartu, dipakai sebagai PIN kios bawaan),
+     * jadi dua kolom inilah satu-satunya yang membuat kuncinya tidak bisa
+     * ditebak teman sekelas.
+     */
+    public const KUNCI_WALI = ['tgl_lahir', 'hp_ortu'];
+
+    /**
      * Kolom yang TIDAK pernah boleh ikut terkirim ke klien.
      * Kunci portal wali (tgl_lahir, hp_ortu) diketahui teman sekelas, jadi
      * membocorkannya lewat layar admin sama saja membagikan kata sandinya.
+     *
+     * Dulu daftar ini KOSONG — docblock di atas menjanjikan pagar yang tidak
+     * pernah ada. Akibatnya setiap respons yang mengirim model ini apa adanya
+     * (topup, setor/tarik titipan, kenaikan kelas, arsip) ikut membawa kunci
+     * wali SELURUH santri yang disentuh, padahal izin jalur-jalur itu
+     * (`saldo.topup`, `titipan.setor`, …) sama sekali terpisah dari
+     * `santri.lihat`. Bendahara yang hanya berhak mengisi saldo jadi bisa
+     * memanen kunci portal satu per satu tanpa pernah membuka layar Santri.
+     *
+     * Sekarang tertutup secara BAWAAN: jalur yang memang berhak membukanya
+     * (layar Santri — form edit butuh nilainya, dan gerbangnya `santri.lihat`/
+     * `sdm.lihat` yang tepat) menyatakannya eksplisit dengan
+     * `makeVisible(Siswa::KUNCI_WALI)`. Jadi jalur baru yang lahir nanti
+     * aman tanpa perlu ingat apa-apa.
      */
-    protected $hidden = [];
+    protected $hidden = self::KUNCI_WALI;
 
     public function golonganRow(): \Illuminate\Database\Eloquent\Relations\BelongsTo
     {
