@@ -547,6 +547,10 @@ $('#btn-logout').onclick = async () => {
 // ========================================================== HID card capture
 // Reader keyboard-wedge mengetik UID + Enter super cepat (jeda antar-karakter < 100ms).
 let kbBuf = '', kbLast = 0;
+// Kotak isian yang sedang disorot saat deretan pindaian MULAI, beserta isinya
+// persis sebelum pemindai mengetik ke dalamnya. Dipakai untuk mengembalikannya
+// (lihat pemulihan di dalam listener di bawah).
+let kbEl = null, kbVal = '', kbSelA = 0, kbSelB = 0;
 let lastTap = { uid: '', at: 0 };
 /*
  * Dipasang di FASE TANGKAP, bukan fase gelembung — dan itu yang membetulkan
@@ -565,11 +569,42 @@ let lastTap = { uid: '', at: 0 };
  * menanganinya. Mengetik biasa tidak terpengaruh — jeda antar-huruf manusia
  * jauh di atas 100 ms, sehingga kbBuf keburu dikosongkan dan Enter-nya
  * diteruskan apa adanya ke kotak isian.
+ *
+ * TAPI yang ditelan hanya ENTER-nya. Digit-digit UID di depannya tetap
+ * mengalir ke kotak isian yang sedang disorot, dan komentar di atas sempat
+ * menjanjikan lebih daripada yang benar-benar dikerjakan kodenya. Akibatnya
+ * terlihat di kasir koperasi (mode tanpa menu, 27 Okt 2026): kasir mengetik
+ * barang manual, lalu menempelkan kartu — kartunya memang terbaca, tetapi
+ * nomor RFID-nya ikut tertulis di kolom "Barang yang dibeli", menempel pada
+ * nama barang yang sedang diketik. Kalau tidak sempat dilihat, nama barang
+ * itulah yang masuk ke nota.
+ *
+ * Karena itu kotak isiannya DIKEMBALIKAN ke isi semula begitu pindaian
+ * terbukti kartu. Dikembalikan, bukan ditelan di muka: menelan tiap digit
+ * menuntut tebakan "ini pemindai atau bukan" SEBELUM deretannya selesai, dan
+ * tebakan itu pasti sesekali salah pada kasir yang mengetik angka dengan
+ * cepat — isian yang sah jadi hilang separuh. Mengembalikan hanya berjalan
+ * setelah bukti lengkap (deretan cepat >= 6 karakter DAN diakhiri Enter).
+ *
+ * Kotak ber-data-scan="1" (UID kartu di form santri, barcode barang)
+ * DIKECUALIKAN: di sana ketikan pemindai memang isi yang dikehendaki.
  */
 document.addEventListener('keydown', (e) => {
   if (!USER) return;
   const now = performance.now();
-  if (now - kbLast > 100) kbBuf = '';
+  if (now - kbLast > 100) {
+    kbBuf = '';
+    // Deretan baru dimulai: potret kotak isian yang sedang disorot SEBELUM
+    // karakter pertama sempat masuk, supaya ada yang bisa dikembalikan nanti.
+    const a = document.activeElement;
+    if (a && (a.tagName === 'INPUT' || a.tagName === 'TEXTAREA') && a.dataset.scan !== '1') {
+      kbEl = a; kbVal = a.value;
+      kbSelA = a.selectionStart ?? a.value.length;
+      kbSelB = a.selectionEnd ?? a.value.length;
+    } else {
+      kbEl = null;
+    }
+  }
   kbLast = now;
   if (e.key === 'Enter') {
     const uid = normUid(kbBuf);
@@ -577,6 +612,22 @@ document.addEventListener('keydown', (e) => {
     if (uid.length >= 6) {
       e.preventDefault();
       e.stopPropagation();
+      /*
+       * Dikembalikan SEBELUM onCardTapped: penanganan tap kerap menggambar
+       * ulang panel, dan sesudah itu kotak isiannya bisa sudah tidak ada lagi
+       * di dokumen — pengembalian jadi sia-sia.
+       *
+       * Nilainya disetel langsung tanpa membangkitkan event `input`: yang
+       * dipasang kembali adalah isi yang SAMA PERSIS dengan sebelum pemindai
+       * mengetik, jadi tidak ada yang perlu diformat ulang (pemformat rupiah
+       * di uang.js justru akan menjalankannya dua kali tanpa perlu).
+       */
+      const el = kbEl;
+      kbEl = null;
+      if (el && document.contains(el) && el.value !== kbVal) {
+        el.value = kbVal;
+        try { el.setSelectionRange(kbSelA, kbSelB); } catch { /* type=number menolak */ }
+      }
       onCardTapped(uid);
     }
   } else if (e.key.length === 1) {
