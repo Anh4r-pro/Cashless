@@ -20,11 +20,24 @@ class Rem
 
     public const JEDA_DETIK = 900;   // 15 menit
 
-    public static function periksa(string $kunci): void
+    /**
+     * @param int|null    $maks  ambang khusus untuk kunci ini. Kunci per-IP di
+     *                           pintu yang penggunanya TERSEBAR (portal wali)
+     *                           wajib jauh lebih longgar daripada kunci
+     *                           per-orang — lihat OrtuController::MAKS_GAGAL_IP.
+     * @param string|null $pesan pengganti pesan bawaan. Orang yang terkena
+     *                           kuncian per-IP lazimnya TIDAK melakukan
+     *                           kesalahan apa pun, jadi "terlalu banyak
+     *                           percobaan gagal" membuatnya mengira dirinya
+     *                           yang salah.
+     */
+    public static function periksa(string $kunci, ?int $maks = null, ?string $pesan = null): void
     {
-        if (RateLimiter::tooManyAttempts($kunci, self::MAKS_GAGAL)) {
+        if (RateLimiter::tooManyAttempts($kunci, $maks ?? self::MAKS_GAGAL)) {
             $menit = (int) ceil(RateLimiter::availableIn($kunci) / 60);
-            throw new ApiError(429, "Terlalu banyak percobaan gagal. Coba lagi dalam {$menit} menit.");
+            throw new ApiError(429, $pesan
+                ? str_replace('{menit}', (string) $menit, $pesan)
+                : "Terlalu banyak percobaan gagal. Coba lagi dalam {$menit} menit.");
         }
     }
 

@@ -26,6 +26,34 @@ use Illuminate\Http\Request;
  */
 class OrtuController extends Controller
 {
+    /**
+     * Ambang kuncian per-IP untuk portal wali — SENGAJA jauh lebih longgar
+     * daripada ambang per-NIS (Rem::MAKS_GAGAL = 5).
+     *
+     * Dulu keduanya memakai ambang yang sama, dan akibatnya nyata: dari 1.525
+     * percobaan login wali, 160 (10%) dijawab 429 pada 28 alamat berbeda.
+     * Wali di sini hampir seluruhnya memakai data seluler, yang di Indonesia
+     * ber-CGNAT — ratusan pelanggan berbagi satu IP publik; IndiHome pun kerap
+     * satu IP untuk beberapa keluarga. Jadi satu wali yang lupa tanggal lahir
+     * anaknya lima kali ikut MENGUNCI wali lain yang kebetulan satu alamat,
+     * selama 15 menit, padahal mereka tidak melakukan apa pun.
+     *
+     * Kelipatan sepuluh, bukan angka karangan: NIS yang sudah terkunci
+     * berhenti menyumbang ke hitungan per-IP (Rem::periksa($kNis) melempar
+     * SEBELUM kegagalannya dicatat), sehingga satu keluarga paling banyak
+     * menyumbang lima. Ambang ini karena itu berarti "sepuluh keluarga
+     * berbeda sama-sama kehabisan jatah dalam 15 menit" — pola yang tidak
+     * wajar bagi pemakaian normal, tetapi ringan bagi penebak.
+     *
+     * Keamanannya tidak bersandar pada angka ini: yang benar-benar menahan
+     * tebak-tebakan terhadap SATU anak adalah rem per-NIS yang tetap lima.
+     * Rem per-IP hanya untuk menahan penyisiran banyak NIS sekaligus.
+     *
+     * Polanya meniru login staf (AuthController::MAKS_GAGAL_IP), yang sejak
+     * awal sudah memisahkan kedua ambang ini.
+     */
+    private const MAKS_GAGAL_IP = Rem::MAKS_GAGAL * 10;
+
     public function login(Request $r)
     {
         // Klien lama masih mengirim bidang "nisn"; keduanya diterima supaya
@@ -44,7 +72,8 @@ class OrtuController extends Controller
         $kIp = 'ortu-ip:' . Rem::ip($r);
         $kNis = 'ortu-nis:' . $nis;
 
-        Rem::periksa($kIp);
+        Rem::periksa($kIp, self::MAKS_GAGAL_IP, 'Terlalu banyak percobaan gagal dari jaringan ini. '
+            . 'Coba lagi dalam {menit} menit, atau pakai jaringan lain (misalnya data seluler).');
         if ($nis !== '') {
             Rem::periksa($kNis);
         }
