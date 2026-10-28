@@ -497,6 +497,8 @@ function gambarKepala(name) {
 function renderView(name) {
   activeView = name;
   cardHandler = null;
+  // Pewaktu lepas-kartu milik layar kasir tidak boleh ikut hidup di layar lain.
+  kasirIdleStop();
   gambarKepala(name);
   if (!name) {
     $('#main').innerHTML = `<div class="panel"><h2>Belum ada menu yang terbuka</h2>
@@ -868,6 +870,7 @@ function kasirTampilAjakanTap(tampil) {
  * berganti cuma siapa yang membayar.
  */
 function kasirLepasKartu() {
+  kasirIdleStop();
   kasir.siswa = null;
   kasir.tapToken = null;
   $('#stu-box').innerHTML = '';
@@ -875,6 +878,75 @@ function kasirLepasKartu() {
   updatePayBtn();
   $('#manual-uid')?.focus();
 }
+
+/**
+ * Lepas kartu otomatis kalau layar kasir menganggur.
+ *
+ * Transaksi yang BERHASIL sudah mengosongkan kartunya sendiri. Yang tidak:
+ * transaksi yang GAGAL — kartunya sengaja dipertahankan supaya kasir bisa
+ * mengulang tanpa meminta santri menempel ulang (lihat cabang catch di
+ * doBayar). Penolakan itu sering terjadi di sini karena jatah makanan harian
+ * cuma Rp25.000, dan notifikasi merahnya gampang terlewat di layar kasir yang
+ * sibuk — sehingga foto, nama, kelas, dan SALDO santri tertinggal di layar
+ * yang menghadap antrean, kadang sampai pembeli berikutnya datang.
+ *
+ * Dilaporkan pemilik 28 Okt 2026 sebagai "informasi santri masih tertampil
+ * padahal seharusnya kosong". Kekhawatiran transaksinya sendiri tidak terbukti
+ * — tap_token sekali pakai dipaksa server, jadi tanpa tap baru tidak ada
+ * transaksi — tetapi yang tersisa di layar tetap data pribadi orang lain.
+ *
+ * Satu menit, bukan beberapa detik: selama kasir masih melayani (mengetik,
+ * mengklik, memindai) pewaktunya selalu disetel ulang, jadi yang benar-benar
+ * tersentuh hanya layar yang BETUL-BETUL ditinggal diam. Memilih angka kecil
+ * berarti kartu lenyap di tengah kasir berpikir atau mencari kembalian.
+ *
+ * Keranjangnya sengaja TIDAK ikut dibuang — persis seperti tombol "ganti
+ * kartu" yang sudah ada. Isi keranjang bukan data pribadi siapa pun, dan
+ * membuangnya menghapus pekerjaan kasir yang mungkin sudah panjang; kartunya
+ * tinggal ditempel lagi untuk melanjutkan.
+ */
+const KASIR_IDLE_MS = 60000;
+let kasirIdleTimer = null;
+
+/*
+ * Suite uji memendekkannya lewat window.KASIR_IDLE_MS_UJI supaya tidak perlu
+ * benar-benar menunggu semenit — padanan dari cara uji portal memundurkan
+ * stempel waktu di basis data alih-alih menunggu sesinya kedaluwarsa.
+ * Di produksi tidak ada yang menyetelnya, jadi nilainya tetap 60 detik. Kalau
+ * toh ada yang menyetelnya, satu-satunya akibat adalah kartu dilepas LEBIH
+ * cepat — tidak ada arah penyalahgunaan yang merugikan.
+ */
+const kasirIdleMs = () => Number(window.KASIR_IDLE_MS_UJI) || KASIR_IDLE_MS;
+
+function kasirIdleStop() {
+  if (kasirIdleTimer) { clearTimeout(kasirIdleTimer); kasirIdleTimer = null; }
+}
+
+function kasirIdleMulai() {
+  kasirIdleStop();
+  if (!kasir.siswa || activeView !== 'kasir') return;
+  kasirIdleTimer = setTimeout(() => {
+    kasirIdleTimer = null;
+    // Diperiksa ulang: satu menit itu lama, kartunya bisa sudah dilepas
+    // sendiri oleh transaksi yang selesai, atau layarnya sudah berpindah.
+    if (!kasir.siswa || activeView !== 'kasir') return;
+    kasirLepasKartu();
+    toast('Kartu dilepas otomatis karena layar menganggur — tempelkan lagi untuk melanjutkan.');
+  }, kasirIdleMs());
+}
+
+/*
+ * Aktivitas apa pun menunda pelepasan. Dipasang SEKALI di dokumen, bukan di
+ * tiap penggambaran ulang — pendengar yang ikut lahir setiap render akan
+ * menumpuk diam-diam dan memperlambat layar yang justru paling sering
+ * digambar ulang. Fase tangkap dipakai supaya kejadian yang dihentikan
+ * penanganan lain (mis. penangkap pindaian kartu) tetap terhitung sebagai
+ * aktivitas.
+ */
+['keydown', 'pointerdown', 'input'].forEach((jenis) =>
+  document.addEventListener(jenis, () => {
+    if (kasirIdleTimer) kasirIdleMulai();
+  }, true));
 
 /**
  * Peringatan sisa jatah jajan — HANYA ketika sudah dekat/habis (lihat
@@ -961,6 +1033,7 @@ function renderKasirSiswa(pesan) {
     ${kasirJajanHtml(kasir.sisaHarian)}
     ${pesan ? `<p class="muted" style="margin:8px 0 0">${pesan}</p>` : ''}`;
   $('#btn-lepas-kartu').onclick = kasirLepasKartu;
+  kasirIdleMulai();
 }
 
 function renderCart() {
@@ -1023,6 +1096,7 @@ async function doBayar() {
     // sebelum kartu ditap. Membiarkannya tertampil membuka peluang kasir
     // (sengaja atau tidak) memproses transaksi susulan atas nama santri yang
     // sama tanpa tap ulang kartunya.
+    kasirIdleStop();
     kasir.siswa = null;
     kasir.tapToken = null;
     kasir.cart = [];
