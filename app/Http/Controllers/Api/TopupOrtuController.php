@@ -474,10 +474,34 @@ class TopupOrtuController extends Controller
         if ($nilai['topup_ortu_maks'] < $nilai['topup_ortu_min']) {
             throw new ApiError(400, 'Nominal terbesar tidak boleh lebih kecil dari nominal terkecil');
         }
-        // Pengajuan yang dari awal mustahil disetujui hanya akan menumpuk di antrean.
-        if ($nilai['topup_ortu_maks'] > $nilai['max_saldo']) {
+        /*
+         * Pagu satu pengajuan BOLEH melampaui pagu saldo kartu — selama titipan
+         * aktif.
+         *
+         * Dulu dilarang mentah, dengan alasan "pengajuan yang dari awal mustahil
+         * disetujui hanya akan menumpuk di antrean". Alasan itu benar sampai
+         * 20 Okt 2026, ketika pengajuan yang melampaui max_saldo memang ditolak
+         * di muka. Sejak commit 214eb90 justru sebaliknya: pengajuannya DITERIMA
+         * dengan peringatan, dan begitu disetujui kelebihannya mengendap sebagai
+         * saldo titipan lalu menetes sendiri ke kartu saat saldo menipis
+         * (Services/Setoran.php). Pengajuan semacam itu sama sekali bukan lagi
+         * "mustahil disetujui" — pagarnya yang tertinggal, dan komentarnya
+         * menggambarkan dunia yang sudah berubah.
+         *
+         * Akibat nyata dari pagar basi itu: wali yang ingin menyetor sekali
+         * untuk beberapa bulan tertahan, dan admin TIDAK BISA menaikkan pagunya
+         * walau ingin — satu-satunya jalan adalah menaikkan max_saldo, yang
+         * justru menghapus guna pagu saldo kartu itu sendiri.
+         *
+         * Yang TIDAK dilonggarkan: ketika sekolah mematikan saldo titipan,
+         * kelebihannya tidak punya tempat mengendap dan alasan lama berlaku
+         * kembali apa adanya. Karena itu syaratnya titipan_aktif, bukan dihapus.
+         */
+        if ($nilai['topup_ortu_maks'] > $nilai['max_saldo']
+            && ($nilai['titipan_aktif'] ?? 0) !== 1) {
             throw new ApiError(400, 'Nominal terbesar tidak boleh melampaui batas saldo santri (' .
-                Rupiah::f($nilai['max_saldo']) . ')');
+                Rupiah::f($nilai['max_saldo']) . ') selama saldo titipan dimatikan — ' .
+                'kelebihan setorannya tidak punya tempat mengendap.');
         }
         /*
          * Biaya harus lebih kecil dari nominal terkecil yang boleh diajukan.
