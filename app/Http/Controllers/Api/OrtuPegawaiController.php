@@ -81,6 +81,10 @@ class OrtuPegawaiController extends Controller
             'sisa_transfer_harian' => max(0, $cfg['transfer_maks_harian'] - $hariT['kirim']),
             'sisa_transfer_kali' => max(0, $cfg['transfer_maks_kali_harian'] - $hariT['n_kirim']),
             'saldo' => $s->saldo,
+            // Tabungan/donasi/transfer tidak pernah mensyaratkan card_uid (PIN
+            // bawaan dihitung dari NIS, bukan dari kartu) — ini hanya untuk
+            // menonaktifkan tombol Ganti PIN di layananMenu().
+            'punya_kartu' => (bool) $s->card_uid,
         ]);
     }
 

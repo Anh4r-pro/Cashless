@@ -326,9 +326,10 @@ async function muatRingkasan() {
   $('#o-hp').textContent = (s.peran === 'pegawai' ? 'HP terdaftar: ' : 'HP wali terdaftar: ') + s.hp_ortu_samar;
   $('#o-hp').classList.toggle('hidden', !MINTA_HP && s.hp_ortu_samar === '—');
   // Tabungan/donasi/ganti PIN lewat perangkat sendiri hanya untuk pintu
-  // pegawai, dan hanya kalau kartunya sudah terhubung — tanpa kartu, ketiga
-  // aksi itu dijamin ditolak server (PIN bawaannya berasal dari NIS kartu).
-  $('#o-layanan').classList.toggle('hidden', !(s.peran === 'pegawai' && s.punya_kartu));
+  // pegawai. Kartu RFID TIDAK disyaratkan — PIN bawaan dihitung dari NIS,
+  // bukan dari kartu — jadi menu ini tetap aktif tanpa kartu; hanya tombol
+  // Ganti PIN sendiri yang dinonaktifkan (lihat layananMenu()).
+  $('#o-layanan').classList.toggle('hidden', s.peran !== 'pegawai');
   $('#o-saldo').textContent = rp(s.saldo);
   // Saldo titipan: uang yang sudah diterima sekolah tetapi sengaja belum ditaruh
   // di kartu. Ditampilkan agar wali yang menyetor sekaligus banyak bisa melihat
@@ -513,9 +514,10 @@ function layananMenu() {
         <span><b>Transfer</b><span class="muted">${d.transfer_bisa
           ? `Sisa jatah hari ini ${rp(d.sisa_transfer_harian)} · ${d.sisa_transfer_kali}x` : 'Golongan ini tidak bisa mengirim saldo'}</span></span>
       </button>
-      <button class="o-metode" id="o-pg-pilih-pin">
+      <button class="o-metode" id="o-pg-pilih-pin" ${d.punya_kartu ? '' : 'disabled'}>
         <span class="o-metode-lg o-pg-ikon vio">🔑</span>
-        <span><b>Ganti PIN</b><span class="muted">Dipakai untuk semua layanan ini & di kios</span></span>
+        <span><b>Ganti PIN</b><span class="muted">${d.punya_kartu
+          ? 'Dipakai untuk semua layanan ini & di kios' : 'Kartu RFID belum terhubung — hubungi admin'}</span></span>
       </button>
     </div>`,
     '<button id="om-batal">Tutup</button>');
