@@ -179,6 +179,12 @@ main { max-width: 1200px; margin: 20px auto; padding: 0 16px; }
 .avatar { width: 72px; height: 72px; border-radius: 12px; background: var(--navy); color: var(--gold); display: flex; align-items: center; justify-content: center; font-size: 26px; font-weight: 800; flex: none; }
 img.avatar { object-fit: cover; background: #dde3ea; }
 .avatar.small, img.avatar.small { width: 40px; height: 40px; font-size: 15px; border-radius: 8px; }
+/* Kotak pratinjau geser/perbesar foto profil di modal Tambah/Ubah Santri —
+   lihat fotoCropSiapkan() di app.js. Ukurannya lebih besar dari .avatar biasa
+   supaya cukup lega digeser dengan jari di HP, bukan sekadar dilihat. */
+.foto-crop { width: 96px; height: 96px; border-radius: 12px; overflow: hidden; position: relative; flex: none; background: #dde3ea; }
+.foto-crop .avatar, .foto-crop > img.avatar { width: 100%; height: 100%; border-radius: 0; }
+#m-foto-img { position: absolute; cursor: grab; touch-action: none; user-select: none; -webkit-user-drag: none; }
 /* Nama+kelas+NIS: tanpa min-width:0 elemen flex ini menolak menyusut lebih
    kecil dari lebar alaminya, memeras saldo di sebelahnya sampai ikut terlipat
    aneh. flex-basis 140px memberinya ruang wajar di layar sempit. */

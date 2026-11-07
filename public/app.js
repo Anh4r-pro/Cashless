@@ -9427,7 +9427,103 @@ function resetPinModal(s) {
     }, 'Reset PIN');
 }
 
+/**
+ * Pratinjau & penyesuaian posisi/ukuran foto profil sebelum diunggah, di
+ * kotak #m-foto-crop milik siswaModal(). Dibangun dengan <img> + geser murni
+ * (bukan canvas selama interaksi) supaya ringan dan selalu mulus digeser;
+ * canvas cuma dipakai sekali di akhir, saat fotoCropKeDataUrl() memotong
+ * hasilnya persis sesuai yang terlihat.
+ *
+ * fotoCrop null = belum ada foto baru dipilih (modal masih pakai foto lama,
+ * tidak ada apa pun untuk dipotong — simpan jalan seperti biasa).
+ */
+let fotoCrop = null;
+let fotoCropDrag = null;
+let fotoCropDiwire = false;
+
+function fotoCropTerapkan(tengahkan) {
+  const c = fotoCrop;
+  const el = $('#m-foto-img');
+  if (!c || !el) return;
+  const skala = c.baseSkala * c.zoom;
+  const lebar = c.naturalW * skala, tinggi = c.naturalH * skala;
+  if (tengahkan) { c.ox = (c.S - lebar) / 2; c.oy = (c.S - tinggi) / 2; }
+  else {
+    c.ox = Math.min(0, Math.max(c.S - lebar, c.ox));
+    c.oy = Math.min(0, Math.max(c.S - tinggi, c.oy));
+  }
+  el.style.width = lebar + 'px';
+  el.style.height = tinggi + 'px';
+  el.style.left = c.ox + 'px';
+  el.style.top = c.oy + 'px';
+}
+
+/** Dipasang SEKALI selamanya (bukan per-modal) — lihat fotoCropDiwire. */
+function fotoCropPasangDrag() {
+  if (fotoCropDiwire) return;
+  fotoCropDiwire = true;
+  const mulai = (x, y) => { if (fotoCrop) fotoCropDrag = { x, y, ox: fotoCrop.ox, oy: fotoCrop.oy }; };
+  const gerak = (x, y) => {
+    if (!fotoCropDrag || !fotoCrop) return;
+    fotoCrop.ox = fotoCropDrag.ox + (x - fotoCropDrag.x);
+    fotoCrop.oy = fotoCropDrag.oy + (y - fotoCropDrag.y);
+    fotoCropTerapkan(false);
+  };
+  const selesai = () => { fotoCropDrag = null; };
+  document.addEventListener('mousedown', (e) => { if (e.target.id === 'm-foto-img') { e.preventDefault(); mulai(e.clientX, e.clientY); } });
+  document.addEventListener('mousemove', (e) => gerak(e.clientX, e.clientY));
+  document.addEventListener('mouseup', selesai);
+  document.addEventListener('touchstart', (e) => { if (e.target.id === 'm-foto-img') { const t = e.touches[0]; mulai(t.clientX, t.clientY); } }, { passive: true });
+  document.addEventListener('touchmove', (e) => { if (!fotoCropDrag) return; const t = e.touches[0]; gerak(t.clientX, t.clientY); }, { passive: true });
+  document.addEventListener('touchend', selesai);
+}
+
+/** Dipasang setiap kali siswaModal() dibuka (elemennya baru tiap kali). */
+function fotoCropSiapkan() {
+  fotoCropPasangDrag();
+  $('#m-foto').onchange = (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    if (fotoCrop) URL.revokeObjectURL(fotoCrop.url);
+    const url = URL.createObjectURL(f);
+    const img = new Image();
+    img.onload = () => {
+      const stage = $('#m-foto-crop');
+      stage.innerHTML = '<img id="m-foto-img" alt="">';
+      const S = stage.clientWidth;
+      fotoCrop = {
+        img, url, naturalW: img.naturalWidth, naturalH: img.naturalHeight,
+        baseSkala: S / Math.min(img.naturalWidth, img.naturalHeight), zoom: 1, ox: 0, oy: 0, S,
+      };
+      $('#m-foto-img').src = url;
+      fotoCropTerapkan(true);
+      $('#m-foto-zoom').value = 100;
+      $('#m-foto-zoom').classList.remove('hidden');
+      $('#m-foto-hint').classList.remove('hidden');
+    };
+    img.src = url;
+  };
+  $('#m-foto-zoom').addEventListener('input', () => {
+    if (!fotoCrop) return;
+    fotoCrop.zoom = Number($('#m-foto-zoom').value) / 100;
+    fotoCropTerapkan(false);
+  });
+}
+
+/** Potong persis area yang terlihat di kotak pratinjau, jadi data URL JPEG. */
+function fotoCropKeDataUrl() {
+  const c = fotoCrop;
+  const skala = c.baseSkala * c.zoom;
+  const kanvas = document.createElement('canvas');
+  kanvas.width = 480;
+  kanvas.height = 480;
+  const ctx = kanvas.getContext('2d');
+  ctx.drawImage(c.img, -c.ox / skala, -c.oy / skala, c.S / skala, c.S / skala, 0, 0, 480, 480);
+  return kanvas.toDataURL('image/jpeg', 0.85);
+}
+
 function siswaModal(s) {
+  fotoCrop = null; // tidak boleh membawa pratinjau crop dari modal sebelumnya
   const sdm = siswaState.sdm;
   // Golongan bawaan formulir baru mengikuti tab tempat tombolnya ditekan:
   // menambah orang dari menu SDM tidak masuk akal berakhir sebagai santri.
@@ -9439,10 +9535,13 @@ function siswaModal(s) {
   const g0 = golDari(kodeAwal);
   openModal(`
     <h2>${s ? 'Ubah Data' : 'Tambah'} ${sdm ? 'Personil' : 'Santri'}</h2>
-    ${s ? `<div style="display:flex; gap:12px; align-items:center; margin-bottom:12px">
-      ${avatarHtml(s)}
+    ${s ? `<div style="display:flex; gap:12px; align-items:flex-start; margin-bottom:12px">
+      <div class="foto-crop" id="m-foto-crop">${avatarHtml(s)}</div>
       <div class="field" style="flex:1; margin:0"><label>Foto (JPG/PNG, maks 3MB)</label>
-      <input type="file" id="m-foto" accept="image/*"></div></div>` : ''}
+      <input type="file" id="m-foto" accept="image/*">
+      <input type="range" id="m-foto-zoom" min="100" max="300" value="100" class="hidden" style="width:100%; margin-top:8px">
+      <span class="muted set-hint hidden" id="m-foto-hint">Geser foto untuk mengatur posisi, geser penggeser untuk memperbesar/perkecil.</span>
+      </div></div>` : ''}
     <div class="field"><label>Golongan</label>
       <select id="m-golongan">${pilihan.map((g) =>
         `<option value="${esc(g.kode)}" ${g.kode === kodeAwal ? 'selected' : ''}>${esc(g.nama)}</option>`).join('')}</select>
@@ -9515,17 +9614,17 @@ function siswaModal(s) {
       let id = s?.id;
       if (s) await api('/api/siswa/' + s.id, { method: 'PUT', body });
       else id = (await api('/api/siswa', { method: 'POST', body })).siswa.id;
-      const f = s && $('#m-foto')?.files[0];
-      if (f) {
-        // Foto profil: cukup kecil untuk dilihat di tabel & kartu — sisi
-        // terpanjang dibatasi lebih ketat daripada bukti transfer, karena di
-        // sini tidak ada teks kecil yang perlu tetap terbaca.
-        const data = (await kompresGambar(f, { maxSisi: 900 })).dataUrl;
-        await api(`/api/siswa/${id}/foto`, { method: 'POST', body: { data } });
+      // fotoCrop (diisi fotoCropSiapkan() begitu berkas dipilih & termuat)
+      // dipakai sebagai sinyal, BUKAN membaca ulang $('#m-foto').files[0] —
+      // persis pola topupBukti di ortu.js: tangkap sekali saat dipilih,
+      // pakai tangkapannya saat submit, jangan tanya ulang ke input mentah.
+      if (s && fotoCrop) {
+        await api(`/api/siswa/${id}/foto`, { method: 'POST', body: { data: fotoCropKeDataUrl() } });
       }
       toast('✔ Data tersimpan', 'ok');
       loadSiswa();
     });
+  if (s) fotoCropSiapkan();
 
   // Ganti golongan → label kolom unit, bagian portal wali, dan petunjuk batasnya
   // ikut berubah seketika. Bagian portal wali disembunyikan (bukan sekadar
